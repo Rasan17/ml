@@ -88,12 +88,12 @@ function renderImputationTable() {
                 <td><span class="pill pill-${cfg.type}">${cfg.type}</span></td>
                 <td><span class="pill pill-missing">${a.missingCount} / ${a.total} (${a.missingPercent}%)</span></td>
                 <td>
-                    <select class="control-select impute-strat-select" data-col="${escapeHtml(col)}" style="min-width: 200px;" ${AppState.completeCase ? 'disabled title="Complete-case option is on: rows with an empty cell are removed"' : ''}>
+                    <select class="control-select impute-strat-select" data-col="${escapeHtml(col)}" aria-label="Missing-data method for ${escapeHtml(col)}" style="min-width: 200px;" ${AppState.completeCase ? 'disabled title="Complete-case option is on: rows with an empty cell are removed"' : ''}>
                         ${strategyOptionsHtml}
                     </select>
                 </td>
                 <td>
-                    <input type="text" class="control-input impute-custom-val" data-col="${escapeHtml(col)}" placeholder="${cfg.type === 'continuous' ? '0' : 'Missing'}" value="${escapeHtml(cfg.customImputeVal || '')}" style="${cfg.imputationStrategy === 'constant' ? 'display:inline-block; width: 110px;' : 'display:none; width: 110px;'}">
+                    <input type="text" class="control-input impute-custom-val" data-col="${escapeHtml(col)}" aria-label="Constant fill value for ${escapeHtml(col)}" placeholder="${cfg.type === 'continuous' ? '0' : 'Missing'}" value="${escapeHtml(cfg.customImputeVal || '')}" style="${cfg.imputationStrategy === 'constant' ? 'display:inline-block; width: 110px;' : 'display:none; width: 110px;'}">
                 </td>
             </tr>
         `;

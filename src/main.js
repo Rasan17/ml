@@ -19,6 +19,7 @@ import './pipeline-results.js';
 import './reports.js';
 import './model-io.js';
 import './survival.js';
+import { downloadTripodChecklist } from './tripod.js';
 import { handleUnexpectedError } from './settings.js';
 
 AppState.pipeline = createEmptyPipelineState(42);
@@ -29,6 +30,8 @@ window.addEventListener('unhandledrejection', (e) => handleUnexpectedError(e.rea
 function start() {
     initDOM();
     setupEventListeners();
+    document.getElementById('standard-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('standard'));
+    document.getElementById('pipeline-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('pipeline'));
     // Keep the sample-size check in step with the chosen split and validation protocol
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
         const el = document.getElementById(id);

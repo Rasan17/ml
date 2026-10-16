@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="style.css?v=25">
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
 
     <div class="app-wrapper">
 
@@ -104,7 +105,7 @@
         <!-- ===================================================================
              STEP 1: DATA INGESTION & OVERVIEW
              =================================================================== -->
-        <main>
+        <main id="main-content">
             <section class="step-content active" data-step="1" id="step-1-content">
                 <div class="card">
                     <div class="card-header">
@@ -354,7 +355,7 @@
                         <div class="model-card selected" data-model-id="nn">
                             <div class="model-card-header">
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <input type="checkbox" class="model-select-checkbox" data-model-id="nn" checked style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
+                                    <input type="checkbox" class="model-select-checkbox" data-model-id="nn" aria-label="Include Neural Network (MLP)" checked style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
                                     <span class="model-card-title">Neural Network (MLP)</span>
                                 </div>
                                 <span class="pill pill-target">Neural Network</span>
@@ -379,7 +380,7 @@
                                 </div>
                                 <div class="custom-seed-row" id="custom-seed-row-nn" style="display: none;">
                                     <div class="seed-input-wrap">
-                                        <input type="number" id="nn-card-seed-input" class="control-input card-seed-input" data-model="nn" placeholder="Custom seed" value="42">
+                                        <input type="number" id="nn-card-seed-input" aria-label="Custom seed for Neural Network (MLP)" class="control-input card-seed-input" data-model="nn" placeholder="Custom seed" value="42">
                                         <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="nn" title="Generate random seed">🎲</button>
                                     </div>
                                     <span class="seed-hint">Custom integer seed (reproducible on the same browser &amp; TF.js backend; GPU arithmetic can differ slightly across devices).</span>
@@ -390,7 +391,7 @@
                         <div class="model-card" data-model-id="rf">
                             <div class="model-card-header">
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <input type="checkbox" class="model-select-checkbox" data-model-id="rf" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
+                                    <input type="checkbox" class="model-select-checkbox" data-model-id="rf" aria-label="Include Random Forest" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
                                     <span class="model-card-title">Random Forest</span>
                                 </div>
                                 <span class="pill pill-feature">Ensemble</span>
@@ -415,7 +416,7 @@
                                 </div>
                                 <div class="custom-seed-row" id="custom-seed-row-rf" style="display: none;">
                                     <div class="seed-input-wrap">
-                                        <input type="number" id="rf-card-seed-input" class="control-input card-seed-input" data-model="rf" placeholder="Custom seed" value="42">
+                                        <input type="number" id="rf-card-seed-input" aria-label="Custom seed for Random Forest" class="control-input card-seed-input" data-model="rf" placeholder="Custom seed" value="42">
                                         <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="rf" title="Generate random seed">🎲</button>
                                     </div>
                                     <span class="seed-hint">Custom bootstrap and feature split seed.</span>
@@ -426,7 +427,7 @@
                         <div class="model-card" data-model-id="glm">
                             <div class="model-card-header">
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <input type="checkbox" class="model-select-checkbox" data-model-id="glm" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
+                                    <input type="checkbox" class="model-select-checkbox" data-model-id="glm" aria-label="Include Logistic / Ridge Regression" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
                                     <span class="model-card-title">Logistic / Ridge Regression</span>
                                 </div>
                                 <span class="pill pill-continuous">Generalized Linear</span>
@@ -451,7 +452,7 @@
                                 </div>
                                 <div class="custom-seed-row" id="custom-seed-row-glm" style="display: none;">
                                     <div class="seed-input-wrap">
-                                        <input type="number" id="glm-card-seed-input" class="control-input card-seed-input" data-model="glm" placeholder="Custom seed" value="42">
+                                        <input type="number" id="glm-card-seed-input" aria-label="Custom seed for Logistic / Ridge Regression" class="control-input card-seed-input" data-model="glm" placeholder="Custom seed" value="42">
                                         <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="glm" title="Generate random seed">🎲</button>
                                     </div>
                                     <span class="seed-hint">Custom seed for parameter initialization.</span>
@@ -462,7 +463,7 @@
                         <div class="model-card" data-model-id="knn">
                             <div class="model-card-header">
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <input type="checkbox" class="model-select-checkbox" data-model-id="knn" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
+                                    <input type="checkbox" class="model-select-checkbox" data-model-id="knn" aria-label="Include k-Nearest Neighbours" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
                                     <span class="model-card-title">k-Nearest Neighbors (k-NN)</span>
                                 </div>
                                 <span class="pill pill-ordinal">Instance-Based</span>
@@ -487,7 +488,7 @@
                                 </div>
                                 <div class="custom-seed-row" id="custom-seed-row-knn" style="display: none;">
                                     <div class="seed-input-wrap">
-                                        <input type="number" id="knn-card-seed-input" class="control-input card-seed-input" data-model="knn" placeholder="Custom seed" value="42">
+                                        <input type="number" id="knn-card-seed-input" aria-label="Custom seed for k-Nearest Neighbours" class="control-input card-seed-input" data-model="knn" placeholder="Custom seed" value="42">
                                         <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="knn" title="Generate random seed">🎲</button>
                                     </div>
                                     <span class="seed-hint">Custom seed for equidistant ranking tie-breaks.</span>
@@ -498,7 +499,7 @@
                         <div class="model-card" data-model-id="nb">
                             <div class="model-card-header">
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <input type="checkbox" class="model-select-checkbox" data-model-id="nb" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
+                                    <input type="checkbox" class="model-select-checkbox" data-model-id="nb" aria-label="Include Naive Bayes" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
                                     <span class="model-card-title">Naive Bayes (Gaussian + Bernoulli)</span>
                                 </div>
                                 <span class="pill pill-nominal">Probabilistic</span>
@@ -523,7 +524,7 @@
                                 </div>
                                 <div class="custom-seed-row" id="custom-seed-row-nb" style="display: none;">
                                     <div class="seed-input-wrap">
-                                        <input type="number" id="nb-card-seed-input" class="control-input card-seed-input" data-model="nb" placeholder="Custom seed" value="42">
+                                        <input type="number" id="nb-card-seed-input" aria-label="Custom seed for Naive Bayes" class="control-input card-seed-input" data-model="nb" placeholder="Custom seed" value="42">
                                         <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="nb" title="Generate random seed">🎲</button>
                                     </div>
                                     <span class="seed-hint">Reference seed recorded for provenance.</span>
@@ -534,7 +535,7 @@
                         <div class="model-card" data-model-id="gbm">
                             <div class="model-card-header">
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <input type="checkbox" class="model-select-checkbox" data-model-id="gbm" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
+                                    <input type="checkbox" class="model-select-checkbox" data-model-id="gbm" aria-label="Include Gradient-Boosted Trees" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
                                     <span class="model-card-title">Gradient-Boosted Trees</span>
                                 </div>
                                 <span class="pill pill-continuous">Boosting</span>
@@ -559,7 +560,7 @@
                                 </div>
                                 <div class="custom-seed-row" id="custom-seed-row-gbm" style="display: none;">
                                     <div class="seed-input-wrap">
-                                        <input type="number" id="gbm-card-seed-input" class="control-input card-seed-input" data-model="gbm" placeholder="Custom seed" value="42">
+                                        <input type="number" id="gbm-card-seed-input" aria-label="Custom seed for Gradient-Boosted Trees" class="control-input card-seed-input" data-model="gbm" placeholder="Custom seed" value="42">
                                         <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="gbm" title="Generate random seed">🎲</button>
                                     </div>
                                     <span class="seed-hint">Reference seed recorded for provenance.</span>
@@ -570,7 +571,7 @@
                         <div class="model-card" data-model-id="ensemble">
                             <div class="model-card-header">
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <input type="checkbox" class="model-select-checkbox" data-model-id="ensemble" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
+                                    <input type="checkbox" class="model-select-checkbox" data-model-id="ensemble" aria-label="Include Voting / Weighted Ensemble" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
                                     <span class="model-card-title">Voting / Weighted Ensemble</span>
                                 </div>
                                 <span class="pill pill-target" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(6, 182, 212, 0.2)); color: #c084fc; border: 1px solid rgba(192, 132, 252, 0.4);">Voting Ensemble</span>
@@ -595,7 +596,7 @@
                                 </div>
                                 <div class="custom-seed-row" id="custom-seed-row-ensemble" style="display: none;">
                                     <div class="seed-input-wrap">
-                                        <input type="number" id="ensemble-card-seed-input" class="control-input card-seed-input" data-model="ensemble" placeholder="Custom master seed" value="42">
+                                        <input type="number" id="ensemble-card-seed-input" aria-label="Custom seed for Voting / Weighted Ensemble" class="control-input card-seed-input" data-model="ensemble" placeholder="Custom master seed" value="42">
                                         <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="ensemble" title="Generate random seed">🎲</button>
                                     </div>
                                     <span class="seed-hint">Propagates deterministic seeds to constituent models.</span>
@@ -610,7 +611,7 @@
                             <h3 style="font-size: 14px; font-weight: 700;">Training Configuration &amp; Fine-Tuning Hyperparameters</h3>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <span style="font-size: 11.5px; color: var(--text-muted);">Tune Parameters for:</span>
-                                <select id="active-hyperparam-select" class="control-select" style="font-size: 12px; padding: 4px 10px;">
+                                <select id="active-hyperparam-select" aria-label="Model whose settings are shown" class="control-select" style="font-size: 12px; padding: 4px 10px;">
                                     <option value="nn" selected>Neural Network (MLP)</option>
                                     <option value="rf">Random Forest</option>
                                     <option value="glm">Logistic / Ridge Regression</option>
@@ -730,7 +731,7 @@
                                                 </label>
                                             </div>
                                             <div class="seed-input-wrap" id="split-seed-custom-wrap" style="display: none;">
-                                                <input type="number" id="split-seed-input" class="control-input" placeholder="e.g. 42" value="42">
+                                                <input type="number" id="split-seed-input" class="control-input" aria-label="Custom split seed" placeholder="e.g. 42" value="42">
                                                 <button type="button" class="btn-roll-seed" id="btn-roll-split-seed" title="Generate random split seed">🎲</button>
                                             </div>
                                             <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
@@ -905,7 +906,7 @@
                                     </label>
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-nn" style="display: none;">
-                                    <input type="number" id="nn-seed-input" class="control-input" placeholder="e.g. 42" value="42">
+                                    <input type="number" id="nn-seed-input" class="control-input" aria-label="Custom seed for Neural Network (MLP)" placeholder="e.g. 42" value="42">
                                     <button type="button" class="btn-roll-seed" id="btn-roll-nn-seed" title="Generate random seed">🎲</button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
@@ -962,7 +963,7 @@
                                     </label>
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-rf" style="display: none;">
-                                    <input type="number" id="rf-seed-input" class="control-input" placeholder="e.g. 42" value="42">
+                                    <input type="number" id="rf-seed-input" class="control-input" aria-label="Custom seed for Random Forest" placeholder="e.g. 42" value="42">
                                     <button type="button" class="btn-roll-seed" id="btn-roll-rf-seed" title="Generate random seed">🎲</button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
@@ -1010,7 +1011,7 @@
                                     </label>
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-glm" style="display: none;">
-                                    <input type="number" id="glm-seed-input" class="control-input" placeholder="e.g. 42" value="42">
+                                    <input type="number" id="glm-seed-input" class="control-input" aria-label="Custom seed for Logistic / Ridge Regression" placeholder="e.g. 42" value="42">
                                     <button type="button" class="btn-roll-seed" id="btn-roll-glm-seed" title="Generate random seed">🎲</button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
@@ -1051,7 +1052,7 @@
                                     </label>
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-knn" style="display: none;">
-                                    <input type="number" id="knn-seed-input" class="control-input" placeholder="e.g. 42" value="42">
+                                    <input type="number" id="knn-seed-input" class="control-input" aria-label="Custom seed for k-Nearest Neighbours" placeholder="e.g. 42" value="42">
                                     <button type="button" class="btn-roll-seed" id="btn-roll-knn-seed" title="Generate random seed">🎲</button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
@@ -1090,7 +1091,7 @@
                                     </label>
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-nb" style="display: none;">
-                                    <input type="number" id="nb-seed-input" class="control-input" placeholder="e.g. 42" value="42">
+                                    <input type="number" id="nb-seed-input" class="control-input" aria-label="Custom seed for Naive Bayes" placeholder="e.g. 42" value="42">
                                     <button type="button" class="btn-roll-seed" id="btn-roll-nb-seed" title="Generate random seed">🎲</button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
@@ -1155,7 +1156,7 @@
                                     </label>
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-gbm" style="display: none;">
-                                    <input type="number" id="gbm-seed-input" class="control-input" placeholder="e.g. 42" value="42">
+                                    <input type="number" id="gbm-seed-input" class="control-input" aria-label="Custom seed for Gradient-Boosted Trees" placeholder="e.g. 42" value="42">
                                     <button type="button" class="btn-roll-seed" id="btn-roll-gbm-seed" title="Generate random seed">🎲</button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
@@ -1201,7 +1202,7 @@
                                     </label>
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-ensemble" style="display: none;">
-                                    <input type="number" id="ensemble-seed-input" class="control-input" placeholder="e.g. 42" value="42">
+                                    <input type="number" id="ensemble-seed-input" class="control-input" aria-label="Custom seed for Voting / Weighted Ensemble" placeholder="e.g. 42" value="42">
                                     <button type="button" class="btn-roll-seed" id="btn-roll-ensemble-seed" title="Generate random seed">🎲</button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
@@ -1315,6 +1316,7 @@
                     <div id="results-dashboard" class="results-dashboard" style="display: none;">
                         <div style="display: flex; justify-content: flex-end;">
                             <button type="button" id="standard-download-report-btn" class="btn btn-secondary btn-sm">📄 Download Analysis Report (.JSON)</button>
+                            <button type="button" id="standard-tripod-btn" class="btn btn-secondary btn-sm" style="margin-left: 8px;" title="Reporting checklist aligned with TRIPOD+AI, pre-filled from this analysis, with a draft Methods paragraph">📝 TRIPOD+AI Checklist &amp; Methods Draft</button>
                         </div>
                         <div id="retrain-status-banner" aria-live="polite"></div>
                         <div id="tuning-report-container"></div>
@@ -1945,6 +1947,7 @@
                                     <button id="pipeline-download-report-btn" class="btn btn-secondary btn-sm">
                                         📄 Download Clinical Protocol Report (.JSON)
                                     </button>
+                                    <button type="button" id="pipeline-tripod-btn" class="btn btn-secondary btn-sm" title="Reporting checklist aligned with TRIPOD+AI, pre-filled from this analysis">📝 TRIPOD+AI Checklist</button>
                                 </div>
                                 <div id="pipeline-leaderboard-container" class="table-container"></div>
                             </div>
@@ -2025,9 +2028,9 @@
     <!-- Application controller: ES modules (src/); when opened directly from disk (file://), where browsers
          block modules, the generated single-file bundle is used instead (node tools/build.js). -->
     <!-- IMPORTMAP:START (generated by tools/build.js) -->
-    <script type="importmap">{"imports":{"./src/batch-prediction.js":"./src/batch-prediction.js?h=23849bd4e2","./src/compute.js":"./src/compute.js?h=f39dd1fc2e","./src/core.js":"./src/core.js?h=a4a5aa70f1","./src/cv-tuning.js":"./src/cv-tuning.js?h=d173c363a9","./src/imputation.js":"./src/imputation.js?h=4dc58d1908","./src/ingest.js":"./src/ingest.js?h=49c018c231","./src/main.js":"./src/main.js?h=2ed05a39b8","./src/model-io.js":"./src/model-io.js?h=b6013f41d0","./src/navigation.js":"./src/navigation.js?h=41821bacbf","./src/panels.js":"./src/panels.js?h=ca5c2f392e","./src/pipeline-results.js":"./src/pipeline-results.js?h=dcfce4d612","./src/pipeline.js":"./src/pipeline.js?h=ece98d6ff2","./src/reports.js":"./src/reports.js?h=13ab6d86fb","./src/settings.js":"./src/settings.js?h=e1a4f741f7","./src/shell.js":"./src/shell.js?h=be70b58fee","./src/single-prediction.js":"./src/single-prediction.js?h=75f6769b32","./src/standard-training.js":"./src/standard-training.js?h=ca7905d98a","./src/survival.js":"./src/survival.js?h=0d3a83ae8e","./src/training-setup.js":"./src/training-setup.js?h=2263435747","./src/variables.js":"./src/variables.js?h=bf4376fc58","./src/watchdog.js":"./src/watchdog.js?h=582f5a6b6e","./data-engine.js":"./data-engine.js?h=c64ca266d5","./models.js":"./models.js?h=e203942f41","./compute-worker.js":"./compute-worker.js?h=efe57bab28"}}</script>
+    <script type="importmap">{"imports":{"./src/batch-prediction.js":"./src/batch-prediction.js?h=23849bd4e2","./src/compute.js":"./src/compute.js?h=f39dd1fc2e","./src/core.js":"./src/core.js?h=a4a5aa70f1","./src/cv-tuning.js":"./src/cv-tuning.js?h=d173c363a9","./src/imputation.js":"./src/imputation.js?h=f6f3d2afe5","./src/ingest.js":"./src/ingest.js?h=49c018c231","./src/main.js":"./src/main.js?h=7c5480ea62","./src/model-io.js":"./src/model-io.js?h=b6013f41d0","./src/navigation.js":"./src/navigation.js?h=41821bacbf","./src/panels.js":"./src/panels.js?h=119e7e7187","./src/pipeline-results.js":"./src/pipeline-results.js?h=dcfce4d612","./src/pipeline.js":"./src/pipeline.js?h=ece98d6ff2","./src/reports.js":"./src/reports.js?h=13ab6d86fb","./src/settings.js":"./src/settings.js?h=e1a4f741f7","./src/shell.js":"./src/shell.js?h=be70b58fee","./src/single-prediction.js":"./src/single-prediction.js?h=75f6769b32","./src/standard-training.js":"./src/standard-training.js?h=ca7905d98a","./src/survival.js":"./src/survival.js?h=0d3a83ae8e","./src/training-setup.js":"./src/training-setup.js?h=2263435747","./src/tripod.js":"./src/tripod.js?h=8584e83fb9","./src/variables.js":"./src/variables.js?h=bf4376fc58","./src/watchdog.js":"./src/watchdog.js?h=582f5a6b6e","./data-engine.js":"./data-engine.js?h=c64ca266d5","./models.js":"./models.js?h=e203942f41","./compute-worker.js":"./compute-worker.js?h=efe57bab28"}}</script>
     <!-- IMPORTMAP:END -->
-    <script type="module" src="src/main.js?h=2ed05a39b8"></script>
+    <script type="module" src="src/main.js?h=7c5480ea62"></script>
     <script>if (location.protocol === 'file:') document.write('<script src="dist/app.bundle.js"><\/script>');</script>
 </body>
 </html>

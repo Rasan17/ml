@@ -469,7 +469,7 @@ function renderExplainPanel(containerId, items, rows, isClassification) {
             <div class="cal-head">
                 <div class="tune-title">🔍 Which predictors matter? (permutation importance, Testing set)</div>
                 <span>
-                    <select id="${containerId}-select" class="control-select" style="width: auto; display: inline-block;">${usable.map((it, i) => `<option${i === 0 ? ' selected' : ''}>${escapeHtml(it.name)}</option>`).join('')}</select>
+                    <select id="${containerId}-select" class="control-select" aria-label="Model for permutation importance" style="width: auto; display: inline-block;">${usable.map((it, i) => `<option${i === 0 ? ' selected' : ''}>${escapeHtml(it.name)}</option>`).join('')}</select>
                     <button type="button" id="${containerId}-btn" class="btn btn-outline btn-sm" onclick="window.runPermutationImportance('${containerId}')">Compute</button>
                 </span>
             </div>
