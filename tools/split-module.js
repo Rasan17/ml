@@ -35,7 +35,7 @@ parts.forEach(p => {
 });
 const owner = new Map();
 parts.forEach(p => p.decls.forEach(d => owner.set(d, p.name)));
-const uses = (body, name) => new RegExp(`(^|[^\\w$.'"])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(body);
+const uses = (body, name) => new RegExp(`(^|\\.\\.\\.|[^\\w$.'"])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(body);
 
 const banner = lines.slice(0, firstImport).filter(l => l.startsWith('//') || /^\/\*/.test(l));
 parts.forEach((p, i) => {

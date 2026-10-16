@@ -30,6 +30,9 @@ jobs:
           node tools/build.js
           git diff --exit-code dist/app.bundle.js dist/validation-core.worker.js index.html
 
+      - name: Module imports resolve (no missing cross-module imports)
+        run: node tests/module_check.js
+
       - name: Edge cases (data engine and models)
         run: node tests/edge_cases.js
 

@@ -214,6 +214,7 @@ From the project folder (Node.js; the reference check also needs Python with Sci
 
 ```bash
 node tests/reference_check.js && python3 tests/reference_check.py   # 61 checks against SciPy / scikit-learn / statsmodels (incl. calibration, recalibration, DeLong, decision curve, IRLS odds ratios, Rubin's rules, t distribution, Cox model, C-index, Kaplan-Meier)
+node tests/module_check.js                                         # every import between the src/ modules resolves
 node tests/edge_cases.js                                           # robustness: single class, all-missing, constant features, imbalance, zero-variance target
 node tests/end_to_end.js                                           # 19 end-to-end checks: binary/multiclass/regression, missing values, unseen categories, rare outcome, tiny cohort, patient/date splits, calibration, threshold, NN fallback, batch = evaluation preprocessing, export/import of all model types; Option C on pure noise (tuning repeated, .632+ for flexible models, model-selection correction); .632+ no-information rates; TreeSHAP and sampled Shapley vs brute force; time-dependent AUC/Brier under censoring
 python3 tests/benchmark_vs_python.py                               # app vs scikit-learn / PyTorch / imbalanced-learn (~2 min)

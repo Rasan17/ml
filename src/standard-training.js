@@ -7,7 +7,7 @@ import { saveSettingsToBrowser } from './settings.js';
 import { DOM } from './shell.js';
 import { disposeModels, evalAbortOpts, markBaselineDeployed, setupTrainingLossChart, updateLossChart } from './training-actions.js';
 import { getHyperparamsForModel } from './training-setup.js';
-import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapResamples, noInformationRates, plus632 } from './validation-core.js';
+import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapResamples, noInformationRates, plus632, selectionOptimism } from './validation-core.js';
 
 async function startModelTraining() {
     if (!AppState.imputedData) {
