@@ -9,3 +9,5 @@ __MACOSX/
 node_modules/
 test-results/
 playwright-report/
+# Local Python environments for the audit tools
+.venv-*/
