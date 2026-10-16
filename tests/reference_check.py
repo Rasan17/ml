@@ -99,6 +99,13 @@ pl=LogisticRegression(penalty=None,tol=1e-12,max_iter=10000).fit(lp.reshape(-1,1
 chk('Platt scaling a, b (vs scikit-learn unpenalised logistic)',[o['platt']['a'],o['platt']['b']],[pl.intercept_[0],pl.coef_[0][0]],1e-5)
 ir=IsotonicRegression(out_of_bounds='clip').fit(np.array(o['calP']),cy)
 chk('Isotonic regression fitted values (vs scikit-learn)',o['isoFitted'],ir.predict(np.array(o['calP'])),1e-9)
+# Rubin's rules (Barnard-Rubin df with complete-data df 120), independent NumPy implementation
+E=o['rubinIn']; m=len(E); Q=np.array([e['coef'] for e in E]); U=np.array([e['se'] for e in E])**2
+qb=Q.mean(0); W=U.mean(0); Bv=Q.var(0,ddof=1); T=W+(1+1/m)*Bv; lam=(1+1/m)*Bv/T; dfo=(m-1)/lam**2; dc=120; dfobs=(dc+1)/(dc+3)*dc*(1-lam); df=dfo*dfobs/(dfo+dfobs)
+lo=qb-stats.t.ppf(.975,df)*np.sqrt(T); pv=2*stats.t.sf(np.abs(qb/np.sqrt(T)),df); R_=o['rubin']
+chk("Rubin's rules: pooled estimate, SE, df",[[r['coef'],r['se'],r['df']] for r in R_],np.column_stack([qb,np.sqrt(T),df]),1e-8)
+chk("Rubin's rules: 95% CI lower bound and p-value",[[r['low'],r['p']] for r in R_],np.column_stack([lo,pv]),1e-6)
+chk('t distribution quantiles and CDF',o['tq']+o['tc'],[stats.t.ppf(.975,4.3),stats.t.ppf(.9,17),stats.t.cdf(1.7,6),stats.t.cdf(-2.4,11.5)],1e-6)
 w=max(len(x[1]) for x in res)
 for st,nm,d,t in res: print(f'{st}  {nm:<{w}}  max|diff|={d:.2e}  (tol {t:.0e})')
 print(f"\n{sum(1 for x in res if x[0]=='PASS')}/{len(res)} checks passed")

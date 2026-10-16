@@ -267,7 +267,23 @@ function renderCompleteCaseBox(rows, activeCols) {
                         values are missing completely at random; otherwise imputation is usually preferable.</span>` : ''}
                 </span>
             </label>
+            <label for="missing-indicator-toggle" style="display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 13px; color: var(--text-primary); margin-top: 10px; ${AppState.completeCase ? 'opacity: 0.5;' : ''}">
+                <input type="checkbox" id="missing-indicator-toggle" ${AppState.missingIndicators ? 'checked' : ''} ${AppState.completeCase ? 'disabled' : ''} style="margin-top: 3px; accent-color: var(--accent-cyan);">
+                <span>
+                    <strong>Add a "was missing" indicator for each predictor with empty cells</strong>
+                    <span style="display: block; font-size: 12px; color: var(--text-secondary); margin-top: 3px;">
+                        Adds a Yes/No predictor recording whether the value was missing, alongside the imputed value, so the models can learn from the fact that a measurement was not taken (e.g. a test not ordered). It is derived automatically for new patients. It can introduce bias if missingness reflects data-collection practice that differs elsewhere.
+                    </span>
+                </span>
+            </label>
         </div>`;
+    document.getElementById('missing-indicator-toggle')?.addEventListener('change', (e) => {
+        setMissingIndicators(e.target.checked);
+        AppState.imputedData = null;
+        if (DOM.toStep4Btn) DOM.toStep4Btn.disabled = true;
+        if (DOM.imputeAuditBox) DOM.imputeAuditBox.innerHTML = '';
+        renderImputationTable();
+    });
     document.getElementById('complete-case-toggle').addEventListener('change', (e) => {
         AppState.completeCase = e.target.checked;
         AppState.imputedData = null; // previous result no longer matches the chosen strategy
@@ -277,4 +293,32 @@ function renderCompleteCaseBox(rows, activeCols) {
     });
 }
 
-export { renderVariableConfigGrid, setVariableIncluded, isAutoExcludedColumn, renderVariableIncludeSummary, setAllVariablesIncluded, renderTargetAndOrdinalControls, countIncompleteRows, renderCompleteCaseBox };
+// Adds (or removes) derived "was missing" indicator columns for every predictor that has empty cells in the
+// training data; the same columns are derived for a separate testing file and for new patients
+function setMissingIndicators(on) {
+    const pd = AppState.parsedData;
+    if (!pd) return;
+    const cfgs = AppState.columnConfigs;
+    // remove existing indicators
+    Object.keys(cfgs).filter(c => cfgs[c].derivedFrom).forEach(ind => {
+        delete cfgs[ind];
+        if (AppState.columnAnalysis) delete AppState.columnAnalysis[ind];
+        pd.headers = pd.headers.filter(h => h !== ind);
+        pd.rows.forEach(r => { delete r[ind]; });
+        (AppState.separateTestRawRows || []).forEach(r => { delete r[ind]; });
+    });
+    AppState.missingIndicators = Boolean(on);
+    if (!on) return;
+    const sources = pd.headers.filter(c => cfgs[c] && cfgs[c].role === 'feature' && pd.rows.some(r => DataEngine.isMissing(r[c])));
+    sources.forEach(src => {
+        const ind = DataEngine.missingIndicatorName(src);
+        const derive = r => { r[ind] = DataEngine.isMissing(r[src]) ? 'Yes' : 'No'; };
+        pd.rows.forEach(derive);
+        (AppState.separateTestRawRows || []).forEach(derive);
+        pd.headers.push(ind);
+        cfgs[ind] = { role: 'feature', type: 'nominal', imputationStrategy: 'mode', derivedFrom: src };
+        if (AppState.columnAnalysis) AppState.columnAnalysis[ind] = DataEngine.analyzeColumns([ind], pd.rows)[ind];
+    });
+}
+
+export { setMissingIndicators, renderVariableConfigGrid, setVariableIncluded, isAutoExcludedColumn, renderVariableIncludeSummary, setAllVariablesIncluded, renderTargetAndOrdinalControls, countIncompleteRows, renderCompleteCaseBox };

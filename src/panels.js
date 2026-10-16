@@ -302,23 +302,43 @@ function renderPatientExplanation(model, x, prep, inputRow) {
 
 // Odds ratios from a logistic regression fitted to convergence (IRLS) on the training data: an explanatory
 // companion to the predictive models, with one reference category per categorical predictor
-function renderOddsRatioPanel(containerId, prep) {
-    const box = document.getElementById(containerId);
-    if (!box) return;
-    if (!prep || !prep.isClassification || (prep.targetClasses || []).length !== 2 || !Array.isArray(prep.X) || !prep.X.length) { box.innerHTML = ''; return; }
+// Design matrix for the explanatory logistic regression: one reference category (the most frequent in the
+// fitted encoding, `refs`) per categorical predictor; continuous predictors per unit (or per SD if SD < 1)
+function orDesign(prep, refs) {
     const cols = [];
     prep.featureCols.forEach(col => {
         const m = prep.featureMetadata[col];
         if (m.type === 'nominal') {
-            const ref = m.mode !== undefined ? m.mode : m.categories[0];
+            const ref = refs && refs[col] !== undefined ? refs[col] : (m.mode !== undefined ? m.mode : m.categories[0]);
             m.categories.forEach((cat, k) => { if (cat !== ref) cols.push({ idx: m.startIndex + k, name: `${col}: ${cat}`, note: `vs ${ref}`, scale: 1 }); });
         } else {
-            // Measures on a small scale (SD < 1, e.g. an index of 0.33) are reported per SD; others per unit
             const sd = m.std > 0 ? m.std : 1;
             const perUnit = m.type === 'ordinal' || sd >= 1;
             cols.push({ idx: m.startIndex, name: col, note: m.type === 'ordinal' ? 'per rank step' : perUnit ? 'per unit' : `per SD (${sd.toPrecision(2)} units)`, scale: perUnit ? sd : 1, perSD: perUnit });
         }
     });
+    return cols;
+}
+
+function oddsRatioRows(cols, estimates, pooled) {
+    const f2 = v => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
+    return estimates.map((r, i) => {
+        const c = cols[i];
+        const k = c.perSD ? 1 / c.scale : 1; // coefficient is per SD of the standardised predictor
+        const or = Math.exp(r.coef * k), lo = Math.exp(r.low * k), hi = Math.exp(r.high * k);
+        const pTxt = r.p === null ? 'n/a' : r.p < 0.001 ? '< 0.001' : r.p.toFixed(3);
+        return `<tr><td>${escapeHtml(c.name)}</td><td>${f2(or)} (${f2(lo)}–${f2(hi)})</td><td>${escapeHtml(c.note)}${c.perSD ? ` <span class="tune-sd">(per SD: ${f2(Math.exp(r.coef))})</span>` : ''}</td><td>${pTxt}</td>${pooled ? `<td>${(r.fmi * 100).toFixed(0)}%</td>` : ''}</tr>`;
+    }).join('');
+}
+
+// Odds ratios from a logistic regression fitted to convergence (IRLS) on the training data: an explanatory
+// companion to the predictive models. With missing predictor values, they can be re-estimated by multiple
+// imputation (MICE with predictive mean matching) pooled with Rubin's rules.
+function renderOddsRatioPanel(containerId, prep) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    if (!prep || !prep.isClassification || (prep.targetClasses || []).length !== 2 || !Array.isArray(prep.X) || !prep.X.length) { box.innerHTML = ''; return; }
+    const cols = orDesign(prep);
     const posLabel = String(prep.targetClasses[1]);
     let body;
     if (cols.length > 60 || prep.X.length > 50000) {
@@ -330,21 +350,53 @@ function renderOddsRatioPanel(containerId, prep) {
         if (!fit || !fit.converged) {
             body = `<p class="tune-muted">${escapeHtml((fit && fit.note) || 'The logistic regression could not be fitted.')}</p>`;
         } else {
-            const f2 = v => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
-            const rows = fit.rows.slice(1).map((r, i) => {
-                const c = cols[i];
-                const k = c.perSD ? 1 / c.scale : 1; // coefficient is per SD of the standardised predictor
-                const or = Math.exp(r.coef * k), lo = Math.exp((r.coef - 1.959964 * r.se) * k), hi = Math.exp((r.coef + 1.959964 * r.se) * k);
-                const pTxt = r.p < 0.001 ? '< 0.001' : r.p.toFixed(3);
-                return `<tr><td>${escapeHtml(c.name)}</td><td>${f2(or)} (${f2(lo)}–${f2(hi)})</td><td>${escapeHtml(c.note)}${c.perSD ? ` <span class="tune-sd">(per SD: ${f2(r.or)})</span>` : ''}</td><td>${pTxt}</td></tr>`;
-            }).join('');
+            const est = fit.rows.slice(1).map(r => ({ coef: r.coef, low: r.coef - 1.959964 * r.se, high: r.coef + 1.959964 * r.se, p: r.p }));
             const epv = Math.min(fit.events, fit.n - fit.events) / cols.length;
-            body = `<table class="data-table thr-table"><thead><tr><th>Predictor</th><th>Odds ratio (95% CI)</th><th>Scale</th><th>p-value</th></tr></thead><tbody>${rows}</tbody></table>
-                <p class="tune-muted">Odds ratios for "${escapeHtml(posLabel)}" from an <strong>unpenalised logistic regression fitted to convergence</strong> on the ${fit.n} training patients (${fit.events} with the outcome), each adjusted for all the other predictors. An odds ratio above 1 means higher odds of "${escapeHtml(posLabel)}"; a confidence interval that includes 1 is compatible with no association. Categorical predictors are compared with their most common category. This table explains associations in the training data; it is separate from the ridge-penalised model used for prediction and does not show causation.${epv < 10 ? ` <strong>Caution:</strong> only ${epv.toFixed(1)} patients in the smaller outcome group per predictor, so these estimates are unstable.` : ''}</p>`;
+            const raw = AppState.orRawRows || [];
+            const nMissing = raw.filter(r => prep.featureCols.some(c => DataEngine.isMissing(r[c]))).length;
+            body = `<table class="data-table thr-table"><thead><tr><th>Predictor</th><th>Odds ratio (95% CI)</th><th>Scale</th><th>p-value</th></tr></thead><tbody>${oddsRatioRows(cols, est, false)}</tbody></table>
+                <p class="tune-muted">Odds ratios for "${escapeHtml(posLabel)}" from an <strong>unpenalised logistic regression fitted to convergence</strong> on the ${fit.n} training patients (${fit.events} with the outcome), each adjusted for all the other predictors. An odds ratio above 1 means higher odds of "${escapeHtml(posLabel)}"; a confidence interval that includes 1 is compatible with no association. Categorical predictors are compared with their most common category. This table explains associations in the training data; it is separate from the ridge-penalised model used for prediction and does not show causation.${epv < 10 ? ` <strong>Caution:</strong> only ${epv.toFixed(1)} patients in the smaller outcome group per predictor, so these estimates are unstable.` : ''}</p>
+                ${nMissing > 0 ? `<div class="explain-box"><strong>Missing data:</strong> ${nMissing} of ${raw.length} training patients had at least one missing predictor value, filled once (single imputation), which makes the confidence intervals too narrow. <button type="button" class="btn btn-outline btn-sm" id="${containerId}-mice-btn" onclick="window.runMiceOddsRatios('${containerId}')">Re-estimate with multiple imputation (MICE)</button><div id="${containerId}-mice"></div></div>` : ''}`;
         }
     }
     box.innerHTML = `<div class="cal-panel"><div class="tune-title">📋 Odds ratios (logistic regression, training data)</div>${body}</div>`;
 }
+
+window.runMiceOddsRatios = async function (containerId) {
+    const prep = AppState.prepMeta;
+    const out = document.getElementById(`${containerId}-mice`);
+    const btn = document.getElementById(`${containerId}-mice-btn`);
+    const raw = (AppState.orRawRows || []).filter(r => !DataEngine.isMissing(r[prep.targetCol]));
+    if (!out || !prep || !raw.length) return;
+    btn.disabled = true;
+    out.innerHTML = '<p class="tune-muted">Creating 10 imputed datasets (MICE, 10 cycles each)…</p>';
+    await ModelEngine.yieldToBrowser();
+    try {
+        const refs = {};
+        prep.featureCols.forEach(c => { const m = prep.featureMetadata[c]; if (m.type === 'nominal') refs[c] = m.mode !== undefined ? m.mode : m.categories[0]; });
+        const mi = DataEngine.miceImpute(raw, AppState.columnConfigs, { m: 10, iterations: 10, seed: 2024 });
+        const estimates = [];
+        let names = null, colsRef = null;
+        for (const data of mi.datasets) {
+            const p = DataEngine.prepareFeaturesAndTarget(data, AppState.columnConfigs);
+            const cols = orDesign(p, refs);
+            const X = p.X.map(r => cols.map(c => r[c.idx]));
+            const fit = ModelEngine.logisticIRLS(X, p.y.map(v => (v === 1 ? 1 : 0)), cols.map(c => c.name));
+            if (!fit || !fit.converged) throw new Error((fit && fit.note) || 'a fit did not converge');
+            const nm = cols.map(c => c.name).join('|');
+            if (names === null) { names = nm; colsRef = cols; } else if (nm !== names) throw new Error('the imputed datasets have different categories');
+            estimates.push({ coef: fit.rows.slice(1).map(r => r.coef), se: fit.rows.slice(1).map(r => r.se) });
+            await ModelEngine.yieldToBrowser();
+        }
+        const pooled = ModelEngine.poolRubin(estimates, raw.length - colsRef.length - 1);
+        out.innerHTML = `<table class="data-table thr-table" style="margin-top: 8px;"><thead><tr><th>Predictor</th><th>Pooled odds ratio (95% CI)</th><th>Scale</th><th>p-value</th><th>Missing information</th></tr></thead><tbody>${oddsRatioRows(colsRef, pooled, true)}</tbody></table>
+            <p class="tune-muted"><strong>Multiple imputation:</strong> missing predictor values were imputed 10 times by chained equations with predictive mean matching (each imputed value is a value actually observed in a similar patient; the outcome is used as a predictor, as recommended). The logistic regression was fitted to each completed dataset and the results pooled with <strong>Rubin's rules</strong>, so the confidence intervals include the uncertainty due to the missing values. "Missing information" is the fraction of each estimate's uncertainty that comes from the missing data. Valid if values are missing at random given the other variables.</p>`;
+    } catch (e) {
+        out.innerHTML = `<p class="tune-muted">Multiple imputation could not be completed: ${escapeHtml(e.message || String(e))}</p>`;
+    } finally {
+        btn.disabled = false;
+    }
+};
 
 async function permutationImportance(model, prep, rows, isClassification, seed, onProgress) {
     const data = DataEngine.prepareTestingDataset(rows, prep);

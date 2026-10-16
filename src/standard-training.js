@@ -177,6 +177,7 @@ async function startModelTraining() {
             }
             AppState.prepMeta = prep;
             AppState.lastTestRows = null; // no separate test set
+            AppState.orRawRows = allRaw;  // raw rows matching the deployed encoding (odds ratios / MICE)
         } else if (isOptionA) {
             // =============================================================
             // OPTION A: INTERNAL TRAIN / TEST SPLIT WITH RETRAINING CHOICE
@@ -362,6 +363,7 @@ async function startModelTraining() {
             // Predictions must use the encoding the deployed models were fitted with:
             // full-cohort encoding after 100% retraining, otherwise the training-split encoding.
             AppState.prepMeta = shouldRetrain ? prep : splitPrep;
+            AppState.orRawRows = shouldRetrain ? rawRows : rowSplit.trainX;
         } else {
             // =============================================================
             // OPTION B: SEPARATE TRAINING (i) AND TESTING (ii) DATASETS
@@ -385,6 +387,7 @@ async function startModelTraining() {
             // Transform separate test data using training metadata (strict zero leakage)
             const testPrep = DataEngine.prepareTestingDataset(optionBRows, prep);
             AppState.lastTestRows = optionBRows; // for permutation importance
+            AppState.orRawRows = optionBTrainRawRows(prep);
             testPrep.completeCaseDropped = completeCaseDropped;
             AppState.separateTestData = testPrep;
 

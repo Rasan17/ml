@@ -888,10 +888,15 @@
                 encodedFeatureNames,
                 totalDimensions: totalEncodedFeatures,
                 droppedMissingTarget,
+                // Derived "was missing" indicator columns: indicator -> source predictor (re-derived for new patients)
+                derivedIndicators: Object.fromEntries(featureCols.filter(c => columnConfigs[c] && columnConfigs[c].derivedFrom).map(c => [c, columnConfigs[c].derivedFrom])),
                 // Binary metrics (AUC, sensitivity, TP/FN) treat class index 1 as the positive class
                 positiveClass: isClassification && targetClasses.length === 2 ? targetClasses[1] : null
             };
         },
+
+        /** Name of the "was missing" indicator column derived from a predictor */
+        missingIndicatorName(col) { return `${col} (was missing)`; },
 
         /**
          * Transform a single arbitrary row (for single-case or batch inference).
@@ -907,6 +912,12 @@
                 if (issues) issues.push({ column: col, kind, value: rawVal });
             };
 
+            // "Was missing" indicators are always re-derived from their source predictor (blank -> Yes)
+            const derived = prepMeta.derivedIndicators || {};
+            if (Object.keys(derived).length) {
+                inputRow = { ...inputRow };
+                Object.keys(derived).forEach(ind => { inputRow[ind] = this.isMissing(inputRow[derived[ind]]) ? 'Yes' : 'No'; });
+            }
             // Blank predictors are filled exactly as in training: with the fitted imputation plan (standard
             // workflow: median / mean / most frequent / constant / k-NN as chosen in Step 3) or the fitted
             // fill values (7-step pipeline). Only without either does the generic fallback below apply.
@@ -1022,6 +1033,116 @@
                 trainIndices, testIndices,
                 info: { method: 'group', groups: keys.length, trainGroups: keys.length - nTestGroups, testGroups: nTestGroups }
             };
+        },
+
+        /**
+         * Multiple imputation by chained equations (MICE) with predictive mean matching (PMM).
+         * For each predictor with missing values in turn, a ridge regression of that predictor on all the
+         * others (and on the outcome, as recommended) is fitted to a bootstrap sample of the observed rows
+         * (proper imputation); each missing value is replaced by the observed value of one of the 5 observed rows
+         * whose predicted values are closest. Categorical predictors are predicted as one-hot vectors.
+         * Returns m completed copies of the rows (imputed values are always values actually observed).
+         */
+        miceImpute(rows, columnConfigs, { m = 5, iterations = 10, seed = 2024, donors = 5 } = {}) {
+            const cols = Object.keys(columnConfigs).filter(c => columnConfigs[c].role === 'feature' || columnConfigs[c].role === 'target');
+            const isNum = c => columnConfigs[c].type !== 'nominal' && rows.every(r => this.isMissing(r[c]) || !isNaN(Number(r[c])));
+            const numeric = {}; cols.forEach(c => { numeric[c] = isNum(c); });
+            const levels = {};
+            cols.forEach(c => { if (!numeric[c]) levels[c] = [...new Set(rows.filter(r => !this.isMissing(r[c])).map(r => String(r[c]).trim()))].sort(); });
+            const missingIdx = {};
+            cols.forEach(c => { missingIdx[c] = rows.map((r, i) => (this.isMissing(r[c]) ? i : -1)).filter(i => i >= 0); });
+            const targets = cols.filter(c => columnConfigs[c].role === 'feature' && missingIdx[c].length > 0 && missingIdx[c].length < rows.length);
+            const n = rows.length;
+
+            // Ridge regression (normal equations); returns coefficient matrix p x q
+            const ridge = (X, Y, lam) => {
+                const p = X[0].length, q = Y[0].length;
+                const A = Array.from({ length: p }, () => new Array(p).fill(0));
+                const Bm = Array.from({ length: p }, () => new Array(q).fill(0));
+                for (let i = 0; i < X.length; i++) {
+                    const xi = X[i];
+                    for (let a = 0; a < p; a++) {
+                        if (xi[a] === 0) continue;
+                        for (let b = a; b < p; b++) A[a][b] += xi[a] * xi[b];
+                        for (let k = 0; k < q; k++) Bm[a][k] += xi[a] * Y[i][k];
+                    }
+                }
+                for (let a = 0; a < p; a++) { for (let b = 0; b < a; b++) A[a][b] = A[b][a]; if (a > 0) A[a][a] += lam; }
+                // Gaussian elimination on [A | Bm]
+                const M = A.map((r, i) => [...r, ...Bm[i]]);
+                for (let c = 0; c < p; c++) {
+                    let piv = c;
+                    for (let r = c + 1; r < p; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+                    if (Math.abs(M[piv][c]) < 1e-12) { M[piv][c] = 1e-12; }
+                    [M[c], M[piv]] = [M[piv], M[c]];
+                    for (let r = 0; r < p; r++) {
+                        if (r === c) continue;
+                        const f = M[r][c] / M[c][c];
+                        if (f) for (let k = c; k < p + q; k++) M[r][k] -= f * M[c][k];
+                    }
+                }
+                return M.map((r, i) => r.slice(p).map(v => v / r[i]));
+            };
+
+            const datasets = [];
+            for (let l = 0; l < m; l++) {
+                const rng = this.createPRNG(seed + 1009 * l);
+                const data = rows.map(r => ({ ...r }));
+                // Start: random draws from the observed values
+                targets.forEach(c => {
+                    const obs = rows.filter(r => !this.isMissing(r[c])).map(r => r[c]);
+                    missingIdx[c].forEach(i => { data[i][c] = obs[Math.floor(rng() * obs.length)]; });
+                });
+                for (let it = 0; it < iterations; it++) {
+                    targets.forEach(c => {
+                        // Design matrix from all other variables (current completed values), standardised / one-hot
+                        const others = cols.filter(o => o !== c && missingIdx[o].length < rows.length && !(columnConfigs[o].role === 'target' && missingIdx[o].length));
+                        const stats = {};
+                        others.forEach(o => {
+                            if (numeric[o]) {
+                                const v = data.map(r => Number(r[o]));
+                                const mu = v.reduce((a, b) => a + b, 0) / n;
+                                const sd = Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / n) || 1;
+                                stats[o] = { mu, sd };
+                            }
+                        });
+                        const design = r => {
+                            const x = [1];
+                            others.forEach(o => {
+                                if (numeric[o]) x.push((Number(r[o]) - stats[o].mu) / stats[o].sd);
+                                else levels[o].slice(1).forEach(lv => x.push(String(r[o]).trim() === lv ? 1 : 0));
+                            });
+                            return x;
+                        };
+                        const resp = r => (numeric[c] ? [Number(r[c])] : levels[c].map(lv => (String(r[c]).trim() === lv ? 1 : 0)));
+                        const misSet = new Set(missingIdx[c]);
+                        const obsIdx = [];
+                        for (let i = 0; i < n; i++) if (!misSet.has(i)) obsIdx.push(i);
+                        const Xall = data.map(design);
+                        const lam = 1e-3 * obsIdx.length;
+                        const betaHat = ridge(obsIdx.map(i => Xall[i]), obsIdx.map(i => resp(rows[i])), lam);
+                        const boot = obsIdx.map(() => obsIdx[Math.floor(rng() * obsIdx.length)]);
+                        const betaStar = ridge(boot.map(i => Xall[i]), boot.map(i => resp(rows[i])), lam);
+                        const pred = (x, B) => B[0].map((_, k) => x.reduce((a, xv, j) => a + xv * B[j][k], 0));
+                        const obsPred = obsIdx.map(i => pred(Xall[i], betaHat));
+                        // Donor pool (capped for very large data) and nearest predicted values
+                        const pool = obsIdx.length > 3000 ? Array.from({ length: 3000 }, () => Math.floor(rng() * obsIdx.length)) : obsIdx.map((_, k) => k);
+                        missingIdx[c].forEach(i => {
+                            const target = pred(Xall[i], betaStar);
+                            const best = [];
+                            pool.forEach(k => {
+                                const d = obsPred[k].reduce((a, v, j) => a + (v - target[j]) ** 2, 0);
+                                if (best.length < donors) { best.push({ k, d }); best.sort((a, b) => a.d - b.d); }
+                                else if (d < best[donors - 1].d) { best[donors - 1] = { k, d }; best.sort((a, b) => a.d - b.d); }
+                            });
+                            const pick = best[Math.floor(rng() * best.length)];
+                            data[i][c] = rows[obsIdx[pick.k]][c];
+                        });
+                    });
+                }
+                datasets.push(data);
+            }
+            return { datasets, imputedColumns: targets, m, iterations };
         },
 
         /** Parses common date formats (ISO yyyy-mm-dd, dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy, "15 Oct 2026"); null if not a date */

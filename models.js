@@ -34,6 +34,57 @@
         return z >= 0 ? (1 + erf) / 2 : (1 - erf) / 2;
     }
 
+    // Log-gamma (Lanczos) and the regularised incomplete beta function (continued fraction, Numerical Recipes)
+    function logGamma(x) {
+        const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5];
+        let y = x, tmp = x + 5.5;
+        tmp -= (x + 0.5) * Math.log(tmp);
+        let ser = 1.000000000190015;
+        for (let j = 0; j < 6; j++) ser += c[j] / ++y;
+        return -tmp + Math.log(2.5066282746310005 * ser / x);
+    }
+    function betacf(a, b, x) {
+        const MAXIT = 300, EPS = 3e-16, FPMIN = 1e-300;
+        const qab = a + b, qap = a + 1, qam = a - 1;
+        let c = 1, d = 1 - qab * x / qap;
+        if (Math.abs(d) < FPMIN) d = FPMIN;
+        d = 1 / d;
+        let h = d;
+        for (let m = 1; m <= MAXIT; m++) {
+            const m2 = 2 * m;
+            let aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+            d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN;
+            c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN;
+            d = 1 / d; h *= d * c;
+            aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+            d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN;
+            c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN;
+            d = 1 / d;
+            const del = d * c;
+            h *= del;
+            if (Math.abs(del - 1) < EPS) break;
+        }
+        return h;
+    }
+    function incompleteBeta(a, b, x) {
+        if (x <= 0) return 0;
+        if (x >= 1) return 1;
+        const bt = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+        return x < (a + 1) / (a + b + 2) ? bt * betacf(a, b, x) / a : 1 - bt * betacf(b, a, 1 - x) / b;
+    }
+    // Student t distribution: CDF and quantile (bisection on the CDF); infinite df uses the normal
+    function tCdf(t, df) {
+        if (!isFinite(df) || df > 1e7) return normalCdf(t);
+        const x = df / (df + t * t);
+        const tail = 0.5 * incompleteBeta(df / 2, 0.5, x);
+        return t >= 0 ? 1 - tail : tail;
+    }
+    function tQuantile(p, df) {
+        let lo = -1e3, hi = 1e3;
+        for (let i = 0; i < 200; i++) { const mid = (lo + hi) / 2; if (tCdf(mid, df) < p) lo = mid; else hi = mid; }
+        return (lo + hi) / 2;
+    }
+
     // Gaussian elimination with partial pivoting; returns null if singular
     function solveLinear(A, b) {
         const n = A.length;
@@ -2239,6 +2290,41 @@
             crit.push({ id: 'optimism', label: `Optimism in adjusted R² ≤ ${optimism}`, n: Math.ceil(1 + (p * (1 - R2)) / optimism) });
             crit.push({ id: 'residual', label: 'Residual SD estimated within a 10% margin', n: 234 + p });
             return { type, p, r2: R2, criteria: crit, n: Math.max(...crit.map(c => c.n)), r2Assumed: !(r2 !== null && r2 > 0 && r2 < 1) };
+        },
+
+        tCdf(t, df) { return tCdf(t, df); },
+        tQuantile(p, df) { return tQuantile(p, df); },
+
+        /**
+         * Rubin's rules: pools m estimates (each a vector of coefficients with their standard errors) from
+         * multiply imputed datasets. Returns pooled coefficient, total SE, degrees of freedom (Barnard–Rubin
+         * small-sample adjustment with the complete-data df), 95% CI, p-value and the fraction of missing information.
+         */
+        poolRubin(estimates, completeDf = Infinity) {
+            const m = estimates.length;
+            if (m < 2) return null;
+            const k = estimates[0].coef.length;
+            const out = [];
+            for (let j = 0; j < k; j++) {
+                const q = estimates.map(e => e.coef[j]);
+                const u = estimates.map(e => e.se[j] * e.se[j]);
+                const qbar = q.reduce((a, b) => a + b, 0) / m;
+                const W = u.reduce((a, b) => a + b, 0) / m;
+                const Bv = q.reduce((a, b) => a + (b - qbar) ** 2, 0) / (m - 1);
+                const T = W + (1 + 1 / m) * Bv;
+                const lambda = T > 0 ? ((1 + 1 / m) * Bv) / T : 0;
+                const dfOld = lambda > 0 ? (m - 1) / (lambda * lambda) : Infinity;
+                let df = dfOld;
+                if (isFinite(completeDf)) {
+                    const dfObs = ((completeDf + 1) / (completeDf + 3)) * completeDf * (1 - lambda);
+                    df = isFinite(dfOld) ? (dfOld * dfObs) / (dfOld + dfObs) : dfObs;
+                }
+                const se = Math.sqrt(T);
+                const tq = tQuantile(0.975, df);
+                const tStat = se > 0 ? qbar / se : null;
+                out.push({ coef: qbar, se, df, low: qbar - tq * se, high: qbar + tq * se, p: tStat === null ? null : 2 * (1 - tCdf(Math.abs(tStat), df)), fmi: lambda, within: W, between: Bv });
+            }
+            return out;
         },
 
         /** Platt scaling: logistic regression of the outcome on logit(p) (Newton-Raphson); null if not estimable */

@@ -81,6 +81,7 @@ function resetDerivedState() {
     AppState.deployedPipelineModel = null;
     AppState.baselinePrepMeta = null;
     AppState.completeCase = false;
+    AppState.missingIndicators = false;
     const pipelineCC = document.getElementById('pipeline-complete-case');
     if (pipelineCC) pipelineCC.checked = false;
     if (AppState.charts.loss) {

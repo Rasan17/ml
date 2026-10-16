@@ -16,6 +16,7 @@ function renderSinglePredictionForm() {
     let formHtml = '';
 
     featureCols.forEach((col, colIdx) => {
+        if (AppState.prepMeta.derivedIndicators && AppState.prepMeta.derivedIndicators[col]) return; // derived automatically from its source
         const meta = featureMetadata[col];
         const fieldId = `predict-field-${colIdx}`;
 

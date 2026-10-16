@@ -19,7 +19,7 @@ const MODEL_FILE_FORMAT = 'ummp-trained-model';
 
 function sanitizedPrep(prep) {
     const keep = ['featureCols', 'featureMetadata', 'totalDimensions', 'targetCol', 'isClassification', 'targetClasses',
-        'targetClassToIdx', 'targetIdxToClass', 'positiveClass', 'fillValues', 'encodedFeatureNames'];
+        'targetClassToIdx', 'targetIdxToClass', 'positiveClass', 'fillValues', 'encodedFeatureNames', 'derivedIndicators'];
     const out = {};
     keep.forEach(k => { if (prep[k] !== undefined) out[k] = JSON.parse(JSON.stringify(prep[k])); });
     let knnImputation = false;

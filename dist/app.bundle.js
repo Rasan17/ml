@@ -1654,6 +1654,7 @@ function resetDerivedState() {
     AppState.deployedPipelineModel = null;
     AppState.baselinePrepMeta = null;
     AppState.completeCase = false;
+    AppState.missingIndicators = false;
     const pipelineCC = document.getElementById('pipeline-complete-case');
     if (pipelineCC) pipelineCC.checked = false;
     if (AppState.charts.loss) {
@@ -2074,13 +2075,57 @@ function renderCompleteCaseBox(rows, activeCols) {
                         values are missing completely at random; otherwise imputation is usually preferable.</span>` : ''}
                 </span>
             </label>
+            <label for="missing-indicator-toggle" style="display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 13px; color: var(--text-primary); margin-top: 10px; ${AppState.completeCase ? 'opacity: 0.5;' : ''}">
+                <input type="checkbox" id="missing-indicator-toggle" ${AppState.missingIndicators ? 'checked' : ''} ${AppState.completeCase ? 'disabled' : ''} style="margin-top: 3px; accent-color: var(--accent-cyan);">
+                <span>
+                    <strong>Add a "was missing" indicator for each predictor with empty cells</strong>
+                    <span style="display: block; font-size: 12px; color: var(--text-secondary); margin-top: 3px;">
+                        Adds a Yes/No predictor recording whether the value was missing, alongside the imputed value, so the models can learn from the fact that a measurement was not taken (e.g. a test not ordered). It is derived automatically for new patients. It can introduce bias if missingness reflects data-collection practice that differs elsewhere.
+                    </span>
+                </span>
+            </label>
         </div>`;
+    document.getElementById('missing-indicator-toggle')?.addEventListener('change', (e) => {
+        setMissingIndicators(e.target.checked);
+        AppState.imputedData = null;
+        if (DOM.toStep4Btn) DOM.toStep4Btn.disabled = true;
+        if (DOM.imputeAuditBox) DOM.imputeAuditBox.innerHTML = '';
+        renderImputationTable();
+    });
     document.getElementById('complete-case-toggle').addEventListener('change', (e) => {
         AppState.completeCase = e.target.checked;
         AppState.imputedData = null; // previous result no longer matches the chosen strategy
         if (DOM.toStep4Btn) DOM.toStep4Btn.disabled = true;
         if (DOM.imputeAuditBox) DOM.imputeAuditBox.innerHTML = '';
         renderImputationTable();
+    });
+}
+
+// Adds (or removes) derived "was missing" indicator columns for every predictor that has empty cells in the
+// training data; the same columns are derived for a separate testing file and for new patients
+function setMissingIndicators(on) {
+    const pd = AppState.parsedData;
+    if (!pd) return;
+    const cfgs = AppState.columnConfigs;
+    // remove existing indicators
+    Object.keys(cfgs).filter(c => cfgs[c].derivedFrom).forEach(ind => {
+        delete cfgs[ind];
+        if (AppState.columnAnalysis) delete AppState.columnAnalysis[ind];
+        pd.headers = pd.headers.filter(h => h !== ind);
+        pd.rows.forEach(r => { delete r[ind]; });
+        (AppState.separateTestRawRows || []).forEach(r => { delete r[ind]; });
+    });
+    AppState.missingIndicators = Boolean(on);
+    if (!on) return;
+    const sources = pd.headers.filter(c => cfgs[c] && cfgs[c].role === 'feature' && pd.rows.some(r => DataEngine.isMissing(r[c])));
+    sources.forEach(src => {
+        const ind = DataEngine.missingIndicatorName(src);
+        const derive = r => { r[ind] = DataEngine.isMissing(r[src]) ? 'Yes' : 'No'; };
+        pd.rows.forEach(derive);
+        (AppState.separateTestRawRows || []).forEach(derive);
+        pd.headers.push(ind);
+        cfgs[ind] = { role: 'feature', type: 'nominal', imputationStrategy: 'mode', derivedFrom: src };
+        if (AppState.columnAnalysis) AppState.columnAnalysis[ind] = DataEngine.analyzeColumns([ind], pd.rows)[ind];
     });
 }
 
@@ -2836,23 +2881,43 @@ function renderPatientExplanation(model, x, prep, inputRow) {
 
 // Odds ratios from a logistic regression fitted to convergence (IRLS) on the training data: an explanatory
 // companion to the predictive models, with one reference category per categorical predictor
-function renderOddsRatioPanel(containerId, prep) {
-    const box = document.getElementById(containerId);
-    if (!box) return;
-    if (!prep || !prep.isClassification || (prep.targetClasses || []).length !== 2 || !Array.isArray(prep.X) || !prep.X.length) { box.innerHTML = ''; return; }
+// Design matrix for the explanatory logistic regression: one reference category (the most frequent in the
+// fitted encoding, `refs`) per categorical predictor; continuous predictors per unit (or per SD if SD < 1)
+function orDesign(prep, refs) {
     const cols = [];
     prep.featureCols.forEach(col => {
         const m = prep.featureMetadata[col];
         if (m.type === 'nominal') {
-            const ref = m.mode !== undefined ? m.mode : m.categories[0];
+            const ref = refs && refs[col] !== undefined ? refs[col] : (m.mode !== undefined ? m.mode : m.categories[0]);
             m.categories.forEach((cat, k) => { if (cat !== ref) cols.push({ idx: m.startIndex + k, name: `${col}: ${cat}`, note: `vs ${ref}`, scale: 1 }); });
         } else {
-            // Measures on a small scale (SD < 1, e.g. an index of 0.33) are reported per SD; others per unit
             const sd = m.std > 0 ? m.std : 1;
             const perUnit = m.type === 'ordinal' || sd >= 1;
             cols.push({ idx: m.startIndex, name: col, note: m.type === 'ordinal' ? 'per rank step' : perUnit ? 'per unit' : `per SD (${sd.toPrecision(2)} units)`, scale: perUnit ? sd : 1, perSD: perUnit });
         }
     });
+    return cols;
+}
+
+function oddsRatioRows(cols, estimates, pooled) {
+    const f2 = v => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
+    return estimates.map((r, i) => {
+        const c = cols[i];
+        const k = c.perSD ? 1 / c.scale : 1; // coefficient is per SD of the standardised predictor
+        const or = Math.exp(r.coef * k), lo = Math.exp(r.low * k), hi = Math.exp(r.high * k);
+        const pTxt = r.p === null ? 'n/a' : r.p < 0.001 ? '< 0.001' : r.p.toFixed(3);
+        return `<tr><td>${escapeHtml(c.name)}</td><td>${f2(or)} (${f2(lo)}–${f2(hi)})</td><td>${escapeHtml(c.note)}${c.perSD ? ` <span class="tune-sd">(per SD: ${f2(Math.exp(r.coef))})</span>` : ''}</td><td>${pTxt}</td>${pooled ? `<td>${(r.fmi * 100).toFixed(0)}%</td>` : ''}</tr>`;
+    }).join('');
+}
+
+// Odds ratios from a logistic regression fitted to convergence (IRLS) on the training data: an explanatory
+// companion to the predictive models. With missing predictor values, they can be re-estimated by multiple
+// imputation (MICE with predictive mean matching) pooled with Rubin's rules.
+function renderOddsRatioPanel(containerId, prep) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    if (!prep || !prep.isClassification || (prep.targetClasses || []).length !== 2 || !Array.isArray(prep.X) || !prep.X.length) { box.innerHTML = ''; return; }
+    const cols = orDesign(prep);
     const posLabel = String(prep.targetClasses[1]);
     let body;
     if (cols.length > 60 || prep.X.length > 50000) {
@@ -2864,21 +2929,53 @@ function renderOddsRatioPanel(containerId, prep) {
         if (!fit || !fit.converged) {
             body = `<p class="tune-muted">${escapeHtml((fit && fit.note) || 'The logistic regression could not be fitted.')}</p>`;
         } else {
-            const f2 = v => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
-            const rows = fit.rows.slice(1).map((r, i) => {
-                const c = cols[i];
-                const k = c.perSD ? 1 / c.scale : 1; // coefficient is per SD of the standardised predictor
-                const or = Math.exp(r.coef * k), lo = Math.exp((r.coef - 1.959964 * r.se) * k), hi = Math.exp((r.coef + 1.959964 * r.se) * k);
-                const pTxt = r.p < 0.001 ? '< 0.001' : r.p.toFixed(3);
-                return `<tr><td>${escapeHtml(c.name)}</td><td>${f2(or)} (${f2(lo)}–${f2(hi)})</td><td>${escapeHtml(c.note)}${c.perSD ? ` <span class="tune-sd">(per SD: ${f2(r.or)})</span>` : ''}</td><td>${pTxt}</td></tr>`;
-            }).join('');
+            const est = fit.rows.slice(1).map(r => ({ coef: r.coef, low: r.coef - 1.959964 * r.se, high: r.coef + 1.959964 * r.se, p: r.p }));
             const epv = Math.min(fit.events, fit.n - fit.events) / cols.length;
-            body = `<table class="data-table thr-table"><thead><tr><th>Predictor</th><th>Odds ratio (95% CI)</th><th>Scale</th><th>p-value</th></tr></thead><tbody>${rows}</tbody></table>
-                <p class="tune-muted">Odds ratios for "${escapeHtml(posLabel)}" from an <strong>unpenalised logistic regression fitted to convergence</strong> on the ${fit.n} training patients (${fit.events} with the outcome), each adjusted for all the other predictors. An odds ratio above 1 means higher odds of "${escapeHtml(posLabel)}"; a confidence interval that includes 1 is compatible with no association. Categorical predictors are compared with their most common category. This table explains associations in the training data; it is separate from the ridge-penalised model used for prediction and does not show causation.${epv < 10 ? ` <strong>Caution:</strong> only ${epv.toFixed(1)} patients in the smaller outcome group per predictor, so these estimates are unstable.` : ''}</p>`;
+            const raw = AppState.orRawRows || [];
+            const nMissing = raw.filter(r => prep.featureCols.some(c => DataEngine.isMissing(r[c]))).length;
+            body = `<table class="data-table thr-table"><thead><tr><th>Predictor</th><th>Odds ratio (95% CI)</th><th>Scale</th><th>p-value</th></tr></thead><tbody>${oddsRatioRows(cols, est, false)}</tbody></table>
+                <p class="tune-muted">Odds ratios for "${escapeHtml(posLabel)}" from an <strong>unpenalised logistic regression fitted to convergence</strong> on the ${fit.n} training patients (${fit.events} with the outcome), each adjusted for all the other predictors. An odds ratio above 1 means higher odds of "${escapeHtml(posLabel)}"; a confidence interval that includes 1 is compatible with no association. Categorical predictors are compared with their most common category. This table explains associations in the training data; it is separate from the ridge-penalised model used for prediction and does not show causation.${epv < 10 ? ` <strong>Caution:</strong> only ${epv.toFixed(1)} patients in the smaller outcome group per predictor, so these estimates are unstable.` : ''}</p>
+                ${nMissing > 0 ? `<div class="explain-box"><strong>Missing data:</strong> ${nMissing} of ${raw.length} training patients had at least one missing predictor value, filled once (single imputation), which makes the confidence intervals too narrow. <button type="button" class="btn btn-outline btn-sm" id="${containerId}-mice-btn" onclick="window.runMiceOddsRatios('${containerId}')">Re-estimate with multiple imputation (MICE)</button><div id="${containerId}-mice"></div></div>` : ''}`;
         }
     }
     box.innerHTML = `<div class="cal-panel"><div class="tune-title">📋 Odds ratios (logistic regression, training data)</div>${body}</div>`;
 }
+
+window.runMiceOddsRatios = async function (containerId) {
+    const prep = AppState.prepMeta;
+    const out = document.getElementById(`${containerId}-mice`);
+    const btn = document.getElementById(`${containerId}-mice-btn`);
+    const raw = (AppState.orRawRows || []).filter(r => !DataEngine.isMissing(r[prep.targetCol]));
+    if (!out || !prep || !raw.length) return;
+    btn.disabled = true;
+    out.innerHTML = '<p class="tune-muted">Creating 10 imputed datasets (MICE, 10 cycles each)…</p>';
+    await ModelEngine.yieldToBrowser();
+    try {
+        const refs = {};
+        prep.featureCols.forEach(c => { const m = prep.featureMetadata[c]; if (m.type === 'nominal') refs[c] = m.mode !== undefined ? m.mode : m.categories[0]; });
+        const mi = DataEngine.miceImpute(raw, AppState.columnConfigs, { m: 10, iterations: 10, seed: 2024 });
+        const estimates = [];
+        let names = null, colsRef = null;
+        for (const data of mi.datasets) {
+            const p = DataEngine.prepareFeaturesAndTarget(data, AppState.columnConfigs);
+            const cols = orDesign(p, refs);
+            const X = p.X.map(r => cols.map(c => r[c.idx]));
+            const fit = ModelEngine.logisticIRLS(X, p.y.map(v => (v === 1 ? 1 : 0)), cols.map(c => c.name));
+            if (!fit || !fit.converged) throw new Error((fit && fit.note) || 'a fit did not converge');
+            const nm = cols.map(c => c.name).join('|');
+            if (names === null) { names = nm; colsRef = cols; } else if (nm !== names) throw new Error('the imputed datasets have different categories');
+            estimates.push({ coef: fit.rows.slice(1).map(r => r.coef), se: fit.rows.slice(1).map(r => r.se) });
+            await ModelEngine.yieldToBrowser();
+        }
+        const pooled = ModelEngine.poolRubin(estimates, raw.length - colsRef.length - 1);
+        out.innerHTML = `<table class="data-table thr-table" style="margin-top: 8px;"><thead><tr><th>Predictor</th><th>Pooled odds ratio (95% CI)</th><th>Scale</th><th>p-value</th><th>Missing information</th></tr></thead><tbody>${oddsRatioRows(colsRef, pooled, true)}</tbody></table>
+            <p class="tune-muted"><strong>Multiple imputation:</strong> missing predictor values were imputed 10 times by chained equations with predictive mean matching (each imputed value is a value actually observed in a similar patient; the outcome is used as a predictor, as recommended). The logistic regression was fitted to each completed dataset and the results pooled with <strong>Rubin's rules</strong>, so the confidence intervals include the uncertainty due to the missing values. "Missing information" is the fraction of each estimate's uncertainty that comes from the missing data. Valid if values are missing at random given the other variables.</p>`;
+    } catch (e) {
+        out.innerHTML = `<p class="tune-muted">Multiple imputation could not be completed: ${escapeHtml(e.message || String(e))}</p>`;
+    } finally {
+        btn.disabled = false;
+    }
+};
 
 async function permutationImportance(model, prep, rows, isClassification, seed, onProgress) {
     const data = DataEngine.prepareTestingDataset(rows, prep);
@@ -3682,6 +3779,7 @@ async function startModelTraining() {
             }
             AppState.prepMeta = prep;
             AppState.lastTestRows = null; // no separate test set
+            AppState.orRawRows = allRaw;  // raw rows matching the deployed encoding (odds ratios / MICE)
         } else if (isOptionA) {
             // =============================================================
             // OPTION A: INTERNAL TRAIN / TEST SPLIT WITH RETRAINING CHOICE
@@ -3867,6 +3965,7 @@ async function startModelTraining() {
             // Predictions must use the encoding the deployed models were fitted with:
             // full-cohort encoding after 100% retraining, otherwise the training-split encoding.
             AppState.prepMeta = shouldRetrain ? prep : splitPrep;
+            AppState.orRawRows = shouldRetrain ? rawRows : rowSplit.trainX;
         } else {
             // =============================================================
             // OPTION B: SEPARATE TRAINING (i) AND TESTING (ii) DATASETS
@@ -3890,6 +3989,7 @@ async function startModelTraining() {
             // Transform separate test data using training metadata (strict zero leakage)
             const testPrep = DataEngine.prepareTestingDataset(optionBRows, prep);
             AppState.lastTestRows = optionBRows; // for permutation importance
+            AppState.orRawRows = optionBTrainRawRows(prep);
             testPrep.completeCaseDropped = completeCaseDropped;
             AppState.separateTestData = testPrep;
 
@@ -4819,6 +4919,7 @@ function renderSinglePredictionForm() {
     let formHtml = '';
 
     featureCols.forEach((col, colIdx) => {
+        if (AppState.prepMeta.derivedIndicators && AppState.prepMeta.derivedIndicators[col]) return; // derived automatically from its source
         const meta = featureMetadata[col];
         const fieldId = `predict-field-${colIdx}`;
 
@@ -7393,7 +7494,7 @@ const MODEL_FILE_FORMAT = 'ummp-trained-model';
 
 function sanitizedPrep(prep) {
     const keep = ['featureCols', 'featureMetadata', 'totalDimensions', 'targetCol', 'isClassification', 'targetClasses',
-        'targetClassToIdx', 'targetIdxToClass', 'positiveClass', 'fillValues', 'encodedFeatureNames'];
+        'targetClassToIdx', 'targetIdxToClass', 'positiveClass', 'fillValues', 'encodedFeatureNames', 'derivedIndicators'];
     const out = {};
     keep.forEach(k => { if (prep[k] !== undefined) out[k] = JSON.parse(JSON.stringify(prep[k])); });
     let knnImputation = false;
@@ -7630,6 +7731,7 @@ function downloadPipelineProtocolReport() {
 
 
 
+
 // =========================================================================
 // ANALYSIS SETTINGS: SAVE / RESTORE / ONE-CLICK RE-RUN
 // Settings hold the user's choices only (column names, roles, options, seeds, hyper-parameters),
@@ -7644,7 +7746,8 @@ const VARIABLE_FIELDS = ['role', 'prevRole', 'type', 'imputationStrategy', 'prev
 // Identifies a dataset by its column headers (FNV-1a hash), so a re-loaded or updated file matches
 function datasetSignature(headers) {
     let h = 0x811c9dc5;
-    const str = headers.join('\u0001');
+    // Derived "(was missing)" indicator columns are not part of the original file's identity
+    const str = headers.filter(x => !/ \(was missing\)$/.test(x)).join('\u0001');
     for (let i = 0; i < str.length; i++) {
         h ^= str.charCodeAt(i);
         h = Math.imul(h, 0x01000193) >>> 0;
@@ -7714,10 +7817,11 @@ function collectSettings() {
         schema: SETTINGS_SCHEMA,
         savedAt: new Date().toISOString(),
         note: 'Analysis choices only; contains no patient data.',
-        dataset: { fileName: AppState.fileName, headers, rowCount: totalRows, signature: datasetSignature(headers) },
+        dataset: { fileName: AppState.fileName, headers: headers.filter(x => !(AppState.columnConfigs[x] && AppState.columnConfigs[x].derivedFrom)), rowCount: totalRows, signature: datasetSignature(headers) },
         variables,
         standard: {
             completeCase: Boolean(AppState.completeCase),
+            missingIndicators: Boolean(AppState.missingIndicators),
             modelScope: AppState.modelScope,
             selectedModelIds: (AppState.selectedModelIds || []).slice(),
             rankingMetricClf: AppState.rankingMetricClf || 'macroF1',
@@ -7824,6 +7928,8 @@ function offerStoredSettings(headers) {
 }
 
 function applySettings(settings) {
+    // Derived "was missing" indicators first, so their columns exist when the variable choices are restored
+    setMissingIndicators(Boolean((settings.standard || {}).missingIndicators));
     const headers = AppState.parsedData.headers;
     const savedHeaders = settings.dataset.headers || Object.keys(settings.variables);
     const missing = savedHeaders.filter(h => !headers.includes(h));

@@ -1,4 +1,5 @@
 // settings.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+import { setMissingIndicators } from './variables.js';
 import { APP_VERSION, AppState, escapeHtml } from './core.js';
 import { executeImputation, renderImputationTable } from './imputation.js';
 import { goToStep } from './navigation.js';
@@ -22,7 +23,8 @@ const VARIABLE_FIELDS = ['role', 'prevRole', 'type', 'imputationStrategy', 'prev
 // Identifies a dataset by its column headers (FNV-1a hash), so a re-loaded or updated file matches
 function datasetSignature(headers) {
     let h = 0x811c9dc5;
-    const str = headers.join('\u0001');
+    // Derived "(was missing)" indicator columns are not part of the original file's identity
+    const str = headers.filter(x => !/ \(was missing\)$/.test(x)).join('\u0001');
     for (let i = 0; i < str.length; i++) {
         h ^= str.charCodeAt(i);
         h = Math.imul(h, 0x01000193) >>> 0;
@@ -92,10 +94,11 @@ function collectSettings() {
         schema: SETTINGS_SCHEMA,
         savedAt: new Date().toISOString(),
         note: 'Analysis choices only; contains no patient data.',
-        dataset: { fileName: AppState.fileName, headers, rowCount: totalRows, signature: datasetSignature(headers) },
+        dataset: { fileName: AppState.fileName, headers: headers.filter(x => !(AppState.columnConfigs[x] && AppState.columnConfigs[x].derivedFrom)), rowCount: totalRows, signature: datasetSignature(headers) },
         variables,
         standard: {
             completeCase: Boolean(AppState.completeCase),
+            missingIndicators: Boolean(AppState.missingIndicators),
             modelScope: AppState.modelScope,
             selectedModelIds: (AppState.selectedModelIds || []).slice(),
             rankingMetricClf: AppState.rankingMetricClf || 'macroF1',
@@ -202,6 +205,8 @@ function offerStoredSettings(headers) {
 }
 
 function applySettings(settings) {
+    // Derived "was missing" indicators first, so their columns exist when the variable choices are restored
+    setMissingIndicators(Boolean((settings.standard || {}).missingIndicators));
     const headers = AppState.parsedData.headers;
     const savedHeaders = settings.dataset.headers || Object.keys(settings.variables);
     const missing = savedHeaders.filter(h => !headers.includes(h));
