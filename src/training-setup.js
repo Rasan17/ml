@@ -1,9 +1,7 @@
 // training-setup.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { AppState, MODEL_INFO, parseSeed } from './core.js';
 import { DOM } from './shell.js';
-import { showSeedToast } from './standard-training.js';
-
-
+import { showSeedToast } from './training-actions.js';
 // =========================================================================
 // STEP 4: MODEL TRAINING & EVALUATION
 // =========================================================================

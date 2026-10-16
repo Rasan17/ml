@@ -4,9 +4,7 @@ import { populateSplitColumnSelects } from './cv-tuning.js';
 import { goToPipelineSubstep, initPipelineUI } from './pipeline.js';
 import { offerStoredSettings } from './settings.js';
 import { DOM } from './shell.js';
-import { disposeModels } from './standard-training.js';
-
-
+import { disposeModels } from './training-actions.js';
 // Known built-in cohorts and their matching validation (testing) files
 const SAMPLE_COHORTS = {
     'universal_medical_cohort.csv': { id: 'cardio', testFile: 'universal_medical_test_cohort.csv', testLabel: 'Cardiometabolic Risk Test Cohort' },

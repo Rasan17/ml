@@ -3,13 +3,13 @@ import { AppState, MODEL_INFO, compareEvalResults, escapeHtml, fmtR2, actionAttr
 import { executeImputation } from './imputation.js';
 import { updateModelExportButton } from './model-io.js';
 import { goToStep } from './navigation.js';
-import { goToPipelineSubstep, renderPipelineLeaderboardOnly } from './pipeline.js';
+import { goToPipelineSubstep } from './pipeline.js';
+import { renderPipelineLeaderboardOnly } from './pipeline-train.js';
 import { renderPipelineVsBaselineComparison } from './reports.js';
 import { DOM } from './shell.js';
 import { renderSinglePredictionForm } from './single-prediction.js';
-import { deployTestedModel, showSeedToast, startModelTraining } from './standard-training.js';
-
-
+import { startModelTraining } from './standard-training.js';
+import { deployTestedModel, showSeedToast } from './training-actions.js';
 // ---------------------------------------------------------------------------------------------
 // "Too good to be true?" check: near-perfect test results are explained in a balanced way
 // (small test set, easily separable data, constrained models) and checked for common causes of

@@ -1068,6 +1068,11 @@ function plus632(key, apparent, oobValue, noInfo) {
 
 
 
+
+
+
+
+
 // DOM Elements
 const DOM = {};
 
@@ -4160,9 +4165,6 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
 
 
 
-
-
-
 async function startModelTraining() {
     if (!AppState.imputedData) {
         alert("Please execute Data Imputation first.");
@@ -4762,6 +4764,14 @@ async function startModelTraining() {
     }
 }
 
+// ---- src/training-actions.js ----
+// training-actions.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from standard-training.js)
+
+
+
+
+
+
 // Shows the ranking metric that applies to the current outcome type in both selectors
 function syncRankingSelectors(isClassification) {
     const value = `${isClassification ? 'clf' : 'reg'}:${rankingMetricKey(isClassification)}`;
@@ -4955,6 +4965,14 @@ function copySeedToClipboard(seed) {
     }
 }
 window.copySeedToClipboard = copySeedToClipboard;
+
+// ---- src/evaluation-dashboard.js ----
+// evaluation-dashboard.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from standard-training.js)
+
+
+
+
+
 
 function renderEvaluationDashboard() {
     const evalRes = AppState.evalResults;
@@ -5853,11 +5871,6 @@ function downloadBatchCSV() {
 
 
 
-
-
-
-
-
 // =========================================================================
 // 7-STEP CLINICAL ML PIPELINE CONTROLLER
 // Conceived, designed and developed by Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)
@@ -5943,6 +5956,13 @@ function goToPipelineSubstep(substepNum) {
     if (substepNum === 5) renderPipelineStep5();
     if (substepNum === 6) renderPipelineStep6UI();
 }
+
+// ---- src/pipeline-step1.js ----
+// pipeline-step1.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from pipeline.js)
+
+
+
+
 
 // =========================================================================
 // STEP 1: Train/Test Split (80/20) & Strict Leak-Free Imputation
@@ -6163,6 +6183,10 @@ function renderPipelineStep1Results(trainMissing = 0, testMissing = 0) {
         DOM.pipelineStep1Results.style.display = 'block';
     }
 }
+
+// ---- src/pipeline-screening.js ----
+// pipeline-screening.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from pipeline.js)
+
 
 // =========================================================================
 // STEP 2: Continuous Variable Correlation Check (Pearson vs. Spearman)
@@ -6566,6 +6590,11 @@ window.pipelineRestoreFeatureStep4 = function (featureName) {
     renderPipelineStep4();
 };
 
+// ---- src/pipeline-balance.js ----
+// pipeline-balance.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from pipeline.js)
+
+
+
 // =========================================================================
 // STEP 5: Imbalance Handling (SMOTENC)
 // =========================================================================
@@ -6810,6 +6839,18 @@ function renderRfImportanceChart() {
         </div>`;
     if (DOM.pipelineRfImportanceContainer) DOM.pipelineRfImportanceContainer.innerHTML = chartHtml;
 }
+
+// ---- src/pipeline-train.js ----
+// pipeline-train.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from pipeline.js)
+
+
+
+
+
+
+
+
+
 
 // =========================================================================
 // STEP 7: Algorithm-Specific Training & Constraints
@@ -7227,6 +7268,8 @@ function renderPipelineLeaderboardOnly() {
 
 // ---- src/pipeline-results.js ----
 // pipeline-results.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+
+
 
 
 
@@ -8744,6 +8787,10 @@ ${items.map(([t, w, v, st]) => `<tr><td><strong>${esc(t)}</strong></td><td>${esc
 
 
 
+
+
+
+
 // =========================================================================
 // ANALYSIS SETTINGS: SAVE / RESTORE / ONE-CLICK RE-RUN
 // Settings hold the user's choices only (column names, roles, options, seeds, hyper-parameters),
@@ -9059,6 +9106,12 @@ function handleUnexpectedError(err) {
 // ---- src/main.js ----
 // main.js: entry point of the Universal Medical ML/NeuralNet Predictor application controller.
 // Loads every module, initialises the shared state and starts the interface once the page is ready.
+
+
+
+
+
+
 
 
 

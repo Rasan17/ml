@@ -6,9 +6,7 @@ import { updatePredictionProvenanceBar } from './pipeline-results.js';
 import { SETTINGS_APP } from './settings.js';
 import { DOM } from './shell.js';
 import { renderSinglePredictionForm } from './single-prediction.js';
-import { showSeedToast } from './standard-training.js';
-
-
+import { showSeedToast } from './training-actions.js';
 // =========================================================================
 // EXPORT / IMPORT OF THE DEPLOYED (TRAINED) MODEL
 // One JSON file: fitted preprocessing (encoding, scaling, imputation), model parameters, decision

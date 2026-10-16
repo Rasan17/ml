@@ -3,9 +3,13 @@ import { setMissingIndicators } from './variables.js';
 import { APP_VERSION, AppState, escapeHtml } from './core.js';
 import { executeImputation, renderImputationTable } from './imputation.js';
 import { goToStep } from './navigation.js';
-import { executePipelineStep1, executePipelineStep6, executePipelineStep7, goToPipelineSubstep, updatePipelineCompleteCaseInfo } from './pipeline.js';
+import { goToPipelineSubstep, updatePipelineCompleteCaseInfo } from './pipeline.js';
+import { executePipelineStep6 } from './pipeline-balance.js';
+import { executePipelineStep1 } from './pipeline-step1.js';
+import { executePipelineStep7 } from './pipeline-train.js';
 import { DOM, initDOM, setupEventListeners } from './shell.js';
-import { showSeedToast, startModelTraining, syncRankingSelectors } from './standard-training.js';
+import { startModelTraining } from './standard-training.js';
+import { showSeedToast, syncRankingSelectors } from './training-actions.js';
 import { renderVariableConfigGrid } from './variables.js';
 
 
