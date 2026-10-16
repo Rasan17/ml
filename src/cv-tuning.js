@@ -69,6 +69,11 @@ function splitSpec(scope) {
 
 // Grouping for cross-validation folds (patient-level splitting): null when records are independent
 function splitGroupFunction() {
+    // Option C (bootstrap): the patient column chosen in its own panel
+    if (document.querySelector('input[name="validation-mode"]:checked')?.value === 'bootstrap') {
+        const col = document.getElementById('bootstrap-group-col')?.value || '';
+        return col ? (r => String(r[col] ?? '').trim()) : null;
+    }
     const sp = splitSpec('standard');
     return sp.method === 'group' && sp.groupCol ? (r => String(r[sp.groupCol] ?? '').trim()) : null;
 }
@@ -119,6 +124,9 @@ function populateSplitColumnSelects(headers) {
         if (first) el.value = first;
     };
     fill('split-group-col', looksId); fill('pipeline-split-group-col', looksId);
+    // Option C: rows are independent patients unless the user names the patient column
+    const bg = document.getElementById('bootstrap-group-col');
+    if (bg) bg.innerHTML = '<option value="">Each row is a different patient</option>' + headers.map(h => `<option value="${escapeHtml(h)}">${escapeHtml(h)}</option>`).join('');
     fill('split-date-col', looksDate); fill('pipeline-split-date-col', looksDate);
     updateSplitMethodVisibility();
 }
@@ -134,12 +142,20 @@ function updateSplitMethodVisibility() {
 }
 
 // Bootstrap 95% CIs for a test evaluation (fewer resamples for very large test sets, to stay responsive)
-async function bootstrapFor(ev, seed) {
+// groups (optional): the patient of each test row (patient-level split), for a patient-level bootstrap
+async function bootstrapFor(ev, seed, groups = null) {
     if (!ev) return null;
     await ModelEngine.yieldToBrowser();
     const n = (ev.actuals || []).length;
     const B = n > 5000 ? 200 : n > 1000 ? 500 : 1000;
-    try { return ModelEngine.bootstrapCIs(ev, B, Number.isFinite(Number(seed)) ? Number(seed) : 2024); } catch (e) { return null; }
+    try { return ModelEngine.bootstrapCIs(ev, B, Number.isFinite(Number(seed)) ? Number(seed) : 2024, groups); } catch (e) { return null; }
+}
+
+// Patient of each evaluated test row when the split keeps each patient's records together (else null)
+function testPatientGroups(validRows, scope) {
+    const sp = splitSpec(scope);
+    if (sp.method !== 'group' || !sp.groupCol || !Array.isArray(validRows)) return null;
+    return validRows.map(r => String(r[sp.groupCol] ?? '').trim());
 }
 
 // Small "(lo–hi)" text for a bootstrap CI
@@ -338,4 +354,4 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
         </div>`;
 }
 
-export { ciScopeNote, readRecalibration, fitRecalibrator, recalibrateAndEvaluate, TUNE_MAX_ROWS, TUNABLE_MODELS, TUNE_LABELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildStandardRowFolds, runTuningOnFolds, optionBTrainRawRows, splitSeedForCV, splitSpec, splitGroupFunction, pipelineGroupFunction, splitRowsForWorkflow, describeSplit, populateSplitColumnSelects, updateSplitMethodVisibility, bootstrapFor, ciSpan, readDecisionThreshold, thresholdedOutput, formatCvScore, cvSummaryFrom, selectTop70InFold, buildPipelineFolds, applyHyperparamsToForm, fmtTuneValue, renderTuningReport };
+export { testPatientGroups, ciScopeNote, readRecalibration, fitRecalibrator, recalibrateAndEvaluate, TUNE_MAX_ROWS, TUNABLE_MODELS, TUNE_LABELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildStandardRowFolds, runTuningOnFolds, optionBTrainRawRows, splitSeedForCV, splitSpec, splitGroupFunction, pipelineGroupFunction, splitRowsForWorkflow, describeSplit, populateSplitColumnSelects, updateSplitMethodVisibility, bootstrapFor, ciSpan, readDecisionThreshold, thresholdedOutput, formatCvScore, cvSummaryFrom, selectTop70InFold, buildPipelineFolds, applyHyperparamsToForm, fmtTuneValue, renderTuningReport };

@@ -2,7 +2,7 @@
 import { fitModel } from './compute.js';
 import { youdenThreshold } from './validation-core.js';
 import { AppState, actionAttrs, compareEvalResults, describeNNTraining, displayModelName, escapeHtml, fmtR2, parseSeed, rankingMetricLabel, summariseHeldOutSet, trainingMedian } from './core.js';
-import { TUNABLE_MODELS, TUNE_MAX_ROWS, bootstrapFor, buildPipelineFolds, ciScopeNote, ciSpan, cvSummaryFrom, fitRecalibrator, formatCvScore, readDecisionThreshold, readRecalibration, recalibrateAndEvaluate, renderTuningReport, runTuningOnFolds } from './cv-tuning.js';
+import { TUNABLE_MODELS, TUNE_MAX_ROWS, bootstrapFor, buildPipelineFolds, ciScopeNote, ciSpan, cvSummaryFrom, fitRecalibrator, formatCvScore, readDecisionThreshold, readRecalibration, recalibrateAndEvaluate, renderTuningReport, runTuningOnFolds, testPatientGroups } from './cv-tuning.js';
 import { renderCalibrationPanel, renderExplainPanel } from './panels.js';
 import { renderPipelineStep5 } from './pipeline-balance.js';
 import { renderPipelineBenchmarkResults, renderTooGoodToBeTrueCheck } from './pipeline-results.js';
@@ -281,7 +281,7 @@ async function executePipelineStep7() {
         // Bootstrap 95% confidence intervals for every test metric
         for (const b of benchmarkList) {
             if (watchdog) watchdog.tick(totalModels, `Computing 95% confidence intervals (bootstrap): ${b.name}...`);
-            b.eval.ci = await bootstrapFor(b.eval, evalSeed);
+            b.eval.ci = await bootstrapFor(b.eval, evalSeed, testPatientGroups(fullTestTrans.validRows, 'pipeline'));
         }
         // Store ranked best-first, so benchmarkResults[0] is genuinely the top model everywhere it is used
         benchmarkList.sort((a, b) => compareEvalResults(a.eval, b.eval, isClassification));

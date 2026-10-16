@@ -225,6 +225,20 @@ function bootstrapResamples(n, B, seed) {
     return Array.from({ length: B }, () => Array.from({ length: n }, () => Math.floor(rng() * n)));
 }
 
+// Cluster (patient-level) bootstrap: whole patients are drawn with replacement, each bringing all of their
+// rows, so a patient's rows are never split between a resample and its out-of-bag set. keys[i] = patient of row i
+function bootstrapResamplesGrouped(keys, B, seed) {
+    const rng = DataEngine.createPRNG(seed);
+    const byGroup = new Map();
+    keys.forEach((k, i) => { const g = String(k ?? ''); if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g).push(i); });
+    const groups = [...byGroup.values()];
+    return Array.from({ length: B }, () => {
+        const out = [];
+        for (let j = 0; j < groups.length; j++) out.push(...groups[Math.floor(rng() * groups.length)]);
+        return out;
+    });
+}
+
 /**
  * Optimism of one model's whole modelling process. Inside every resample the process is repeated from
  * the raw rows: imputation, encoding and scaling are refitted and, when `tune` is given, the settings
@@ -405,4 +419,4 @@ function plus632(key, apparent, oobValue, noInfo) {
     return { value: T.from(app + w * (err1 - app)), weight: w, overfit: R };
 }
 
-export { TUNE_MAX_ROWS, TUNABLE_MODELS, FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, medianOf, tuningGrid, makeFolds, assignRowFolds, capRows, effectiveFolds, buildRowFolds, runTuningCore, bootstrapResamples, bootstrapOptimism, selectionOptimism, noInformationRates, plus632, youdenThreshold };
+export { TUNE_MAX_ROWS, TUNABLE_MODELS, FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, medianOf, tuningGrid, makeFolds, assignRowFolds, capRows, effectiveFolds, buildRowFolds, runTuningCore, bootstrapResamples, bootstrapResamplesGrouped, bootstrapOptimism, selectionOptimism, noInformationRates, plus632, youdenThreshold };

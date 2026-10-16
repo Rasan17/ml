@@ -57,7 +57,10 @@ function calibrationBody(item, positiveLabel) {
     const f2 = v => (typeof v === 'number' ? v.toFixed(2) : 'n/a');
     const recalNote = rc
         ? `<div class="explain-box" style="margin-top: 8px;"><strong>📐 Recalibrated</strong> with ${rc.method === 'platt' ? 'Platt scaling' : 'isotonic regression'} fitted on ${escapeHtml(rc.fittedOn)}. Before recalibration on these test patients: slope ${f2(rc.before.slope)}, intercept ${f2(rc.before.intercept)}, Brier ${typeof rc.before.brierScore === 'number' ? rc.before.brierScore.toFixed(3) : 'n/a'}${typeof rc.before.rocAuc === 'number' ? `, AUC ${rc.before.rocAuc.toFixed(3)}` : ''}. The values above are after recalibration.</div>`
-        : (ev.recalibrationSkipped ? `<div class="tune-muted" style="margin-top: 6px;">${escapeHtml(ev.recalibrationSkipped)}</div>` : '');
+        : (ev.recalibrationSkipped ? `<div class="tune-muted" style="margin-top: 6px;">${escapeHtml(ev.recalibrationSkipped)}</div>`
+            // Miscalibrated (the slope's 95% CI excludes 1) and not recalibrated: say how to correct it
+            : (ev.ci && ev.ci.calibrationSlope && (ev.ci.calibrationSlope[0] > 1 || ev.ci.calibrationSlope[1] < 1)
+                ? `<div class="tune-warn" style="margin-top: 6px;">⚠️ The calibration slope differs from 1 beyond chance (95% CI ${f2(ev.ci.calibrationSlope[0])}–${f2(ev.ci.calibrationSlope[1])}), so the predicted percentages should not be read as patients' risks. Recalibration (the "Recalibrate two-outcome probabilities" option before training: Platt scaling or isotonic regression, fitted on the Training set only) can correct this; confirm the result on new patients.</div>` : ''));
     const probNote = ev.probabilityType && ev.probabilityType !== 'model' && ev.probabilityType !== 'recalibrated' ? ' This model\'s "probabilities" are vote or neighbour shares, which are often poorly calibrated.' : '';
     return `
         <div class="cal-grid">

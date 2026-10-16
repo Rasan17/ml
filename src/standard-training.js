@@ -2,13 +2,13 @@
 import { bootstrapRun, fitModel } from './compute.js';
 import { estimateImputationSeconds, fitPooledModel, prepareMultipleImputation, readMultipleImputation } from './multiple-imputation.js';
 import { AppState, MODEL_INFO, RANKING_METRICS, compareEvalResults, describeNNTraining, escapeHtml, fmtR2, parseSeed, rankingMetricKey, rankingMetricLabel, trainingMedian } from './core.js';
-import { TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, cvSummaryFrom, fitRecalibrator, optionBTrainRawRows, readDecisionThreshold, readRecalibration, recalibrateAndEvaluate, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV, splitSpec } from './cv-tuning.js';
+import { TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, cvSummaryFrom, fitRecalibrator, optionBTrainRawRows, readDecisionThreshold, readRecalibration, recalibrateAndEvaluate, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV, testPatientGroups } from './cv-tuning.js';
 import { renderEvaluationDashboard } from './evaluation-dashboard.js';
 import { saveSettingsToBrowser } from './settings.js';
 import { DOM } from './shell.js';
 import { disposeModels, evalAbortOpts, markBaselineDeployed, setupTrainingLossChart, updateLossChart } from './training-actions.js';
 import { getHyperparamsForModel } from './training-setup.js';
-import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapResamples, noInformationRates, plus632, selectionOptimism, youdenThreshold } from './validation-core.js';
+import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapResamples, bootstrapResamplesGrouped, noInformationRates, plus632, selectionOptimism, youdenThreshold } from './validation-core.js';
 
 async function startModelTraining() {
     if (!AppState.imputedData) {
@@ -127,7 +127,10 @@ async function startModelTraining() {
             const B = parseInt(document.getElementById('bootstrap-reps')?.value, 10) || 100;
             const seedC = splitSeedForCV();
             // The same resamples for every model (fair comparison), reproducible from the seed
-            const boots = bootstrapResamples(allRaw.length, B, seedC);
+            const groupColC = document.getElementById('bootstrap-group-col')?.value || '';
+            const boots = groupColC
+                ? bootstrapResamplesGrouped(allRaw.map(r => String(r[groupColC] ?? '').trim()), B, seedC)
+                : bootstrapResamples(allRaw.length, B, seedC);
             const evalOptsC = {
                 regressionThreshold: prep.isClassification ? null : trainingMedian(prep.y),
                 decisionThreshold: readDecisionThreshold('decision-threshold'),
@@ -156,9 +159,8 @@ async function startModelTraining() {
                 const evalRes = await ModelEngine.evaluateAsync(model, prep.X, prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
                 const wasTuned = autoTune && TUNABLE_MODELS.has(mId);
                 const tuneInside = wasTuned && !slowModel(mId);
-                const spec = splitSpec('standard');
                 const inner = (tuneInside || repeatSelection)
-                    ? { k: innerK, seed: seedC, groupCol: spec.method === 'group' && spec.groupCol ? spec.groupCol : null, metricKey, metricDefs, doTune: tuneInside }
+                    ? { k: innerK, seed: seedC, groupCol: groupColC || null, metricKey, metricDefs, doTune: tuneInside }
                     : null;
                 const Bm = slowModel(mId) ? Math.min(B, 50) : B;
                 const what = tuneInside ? ' (tuning repeated inside each resample)' : (inner ? ' (cross-validation repeated inside each resample)' : '');
@@ -211,6 +213,7 @@ async function startModelTraining() {
                 evalRes.testCount = prep.X.length;
                 evalRes.totalCount = prep.X.length;
                 evalRes.splitSeed = seedC;
+                if (groupColC) evalRes.bootstrapGroupCol = groupColC;
                 evalRes.seed = hp.seed;
                 if (tuned.cv) evalRes.cv = tuned.cv;
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
@@ -361,7 +364,7 @@ async function startModelTraining() {
                     if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration was not applied: too few out-of-fold predictions or events to fit it reliably.';
                 }
                 evalRes.protocol = 'option-a';
-                evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
+                evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed, testPatientGroups(testData.validRows, 'standard'));
                 evalRes.splitInfo = rowSplit.info;
                 if (tuned.cv) evalRes.cv = tuned.cv;
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);

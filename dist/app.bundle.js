@@ -927,6 +927,20 @@ function bootstrapResamples(n, B, seed) {
     return Array.from({ length: B }, () => Array.from({ length: n }, () => Math.floor(rng() * n)));
 }
 
+// Cluster (patient-level) bootstrap: whole patients are drawn with replacement, each bringing all of their
+// rows, so a patient's rows are never split between a resample and its out-of-bag set. keys[i] = patient of row i
+function bootstrapResamplesGrouped(keys, B, seed) {
+    const rng = DataEngine.createPRNG(seed);
+    const byGroup = new Map();
+    keys.forEach((k, i) => { const g = String(k ?? ''); if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g).push(i); });
+    const groups = [...byGroup.values()];
+    return Array.from({ length: B }, () => {
+        const out = [];
+        for (let j = 0; j < groups.length; j++) out.push(...groups[Math.floor(rng() * groups.length)]);
+        return out;
+    });
+}
+
 /**
  * Optimism of one model's whole modelling process. Inside every resample the process is repeated from
  * the raw rows: imputation, encoding and scaling are refitted and, when `tune` is given, the settings
@@ -3137,7 +3151,10 @@ function calibrationBody(item, positiveLabel) {
     const f2 = v => (typeof v === 'number' ? v.toFixed(2) : 'n/a');
     const recalNote = rc
         ? `<div class="explain-box" style="margin-top: 8px;"><strong>📐 Recalibrated</strong> with ${rc.method === 'platt' ? 'Platt scaling' : 'isotonic regression'} fitted on ${escapeHtml(rc.fittedOn)}. Before recalibration on these test patients: slope ${f2(rc.before.slope)}, intercept ${f2(rc.before.intercept)}, Brier ${typeof rc.before.brierScore === 'number' ? rc.before.brierScore.toFixed(3) : 'n/a'}${typeof rc.before.rocAuc === 'number' ? `, AUC ${rc.before.rocAuc.toFixed(3)}` : ''}. The values above are after recalibration.</div>`
-        : (ev.recalibrationSkipped ? `<div class="tune-muted" style="margin-top: 6px;">${escapeHtml(ev.recalibrationSkipped)}</div>` : '');
+        : (ev.recalibrationSkipped ? `<div class="tune-muted" style="margin-top: 6px;">${escapeHtml(ev.recalibrationSkipped)}</div>`
+            // Miscalibrated (the slope's 95% CI excludes 1) and not recalibrated: say how to correct it
+            : (ev.ci && ev.ci.calibrationSlope && (ev.ci.calibrationSlope[0] > 1 || ev.ci.calibrationSlope[1] < 1)
+                ? `<div class="tune-warn" style="margin-top: 6px;">⚠️ The calibration slope differs from 1 beyond chance (95% CI ${f2(ev.ci.calibrationSlope[0])}–${f2(ev.ci.calibrationSlope[1])}), so the predicted percentages should not be read as patients' risks. Recalibration (the "Recalibrate two-outcome probabilities" option before training: Platt scaling or isotonic regression, fitted on the Training set only) can correct this; confirm the result on new patients.</div>` : ''));
     const probNote = ev.probabilityType && ev.probabilityType !== 'model' && ev.probabilityType !== 'recalibrated' ? ' This model\'s "probabilities" are vote or neighbour shares, which are often poorly calibrated.' : '';
     return `
         <div class="cal-grid">
@@ -4036,6 +4053,11 @@ function splitSpec(scope) {
 
 // Grouping for cross-validation folds (patient-level splitting): null when records are independent
 function splitGroupFunction() {
+    // Option C (bootstrap): the patient column chosen in its own panel
+    if (document.querySelector('input[name="validation-mode"]:checked')?.value === 'bootstrap') {
+        const col = document.getElementById('bootstrap-group-col')?.value || '';
+        return col ? (r => String(r[col] ?? '').trim()) : null;
+    }
     const sp = splitSpec('standard');
     return sp.method === 'group' && sp.groupCol ? (r => String(r[sp.groupCol] ?? '').trim()) : null;
 }
@@ -4086,6 +4108,9 @@ function populateSplitColumnSelects(headers) {
         if (first) el.value = first;
     };
     fill('split-group-col', looksId); fill('pipeline-split-group-col', looksId);
+    // Option C: rows are independent patients unless the user names the patient column
+    const bg = document.getElementById('bootstrap-group-col');
+    if (bg) bg.innerHTML = '<option value="">Each row is a different patient</option>' + headers.map(h => `<option value="${escapeHtml(h)}">${escapeHtml(h)}</option>`).join('');
     fill('split-date-col', looksDate); fill('pipeline-split-date-col', looksDate);
     updateSplitMethodVisibility();
 }
@@ -4101,12 +4126,20 @@ function updateSplitMethodVisibility() {
 }
 
 // Bootstrap 95% CIs for a test evaluation (fewer resamples for very large test sets, to stay responsive)
-async function bootstrapFor(ev, seed) {
+// groups (optional): the patient of each test row (patient-level split), for a patient-level bootstrap
+async function bootstrapFor(ev, seed, groups = null) {
     if (!ev) return null;
     await ModelEngine.yieldToBrowser();
     const n = (ev.actuals || []).length;
     const B = n > 5000 ? 200 : n > 1000 ? 500 : 1000;
-    try { return ModelEngine.bootstrapCIs(ev, B, Number.isFinite(Number(seed)) ? Number(seed) : 2024); } catch (e) { return null; }
+    try { return ModelEngine.bootstrapCIs(ev, B, Number.isFinite(Number(seed)) ? Number(seed) : 2024, groups); } catch (e) { return null; }
+}
+
+// Patient of each evaluated test row when the split keeps each patient's records together (else null)
+function testPatientGroups(validRows, scope) {
+    const sp = splitSpec(scope);
+    if (sp.method !== 'group' || !sp.groupCol || !Array.isArray(validRows)) return null;
+    return validRows.map(r => String(r[sp.groupCol] ?? '').trim());
 }
 
 // Small "(lo–hi)" text for a bootstrap CI
@@ -4434,7 +4467,10 @@ async function startModelTraining() {
             const B = parseInt(document.getElementById('bootstrap-reps')?.value, 10) || 100;
             const seedC = splitSeedForCV();
             // The same resamples for every model (fair comparison), reproducible from the seed
-            const boots = bootstrapResamples(allRaw.length, B, seedC);
+            const groupColC = document.getElementById('bootstrap-group-col')?.value || '';
+            const boots = groupColC
+                ? bootstrapResamplesGrouped(allRaw.map(r => String(r[groupColC] ?? '').trim()), B, seedC)
+                : bootstrapResamples(allRaw.length, B, seedC);
             const evalOptsC = {
                 regressionThreshold: prep.isClassification ? null : trainingMedian(prep.y),
                 decisionThreshold: readDecisionThreshold('decision-threshold'),
@@ -4463,9 +4499,8 @@ async function startModelTraining() {
                 const evalRes = await ModelEngine.evaluateAsync(model, prep.X, prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
                 const wasTuned = autoTune && TUNABLE_MODELS.has(mId);
                 const tuneInside = wasTuned && !slowModel(mId);
-                const spec = splitSpec('standard');
                 const inner = (tuneInside || repeatSelection)
-                    ? { k: innerK, seed: seedC, groupCol: spec.method === 'group' && spec.groupCol ? spec.groupCol : null, metricKey, metricDefs, doTune: tuneInside }
+                    ? { k: innerK, seed: seedC, groupCol: groupColC || null, metricKey, metricDefs, doTune: tuneInside }
                     : null;
                 const Bm = slowModel(mId) ? Math.min(B, 50) : B;
                 const what = tuneInside ? ' (tuning repeated inside each resample)' : (inner ? ' (cross-validation repeated inside each resample)' : '');
@@ -4518,6 +4553,7 @@ async function startModelTraining() {
                 evalRes.testCount = prep.X.length;
                 evalRes.totalCount = prep.X.length;
                 evalRes.splitSeed = seedC;
+                if (groupColC) evalRes.bootstrapGroupCol = groupColC;
                 evalRes.seed = hp.seed;
                 if (tuned.cv) evalRes.cv = tuned.cv;
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
@@ -4668,7 +4704,7 @@ async function startModelTraining() {
                     if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration was not applied: too few out-of-fold predictions or events to fit it reliably.';
                 }
                 evalRes.protocol = 'option-a';
-                evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
+                evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed, testPatientGroups(testData.validRows, 'standard'));
                 evalRes.splitInfo = rowSplit.info;
                 if (tuned.cv) evalRes.cv = tuned.cv;
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
@@ -7342,7 +7378,7 @@ async function executePipelineStep7() {
         // Bootstrap 95% confidence intervals for every test metric
         for (const b of benchmarkList) {
             if (watchdog) watchdog.tick(totalModels, `Computing 95% confidence intervals (bootstrap): ${b.name}...`);
-            b.eval.ci = await bootstrapFor(b.eval, evalSeed);
+            b.eval.ci = await bootstrapFor(b.eval, evalSeed, testPatientGroups(fullTestTrans.validRows, 'pipeline'));
         }
         // Store ranked best-first, so benchmarkResults[0] is genuinely the top model everywhere it is used
         benchmarkList.sort((a, b) => compareEvalResults(a.eval, b.eval, isClassification));

@@ -109,7 +109,7 @@ async function trainEval(id, w, isClassification) {
 // training functions, so the test runs the same code as Option C in the browser
 function loadValidationCore() {
     const code = fs.readFileSync(path.join(dir, 'src', 'validation-core.js'), 'utf8').replace(/^export\s*\{[^}]*\};?\s*$/gm, '');
-    return new Function(`${code}\nreturn { bootstrapResamples, bootstrapOptimism, selectionOptimism, tuningGrid, noInformationRates, plus632, youdenThreshold, effectiveFolds, buildRowFolds };`)();
+    return new Function(`${code}\nreturn { bootstrapResamples, bootstrapResamplesGrouped, bootstrapOptimism, selectionOptimism, tuningGrid, noInformationRates, plus632, youdenThreshold, effectiveFolds, buildRowFolds };`)();
 }
 async function fitLocal(id, isClf, nc, hp, X, y) {
     const m = ME.createModel(id, isClf, nc, hp);
@@ -533,6 +533,47 @@ async function optionC(VC, rows, cfg, modelId, hp, B, tune) {
         // A near-constant predictor is not blown up by dividing by a tiny spread
         assert(x.every(v => Number.isFinite(v) && Math.abs(v) < 1e6), `encoded values ${x}`);
         return `Youden J exact; 5 folds reduced to 3 for 3 events; Age 650 flagged; near-constant predictor encoded as ${x[1]}`;
+    });
+
+    await check('Repeated patients: Option C resampling whole patients removes the optimism of resampling rows', async () => {
+        const VC = loadValidationCore();
+        // Pure noise, but every patient appears 3 times (e.g. three admissions with the same findings)
+        const base = noiseCohort(60, 6, 31);
+        const rows = [], cfg = { ...base.cfg, PID: { role: 'meta', type: 'nominal' } };
+        base.rows.forEach((r, i) => { for (let k = 0; k < 3; k++) rows.push({ ...r, PID: `P${i}` }); });
+        const analysis = DE.analyzeColumns(Object.keys(rows[0]), rows);
+        const imp = DE.imputeDataset(rows, cfg, analysis), prep = DE.prepareFeaturesAndTarget(imp.imputedRows, cfg);
+        const m = await fitLocal('rf', true, 2, { numTrees: 40, seed: 1 }, prep.X, prep.y);
+        const app = await ME.evaluateAsync(m, prep.X, prep.y, true, prep.targetClasses, {});
+        const est = async boots => {
+            const run = await VC.bootstrapOptimism({ rows, boots, configs: cfg, analysis, isClassification: true, modelId: 'rf', hp: { numTrees: 40, seed: 1 }, evalOptions: {}, keys: ['rocAuc'], fitAndScoreMulti: localFitAndScoreMulti });
+            return VC.plus632('rocAuc', app.rocAuc, run.oobMean.rocAuc, 0.5).value;
+        };
+        const byRow = await est(VC.bootstrapResamples(rows.length, 25, 7));
+        const byPatient = await est(VC.bootstrapResamplesGrouped(rows.map(r => r.PID), 25, 7));
+        assert(Math.abs(byPatient - 0.5) < 0.1 && byRow - byPatient > 0.1, `.632+ AUC by row ${byRow.toFixed(3)}, by patient ${byPatient.toFixed(3)}`);
+        // Test-set confidence intervals resample patients when told the patient of each row
+        const ev = { actuals: prep.y, predictions: prep.y, isClassification: true, numClasses: 2, probPositive: prep.X.map(() => 0.5) };
+        const ciP = ME.bootstrapCIs(ev, 200, 1, rows.map(r => r.PID));
+        assert(ciP && ciP.clustered, 'patient-level bootstrap of the test set was not used');
+        return `pure noise with 3 rows per patient: .632+ AUC ${byRow.toFixed(2)} resampling rows vs ${byPatient.toFixed(2)} resampling patients`;
+    });
+
+    await check('Reproducibility: the same seed gives identical predictions for every model type', async () => {
+        const rows = cohort(200, 13, 'binary', { missing: true });
+        const cfg = configs('binary');
+        const split = DE.trainTestSplit(rows, rows.map(r => r.Outcome), 0.8, true, 42);
+        const w = prepareWorkflow(rows, cfg, true, split);
+        const out = [];
+        for (const id of ['glm', 'rf', 'gbm', 'knn', 'nb', 'nn', 'ensemble']) {
+            const hp = { ...(HP[id] || {}), seed: 9 };
+            const run = async () => { const m = await fitLocal(id, true, 2, hp, w.prep.X, w.prep.y); const p = w.test.X.map(x => Number(m.predictSingle(x).probabilities ? m.predictSingle(x).probabilities[1] || 0 : m.predictSingle(x).pred)); if (m.dispose) m.dispose(); return p; };
+            const a = await run(), b = await run();
+            const d = Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+            assert(d === 0, `${id}: predictions differ between two runs with the same seed (max ${d})`);
+            out.push(id);
+        }
+        return `identical: ${out.join(', ')}`;
     });
 
     await check('Shapley explanations: exact TreeSHAP (RF, boosted trees) and sampled Shapley (logistic) match brute-force enumeration', async () => {

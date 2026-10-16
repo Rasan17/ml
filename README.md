@@ -28,6 +28,7 @@ The **Universal Medical ML/NeuralNet Predictor** provides clinical researchers, 
 - Runs locally in modern browsers via HTML5, Vanilla JavaScript, and TensorFlow.js.
 - Patient health records and uploaded CSVs are processed solely in client memory—**zero data is transmitted to external servers**.
 - A Content-Security-Policy in the page lets the browser contact only the app's own files (`connect-src 'self'`), so data cannot be sent to any other server.
+- Checked on the deployed site (October 2026): during a full analysis every network request went to the app's own address, all to fetch its own files and sample data; nothing was sent out, and no third-party scripts, fonts or analytics are loaded.
 - Keeping data in the browser supports GDPR/HIPAA-aligned workflows, but software alone cannot make a study compliant: lawful basis, de-identification, device security and governance remain the user's and institution's responsibility.
 
 ### 2. Flexible Variable Role & Scale Configuration
@@ -208,6 +209,8 @@ The suite includes built-in clinical datasets for instant experimentation:
 - **Collinearity.** Multi-level categorical features use the Generalised VIF (Fox & Monette), shown as GVIF^(1/df) so the VIF > 5 rule applies.
 - **Univariate screening** (p < 0.05) is informational; selecting predictors by p-value can bias models and is left to the user's judgement.
 - **Scale.** Model training, multiple imputation, and the whole Option C bootstrap loop (including its data preparation), run in a background worker (multiple imputation of 5,000 patients with 16 predictors takes about 4 s for 5 imputations); browsers slow background work down when the window is hidden or minimised; Option C with automatic tuning re-tunes the model in every resample and can take several minutes per model; elsewhere, data preparation (imputation, SMOTENC, fold preparation) still runs on the page and can briefly pause it for very large cohorts (tens of thousands of rows, or nominal variables with many levels).
+- **Repeated patients.** If a patient can have several rows, say so: choose the patient column in the split settings (Option A, the pipeline) or in the Option C panel. Splits, cross-validation folds, the Option C bootstrap and the test-set confidence intervals then work on whole patients (on pure noise with three rows per patient, resampling rows reported an AUC of 0.99, resampling patients 0.50). The DeLong test still treats rows as independent.
+- **Assessing a model.** Report it following TRIPOD+AI and assess risk of bias and applicability with PROBAST+AI; the app's checklist export pre-fills the TRIPOD+AI items it can.
 - **Not a medical device.** For research and education only; not for individual clinical decisions without independent validation.
 
 ## ✅ Verification Tests

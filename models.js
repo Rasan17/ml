@@ -2565,43 +2565,52 @@
          * Percentile bootstrap 95% confidence intervals for the held-out metrics in an evaluation result,
          * resampling test patients with replacement (seeded, reproducible).
          */
-        bootstrapCIs(ev, B = 1000, seed = 2024) {
+        // groups (optional): the patient of each test row; whole patients are then resampled (cluster bootstrap),
+        // so several rows from one patient do not make the intervals too narrow
+        bootstrapCIs(ev, B = 1000, seed = 2024, groups = null) {
             if (!ev || !Array.isArray(ev.actuals) || ev.actuals.length < 5) return null;
             const rng = createPRNG(seed);
             const n = ev.actuals.length;
             const y = ev.actuals, yhat = ev.predictions;
             const stats = {};
             const add = (k, v) => { if (typeof v === 'number' && isFinite(v)) (stats[k] = stats[k] || []).push(v); };
+            let clusters = null;
+            if (Array.isArray(groups) && groups.length === n) {
+                const byG = new Map();
+                groups.forEach((g, i) => { const k = String(g ?? ''); if (!byG.has(k)) byG.set(k, []); byG.get(k).push(i); });
+                if (byG.size < n) clusters = [...byG.values()];
+            }
             const slopeB = Math.min(B, n > 3000 ? 0 : 300); // calibration slope needs an iterative fit: fewer resamples
             for (let b = 0; b < B; b++) {
-                const idx = Array.from({ length: n }, () => Math.floor(rng() * n));
+                const idx = clusters ? [].concat(...Array.from({ length: clusters.length }, () => clusters[Math.floor(rng() * clusters.length)])) : Array.from({ length: n }, () => Math.floor(rng() * n));
+                const m = idx.length;
                 if (ev.isClassification) {
                     const yy = idx.map(i => y[i]), pp = idx.map(i => yhat[i]);
                     const k = ev.numClasses || Math.max(...y) + 1;
                     let correct = 0; const tp = new Array(k).fill(0), sup = new Array(k).fill(0), prd = new Array(k).fill(0);
                     yy.forEach((v, i) => { sup[v]++; prd[pp[i]]++; if (v === pp[i]) { correct++; tp[v]++; } });
-                    add('accuracy', correct / n);
+                    add('accuracy', correct / m);
                     const present = sup.map((s, c) => c).filter(c => sup[c] > 0);
                     add('balancedAccuracy', present.reduce((a, c) => a + tp[c] / sup[c], 0) / present.length);
                     add('macroF1', sup.reduce((a, s, c) => { const pr = prd[c] ? tp[c] / prd[c] : 0, rc = s ? tp[c] / s : 0; return a + (pr + rc ? 2 * pr * rc / (pr + rc) : 0); }, 0) / k);
                     if (ev.probPositive) {
                         const yb = yy.map(v => (v === 1 ? 1 : 0)), pr = idx.map(i => ev.probPositive[i]);
-                        add('brierScore', pr.reduce((a, q, i) => a + (q - yb[i]) ** 2, 0) / n);
+                        add('brierScore', pr.reduce((a, q, i) => a + (q - yb[i]) ** 2, 0) / m);
                         if (yb.some(v => v === 1) && yb.some(v => v === 0)) add('rocAuc', this._calculateBinaryAUC(yb, pr));
                         if (b < slopeB) { const c = this.calibrationSummary(yb, pr); add('calibrationSlope', c.slope); add('calibrationIntercept', c.intercept); }
                     } else if (ev.probMatrix) {
-                        add('brierScore', idx.reduce((a, i) => a + ev.probMatrix[i].reduce((s, q, c) => s + (q - (y[i] === c ? 1 : 0)) ** 2, 0), 0) / n);
+                        add('brierScore', idx.reduce((a, i) => a + ev.probMatrix[i].reduce((s, q, c) => s + (q - (y[i] === c ? 1 : 0)) ** 2, 0), 0) / m);
                     }
                 } else {
                     const yy = idx.map(i => y[i]), pp = idx.map(i => yhat[i]);
-                    const mean = yy.reduce((a, v) => a + v, 0) / n;
+                    const mean = yy.reduce((a, v) => a + v, 0) / m;
                     const sse = yy.reduce((a, v, i) => a + (v - pp[i]) ** 2, 0), sst = yy.reduce((a, v) => a + (v - mean) ** 2, 0);
                     if (sst > 0) add('r2', 1 - sse / sst);
-                    add('rmse', Math.sqrt(sse / n));
-                    add('mae', yy.reduce((a, v, i) => a + Math.abs(v - pp[i]), 0) / n);
+                    add('rmse', Math.sqrt(sse / m));
+                    add('mae', yy.reduce((a, v, i) => a + Math.abs(v - pp[i]), 0) / m);
                 }
             }
-            const out = { B, method: 'percentile bootstrap of test patients' };
+            const out = { B, method: clusters ? `percentile bootstrap of test patients (${clusters.length} patients resampled with all their rows)` : 'percentile bootstrap of test patients', clustered: Boolean(clusters) };
             Object.keys(stats).forEach(k => {
                 const v = stats[k].sort((a, b) => a - b);
                 const q = f => v[Math.min(v.length - 1, Math.max(0, Math.floor(f * (v.length - 1))))];
