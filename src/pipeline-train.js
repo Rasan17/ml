@@ -369,7 +369,7 @@ function renderPipelineLeaderboardOnly() {
                 <td style="font-size: 11.5px; color: var(--text-secondary);">${escapeHtml(ev.constraintNote)}</td>
                 <td style="text-align: right;">
                     ${isDeployed ? `
-                        <span class="pill" style="background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.3);">
+                        <span class="pill" style="background: rgba(16, 185, 129, 0.15); color: var(--tag-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.3);">
                             ✓ Active
                         </span>
                     ` : `

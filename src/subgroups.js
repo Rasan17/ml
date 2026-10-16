@@ -151,7 +151,8 @@ function runSubgroupAnalysis(containerId) {
         const anyFlag = res.some(r => flag(r.m)), anySmall = res.some(r => small(r.m));
         out.innerHTML = `
             ${it.inSample ? '<div class="tune-warn">⚠️ This model was retrained on all patients, including these Testing patients, so its figures here are optimistic. Compare the groups with each other rather than reading the values at face value; for an honest check, train without retraining (Option A) or use an external cohort (Option B).</div>' : ''}
-            <div class="table-container"><table class="data-table thr-table">
+            <div class="table-container" tabindex="0" role="region" aria-label="Subgroup results table">
+                <table class="data-table thr-table">
                 <thead><tr>${head}</tr></thead>
                 <tbody>
                     <tr style="font-weight: 600;">${row('All Testing patients', all)}</tr>

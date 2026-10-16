@@ -797,11 +797,12 @@ function capRows(rows, isClassification, targetCol, seed, groupOf) {
 
 // Folds for stratified cross-validation: no more folds than patients in the smaller outcome group, so that
 // every validation fold contains both outcomes (otherwise its AUC is undefined and its F1 is distorted)
-function effectiveFolds(rows, k, isClassification, targetCol) {
+// (with groupOf, distinct patients are counted, since a patient's rows always share a fold)
+function effectiveFolds(rows, k, isClassification, targetCol, groupOf = null) {
     if (!isClassification) return k;
-    const counts = {};
-    rows.forEach(r => { const v = String(r[targetCol]).trim(); counts[v] = (counts[v] || 0) + 1; });
-    const minority = Math.min(...Object.values(counts));
+    const members = {};
+    rows.forEach((r, i) => { const v = String(r[targetCol]).trim(); (members[v] = members[v] || new Set()).add(groupOf ? groupOf(r) : i); });
+    const minority = Math.min(...Object.values(members).map(s => s.size));
     return Math.max(2, Math.min(k, minority));
 }
 
@@ -811,7 +812,7 @@ async function buildRowFolds(rawRows, k, o, onFold) {
     const { configs, analysis, isClassification, targetCol, seed, groupOf = null, stratifyGroups = false, decisionThreshold = null } = o;
     const cap = capRows(rawRows, isClassification, targetCol, seed, groupOf);
     const requestedFolds = k;
-    k = effectiveFolds(cap.rows, k, isClassification, targetCol);
+    k = effectiveFolds(cap.rows, k, isClassification, targetCol, groupOf);
     const fold = assignRowFolds(cap.rows, k, isClassification, targetCol, seed, groupOf, stratifyGroups);
     const sets = [];
     for (let f = 0; f < k; f++) {
@@ -2336,7 +2337,7 @@ function renderVariableConfigGrid() {
                         <input type="checkbox" class="var-include-check" data-col="${escapeHtml(col)}" ${cfg.role !== 'meta' ? 'checked' : ''} ${cfg.role === 'target' ? 'disabled' : ''} aria-label="Include ${escapeHtml(col)} in the analysis">
                         <span class="var-name" title="${escapeHtml(col)}">${escapeHtml(col)}</span>
                     </label>
-                    ${a.missingCount > 0 ? `<span class="pill pill-missing">${a.missingCount} missing (${a.missingPercent}%)</span>` : `<span class="pill" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">Complete</span>`}
+                    ${a.missingCount > 0 ? `<span class="pill pill-missing">${a.missingCount} missing (${a.missingPercent}%)</span>` : `<span class="pill" style="background: rgba(16, 185, 129, 0.1); color: var(--tag-emerald);">Complete</span>`}
                 </div>
 
                 <div style="font-size: 11.5px; color: var(--text-muted);">
@@ -3374,6 +3375,7 @@ function explainPatient(model, x, prep) {
         const ref = referenceEncoding(meta);
         const x2 = x.slice();
         for (let j = 0; j < meta.length; j++) x2[meta.startIndex + j] = ref[j];
+        if (x.__mi) Object.defineProperty(x2, '__mi', { value: x.__mi.map(v => { const w = v.slice(); for (let j = 0; j < meta.length; j++) w[meta.startIndex + j] = ref[j]; return w; }), enumerable: false });
         const same = ref.every((v, j) => Math.abs(v - x[meta.startIndex + j]) < 1e-9);
         return { col, meta, delta: same ? 0 : f0 - explainOutput(model, x2, prep, classIdx) };
     });
@@ -3393,7 +3395,8 @@ function shapleyExplanation(model, x, prep, classIdx) {
     prep.featureCols.forEach((col, g) => { const m = prep.featureMetadata[col]; for (let j = 0; j < m.length; j++) groups[m.startIndex + j] = g; });
     const P = prep.featureCols.length;
     const calibrated = Boolean(model && model.calibrator);
-    let r = calibrated ? null : ModelEngine.treeShap(model, x, background, groups, P, classIdx);
+    // Exact TreeSHAP needs one version of the patient; a multiply imputed patient uses the sampled method
+    let r = calibrated || x.__mi ? null : ModelEngine.treeShap(model, x, background, groups, P, classIdx);
     if (r && r.scale === 'log-odds' && !r.multiclass) {
         // Boosted trees: exact on the log-odds scale; shown in percentage points by sharing out the change in probability
         const sig = v => 1 / (1 + Math.exp(-v));
@@ -3901,7 +3904,8 @@ function runSubgroupAnalysis(containerId) {
         const anyFlag = res.some(r => flag(r.m)), anySmall = res.some(r => small(r.m));
         out.innerHTML = `
             ${it.inSample ? '<div class="tune-warn">⚠️ This model was retrained on all patients, including these Testing patients, so its figures here are optimistic. Compare the groups with each other rather than reading the values at face value; for an honest check, train without retraining (Option A) or use an external cohort (Option B).</div>' : ''}
-            <div class="table-container"><table class="data-table thr-table">
+            <div class="table-container" tabindex="0" role="region" aria-label="Subgroup results table">
+                <table class="data-table thr-table">
                 <thead><tr>${head}</tr></thead>
                 <tbody>
                     <tr style="font-weight: 600;">${row('All Testing patients', all)}</tr>
@@ -4243,7 +4247,7 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const rows = cap.rows;
     const sampled = cap.sampled;
     const requestedFolds = k;
-    k = effectiveFolds(rows, k, isClassification, targetCol);
+    k = effectiveFolds(rows, k, isClassification, targetCol, groupOf);
     const fold = assignRowFolds(rows, k, isClassification, targetCol, seed, groupOf);
     const cfg = {};
     cols.forEach(c => { cfg[c] = p.columnConfigs[c]; });
@@ -5266,7 +5270,7 @@ function renderEvaluationDashboard() {
                             Accuracy evaluated on held-out <strong>${testPct}% test split (${testCount} cases)</strong> after fitting on <strong>${trainPct}% (${trainCount} cases)</strong>. Deployed models were then fully retrained on <strong>100% of cohort data (${totalCount} cases)</strong>.
                         </div>
                     </div>
-                    <span class="pill pill-target" style="background: rgba(16, 185, 129, 0.18); color: var(--accent-emerald); border-color: rgba(16, 185, 129, 0.4); font-size: 12px; font-weight: 700;">
+                    <span class="pill pill-target" style="background: rgba(16, 185, 129, 0.18); color: var(--tag-emerald); border-color: rgba(16, 185, 129, 0.4); font-size: 12px; font-weight: 700;">
                         100% Retrained Models Active
                     </span>
                 </div>
@@ -5431,7 +5435,7 @@ function renderEvaluationDashboard() {
                     : `<span style="font-size: 11px; color: var(--text-muted); font-family: monospace;">N/A</span>`;
 
                 const deployBtn = isDeployed
-                    ? `<span class="pill pill-target" style="background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.4);">✓ Active Predictor</span>`
+                    ? `<span class="pill pill-target" style="background: rgba(16, 185, 129, 0.2); color: var(--tag-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.4);">✓ Active Predictor</span>`
                     : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="padding: 4px 10px; font-size: 11px; cursor: pointer;">Deploy Model</button>`;
 
                 lbRows += `
@@ -5556,7 +5560,7 @@ function renderEvaluationDashboard() {
                 }
 
                 const deployBtn = isDeployed
-                    ? `<button class="btn-preset-action" disabled style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: var(--accent-emerald); font-weight: 700; width: 100%;">✓ Active Predictor (Steps 5 &amp; 6)</button>`
+                    ? `<button class="btn-preset-action" disabled style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: var(--tag-emerald); font-weight: 700; width: 100%;">✓ Active Predictor (Steps 5 &amp; 6)</button>`
                     : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="width: 100%; font-weight: 600; cursor: pointer;">⭐ Set as Active Predictor</button>`;
 
                 cmCardsHtml += `
@@ -5571,7 +5575,7 @@ function renderEvaluationDashboard() {
                             </div>
                             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
                                 ${isChampion ? `<span class="champion-badge">🏆 Top-ranked (${escapeHtml(rankingMetricLabel(prep.isClassification))})</span>` : `<span class="pill" style="font-size: 10.5px;">Rank #${idx + 1}</span>`}
-                                ${isDeployed ? `<span class="pill pill-target" style="font-size: 10px; background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald);">⭐ Active</span>` : ''}
+                                ${isDeployed ? `<span class="pill pill-target" style="font-size: 10px; background: rgba(16, 185, 129, 0.15); color: var(--tag-emerald);">⭐ Active</span>` : ''}
                             </div>
                         </div>
 
@@ -6494,7 +6498,7 @@ function renderPipelineStep2() {
                 <td>${norm.std}</td>
                 <td><strong style="color: ${norm.isNormal ? 'var(--accent-emerald)' : 'var(--accent-amber)'};">${norm.skewness}</strong></td>
                 <td>
-                    <span class="pill" style="${norm.isNormal ? 'background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); border-color: rgba(16, 185, 129, 0.4);' : 'background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.4);'}">
+                    <span class="pill" style="${norm.isNormal ? 'background: rgba(16, 185, 129, 0.15); color: var(--tag-emerald); border-color: rgba(16, 185, 129, 0.4);' : 'background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.4);'}">
                         ${norm.isNormal ? '✓ Approx. symmetric (|G₁| ≤ 1.0)' : '⚠️ Skewed (|G₁| > 1.0)'}
                     </span>
                 </td>
@@ -6731,7 +6735,7 @@ function renderPipelineStep4() {
                     `}
                 </td>
                 <td>
-                    <span class="pill" style="${isSig ? 'background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); border-color: rgba(16, 185, 129, 0.4);' : 'background: rgba(100, 116, 139, 0.15); color: var(--text-muted);'}">
+                    <span class="pill" style="${isSig ? 'background: rgba(16, 185, 129, 0.15); color: var(--tag-emerald); border-color: rgba(16, 185, 129, 0.4);' : 'background: rgba(100, 116, 139, 0.15); color: var(--text-muted);'}">
                         ${isSig ? '✓ p < 0.05 (Sig)' : 'p ≥ 0.05 (Non-Sig)'}
                     </span>
                 </td>
@@ -7466,7 +7470,7 @@ function renderPipelineLeaderboardOnly() {
                 <td style="font-size: 11.5px; color: var(--text-secondary);">${escapeHtml(ev.constraintNote)}</td>
                 <td style="text-align: right;">
                     ${isDeployed ? `
-                        <span class="pill" style="background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.3);">
+                        <span class="pill" style="background: rgba(16, 185, 129, 0.15); color: var(--tag-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.3);">
                             ✓ Active
                         </span>
                     ` : `

@@ -23,7 +23,7 @@ function renderVariableConfigGrid() {
                         <input type="checkbox" class="var-include-check" data-col="${escapeHtml(col)}" ${cfg.role !== 'meta' ? 'checked' : ''} ${cfg.role === 'target' ? 'disabled' : ''} aria-label="Include ${escapeHtml(col)} in the analysis">
                         <span class="var-name" title="${escapeHtml(col)}">${escapeHtml(col)}</span>
                     </label>
-                    ${a.missingCount > 0 ? `<span class="pill pill-missing">${a.missingCount} missing (${a.missingPercent}%)</span>` : `<span class="pill" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">Complete</span>`}
+                    ${a.missingCount > 0 ? `<span class="pill pill-missing">${a.missingCount} missing (${a.missingPercent}%)</span>` : `<span class="pill" style="background: rgba(16, 185, 129, 0.1); color: var(--tag-emerald);">Complete</span>`}
                 </div>
 
                 <div style="font-size: 11.5px; color: var(--text-muted);">

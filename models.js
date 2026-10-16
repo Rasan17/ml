@@ -2097,6 +2097,7 @@
     // output(rows) returns the explained output for a batch of encoded rows.
     function sampledShapley(output, x, background, groups, nGroups, nOrderings = 200, seed = 1) {
         const rng = createPRNG(seed);
+        const versions = x && x.__mi ? x.__mi : null;
         const cols = Array.from({ length: nGroups }, () => []);
         groups.forEach((g, j) => cols[g].push(j));
         const rows = [], plan = [];
@@ -2106,9 +2107,17 @@
             const z = background[Math.floor(rng() * background.length)];
             [order, order.slice().reverse()].forEach(ord => {
                 const h = z.slice();
+                // A multiply imputed patient (x.__mi): each hybrid row carries one version per imputation, so
+                // the pooled model scores it exactly as it scores the patient (contributions then add up to
+                // the prediction shown)
+                const hs = versions ? versions.map(() => z.slice()) : null;
+                const snap = () => { const r = h.slice(); if (hs) Object.defineProperty(r, '__mi', { value: hs.map(v => v.slice()), enumerable: false }); return r; };
                 const start = rows.length;
-                rows.push(h.slice());
-                ord.forEach(g => { cols[g].forEach(j => { h[j] = x[j]; }); rows.push(h.slice()); });
+                rows.push(snap());
+                ord.forEach(g => {
+                    cols[g].forEach(j => { h[j] = x[j]; if (hs) hs.forEach((v, l) => { v[j] = versions[l][j]; }); });
+                    rows.push(snap());
+                });
                 plan.push({ ord, start });
             });
         }
@@ -2854,7 +2863,7 @@
         kaplanMeier(time, event) {
             const ts = [...new Set(time)].sort((a, b) => a - b);
             let S = 1, gw = 0;
-            const out = [{ time: 0, survival: 1, atRisk: time.length, events: 0, se: 0, lower: 1, upper: 1 }];
+            const out = [{ time: 0, survival: 1, atRisk: time.length, events: 0, se: 0, lower: null, upper: null }]; // no interval before the first event
             ts.forEach(t => {
                 const atRisk = time.filter(v => v >= t).length;
                 const d = time.filter((v, i) => v === t && event[i] === 1).length;

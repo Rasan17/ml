@@ -280,6 +280,7 @@ function explainPatient(model, x, prep) {
         const ref = referenceEncoding(meta);
         const x2 = x.slice();
         for (let j = 0; j < meta.length; j++) x2[meta.startIndex + j] = ref[j];
+        if (x.__mi) Object.defineProperty(x2, '__mi', { value: x.__mi.map(v => { const w = v.slice(); for (let j = 0; j < meta.length; j++) w[meta.startIndex + j] = ref[j]; return w; }), enumerable: false });
         const same = ref.every((v, j) => Math.abs(v - x[meta.startIndex + j]) < 1e-9);
         return { col, meta, delta: same ? 0 : f0 - explainOutput(model, x2, prep, classIdx) };
     });
@@ -299,7 +300,8 @@ function shapleyExplanation(model, x, prep, classIdx) {
     prep.featureCols.forEach((col, g) => { const m = prep.featureMetadata[col]; for (let j = 0; j < m.length; j++) groups[m.startIndex + j] = g; });
     const P = prep.featureCols.length;
     const calibrated = Boolean(model && model.calibrator);
-    let r = calibrated ? null : ModelEngine.treeShap(model, x, background, groups, P, classIdx);
+    // Exact TreeSHAP needs one version of the patient; a multiply imputed patient uses the sampled method
+    let r = calibrated || x.__mi ? null : ModelEngine.treeShap(model, x, background, groups, P, classIdx);
     if (r && r.scale === 'log-odds' && !r.multiclass) {
         // Boosted trees: exact on the log-odds scale; shown in percentage points by sharing out the change in probability
         const sig = v => 1 / (1 + Math.exp(-v));

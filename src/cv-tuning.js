@@ -259,7 +259,7 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const rows = cap.rows;
     const sampled = cap.sampled;
     const requestedFolds = k;
-    k = effectiveFolds(rows, k, isClassification, targetCol);
+    k = effectiveFolds(rows, k, isClassification, targetCol, groupOf);
     const fold = assignRowFolds(rows, k, isClassification, targetCol, seed, groupOf);
     const cfg = {};
     cols.forEach(c => { cfg[c] = p.columnConfigs[c]; });

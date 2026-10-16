@@ -622,6 +622,18 @@ async function optionC(VC, rows, cfg, modelId, hp, B, tune) {
         const sumG = Math.abs(ss.phi.reduce((a, b) => a + b, 0) - (f(x) - ss.base));
         assert(dG < 0.01 && sumG < 1e-9, `sampled Shapley differs from brute force by ${dG}`);
         out.push(`logistic (sampled) max diff ${dG.toFixed(4)}`);
+        // A multiply imputed patient with blanks: the contributions add up to the pooled prediction shown
+        const mi = DE.miceFit(split.trainX, cfg, { m: 3, seed: 2 });
+        const miPrep = DE.prepareFeaturesAndTarget([].concat(...mi.datasets), cfg);
+        miPrep.imputation = { configs: cfg, mice: mi.imputer };
+        const pooled = ME.createMIPooled(mi.datasets.map(d => { const t = DE.prepareTestingDataset(d, miPrep); const md = ME.createModel('rf', true, 2, { numTrees: 15, seed: 3 }); md.fit(t.X, t.y); return md; }));
+        const blank = { ...split.testX[0], ICP: '', Site: '' };
+        const xm = DE.transformSingleRow(blank, miPrep);
+        const shown = Number(pooled.predictSingle(xm).probabilities[1] || 0);
+        const sm = ME.sampledShapley(r2 => pooled.predictOutputs(r2).map(o => Number(o.probabilities[1] || 0)), xm, miPrep.X.slice(0, 25), groups.length ? DE.prepareFeaturesAndTarget(mi.datasets[0], cfg).featureCols.flatMap((c, g) => { const m2 = miPrep.featureMetadata[c]; return Array(m2.length).fill(g); }) : groups, P, 100, 3);
+        const sumMI = Math.abs(sm.base + sm.phi.reduce((a2, b2) => a2 + b2, 0) - shown);
+        assert(xm.__mi && Math.abs(sm.value - shown) < 1e-12 && sumMI < 1e-9, `imputed patient: explanation value ${sm.value} vs prediction ${shown} (sum error ${sumMI})`);
+        out.push('multiply imputed patient: contributions add up to the prediction shown');
         return out.join('; ');
     });
 

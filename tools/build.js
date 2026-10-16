@@ -46,6 +46,8 @@ if (/<!-- IMPORTMAP:START[\s\S]*?IMPORTMAP:END -->/.test(html)) html = html.repl
 else html = html.replace(/(\s*)<script type="module" src="src\/main\.js[^"]*"><\/script>/, `$1${block}$&`);
 html = html.replace(/<script type="module" src="src\/main\.js[^"]*"><\/script>/, `<script type="module" src="src/main.js?h=${hash(path.join(srcDir, 'main.js'))}"></script>`);
 ['data-engine.js', 'models.js'].forEach(f => { html = html.replace(new RegExp(`<script src="${f.replace('.', '\\.')}(\\?[^"]*)?"></script>`), `<script src="${f}?h=${hash(path.join(root, f))}"></script>`); });
+// The stylesheet is versioned by content too, so a style change reaches users at once
+html = html.replace(/<link rel="stylesheet" href="style\.css(\?[^"]*)?">/, `<link rel="stylesheet" href="style.css?h=${hash(path.join(root, 'style.css'))}">`);
 // Content-Security-Policy: inline scripts are allowed only by their hashes (the import map and the file://
 // loader), so injected inline script or event-handler attributes cannot run
 const inline = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);

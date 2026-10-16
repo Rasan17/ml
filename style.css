@@ -23,6 +23,10 @@
     --accent-emerald: #10b981;
     --accent-amber: #f59e0b;
     --accent-rose: #fb7185;
+    /* Text on tinted tags and pills (>= 4.5:1 on their tinted backgrounds, WCAG AA) */
+    --tag-purple: #d8b4fe;
+    --tag-emerald: #34d399;
+    --tag-muted: #a3b1c6;
     
     --glow-cyan: 0 0 20px rgba(6, 182, 212, 0.25);
     --glow-indigo: 0 0 25px rgba(99, 102, 241, 0.3);
@@ -59,13 +63,17 @@
     --text-secondary: #475569;
     --text-muted: #586679;  /* >= 4.5:1 on light surfaces (WCAG AA) */
     /* Darker accents for light backgrounds (the bright dark-mode accents fall below 3:1 here) */
-    --accent-cyan: #0e7490;
-    --accent-blue: #0369a1;
-    --accent-indigo: #4338ca;
-    --accent-purple: #7e22ce;
-    --accent-emerald: #047857;
-    --accent-amber: #b45309;
-    --accent-rose: #be123c;
+    /* Dark enough for >= 4.5:1 on white and on the pale tints used behind tags, warnings and cells */
+    --accent-cyan: #155e75;
+    --accent-blue: #075985;
+    --accent-indigo: #3730a3;
+    --accent-purple: #6b21a8;
+    --accent-emerald: #065f46;
+    --accent-amber: #92400e;
+    --accent-rose: #9f1239;
+    --tag-purple: #6b21a8;
+    --tag-emerald: #065f46;
+    --tag-muted: #475569;
     
     --glow-cyan: 0 4px 15px rgba(6, 182, 212, 0.15);
     --glow-indigo: 0 4px 20px rgba(99, 102, 241, 0.15);
@@ -526,13 +534,13 @@ body {
 }
 
 .pill-meta { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); }
-.pill-target { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); }
+.pill-target { background: rgba(168, 85, 247, 0.2); color: var(--tag-purple); border: 1px solid rgba(168, 85, 247, 0.4); }
 .pill-feature { background: rgba(6, 182, 212, 0.15); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.35); }
 
 .pill-continuous { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
 .pill-ordinal { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
 .pill-nominal { background: rgba(16, 185, 129, 0.15); color: #34d399; }
-.pill-missing { background: rgba(244, 63, 94, 0.2); color: #fb7185; }
+.pill-missing { background: rgba(244, 63, 94, 0.2); color: #fda4af; }
 
 /* Select / Input Controls */
 .control-select, .control-input {
@@ -597,7 +605,7 @@ body {
 }
 
 .var-card.is-meta {
-    opacity: 0.75;
+    border-style: dashed; /* excluded: shown by the dashed border and the struck-through name, text kept readable */
 }
 
 .var-header {
@@ -1704,7 +1712,7 @@ body {
 }
 .var-include input { width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--accent-cyan, #38bdf8); cursor: pointer; }
 .var-include input:disabled { cursor: not-allowed; }
-.var-card.is-meta .var-name { text-decoration: line-through; color: var(--text-muted); }
+.var-card.is-meta .var-name { text-decoration: line-through; color: var(--text-secondary); }
 
 /* Data Ingestion preview: fixed-height box that scrolls both ways, with a sticky header */
 .table-container.preview-scroll {
@@ -1847,8 +1855,8 @@ body.comparison-running { overflow: hidden; }
 .selection-label { font-weight: 600; color: var(--text-primary); }
 .selection-option { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-secondary); }
 .selection-option input { accent-color: var(--accent-cyan); }
-.selection-tag { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); }
-.selection-tag-muted { background: rgba(100, 116, 139, 0.15); color: var(--text-muted); }
+.selection-tag { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: rgba(16, 185, 129, 0.15); color: var(--tag-emerald); }
+.selection-tag-muted { background: rgba(100, 116, 139, 0.15); color: var(--tag-muted); }
 
 /* Train/test split method (random, by patient, by date) */
 .split-method-box { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border-color); }
@@ -1915,3 +1923,13 @@ body.comparison-running { overflow: hidden; }
 /* Hover read-out points on the SVG charts */
 .chart-hover { cursor: crosshair; }
 .chart-hover:hover { fill: currentColor; fill-opacity: 0.35; }
+
+/* Light theme: tags, pills and confusion-matrix cells that use bright dark-theme colours (WCAG AA contrast) */
+[data-theme="light"] .pill-meta { color: #475569; }
+[data-theme="light"] .pill-feature { color: var(--accent-cyan); }
+[data-theme="light"] .pill-continuous { color: var(--accent-blue); }
+[data-theme="light"] .pill-ordinal { color: var(--accent-amber); }
+[data-theme="light"] .pill-nominal { color: var(--accent-emerald); }
+[data-theme="light"] .pill-missing { color: var(--accent-rose); }
+[data-theme="light"] .cm-cell-hit { color: var(--accent-emerald); }
+[data-theme="light"] .cm-cell-miss { color: var(--accent-rose); }

@@ -96,11 +96,12 @@ function capRows(rows, isClassification, targetCol, seed, groupOf) {
 
 // Folds for stratified cross-validation: no more folds than patients in the smaller outcome group, so that
 // every validation fold contains both outcomes (otherwise its AUC is undefined and its F1 is distorted)
-function effectiveFolds(rows, k, isClassification, targetCol) {
+// (with groupOf, distinct patients are counted, since a patient's rows always share a fold)
+function effectiveFolds(rows, k, isClassification, targetCol, groupOf = null) {
     if (!isClassification) return k;
-    const counts = {};
-    rows.forEach(r => { const v = String(r[targetCol]).trim(); counts[v] = (counts[v] || 0) + 1; });
-    const minority = Math.min(...Object.values(counts));
+    const members = {};
+    rows.forEach((r, i) => { const v = String(r[targetCol]).trim(); (members[v] = members[v] || new Set()).add(groupOf ? groupOf(r) : i); });
+    const minority = Math.min(...Object.values(members).map(s => s.size));
     return Math.max(2, Math.min(k, minority));
 }
 
@@ -110,7 +111,7 @@ async function buildRowFolds(rawRows, k, o, onFold) {
     const { configs, analysis, isClassification, targetCol, seed, groupOf = null, stratifyGroups = false, decisionThreshold = null } = o;
     const cap = capRows(rawRows, isClassification, targetCol, seed, groupOf);
     const requestedFolds = k;
-    k = effectiveFolds(cap.rows, k, isClassification, targetCol);
+    k = effectiveFolds(cap.rows, k, isClassification, targetCol, groupOf);
     const fold = assignRowFolds(cap.rows, k, isClassification, targetCol, seed, groupOf, stratifyGroups);
     const sets = [];
     for (let f = 0; f < k; f++) {
