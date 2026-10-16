@@ -2,6 +2,7 @@
 // so the page stays responsive and Force Stop takes effect at once (the worker is terminated). When workers
 // are unavailable (e.g. the app opened directly from disk) or fail, the same code runs on the page instead.
 /* global ModelEngine */
+import { bootstrapOptimism } from './validation-core.js';
 
 let worker = null;
 let workerBroken = false;
@@ -15,7 +16,7 @@ function versionedWorkerUrl() {
     try {
         const map = JSON.parse(document.querySelector('script[type="importmap"]').textContent).imports || {};
         const v = k => { const m = String(map[k] || '').match(/\?h=([0-9a-f]+)/); return m ? m[1] : ''; };
-        return `compute-worker.js?h=${v('./compute-worker.js')}&de=${v('./data-engine.js')}&m=${v('./models.js')}`;
+        return `compute-worker.js?h=${v('./compute-worker.js')}&de=${v('./data-engine.js')}&m=${v('./models.js')}&vc=${v('./dist/validation-core.worker.js')}`;
     } catch (e) {
         return 'compute-worker.js';
     }
@@ -170,4 +171,31 @@ async function fitAndScoreMulti(modelId, isClassification, numClasses, hp, X, y,
     }
 }
 
-export { fitModel, fitAndScore, fitAndScoreMulti, cancelAll, workerAvailable, describeWorker };
+/**
+ * Option C: the whole bootstrap loop of one model (validation-core.js bootstrapOptimism), run inside the
+ * worker so the page stays responsive; on the page when workers are unavailable. `payload` is the plain-data
+ * part of the options (tune.groupCol names the patient-ID column, if any); onResample(b, n, t0) and
+ * onInnerProgress(b, n, c, nc, f, nf) report progress.
+ */
+async function bootstrapRun(payload, { onResample = null, onInnerProgress = null, isAborted = null } = {}) {
+    if (workerAvailable()) {
+        try {
+            return await call('bootstrap', payload, {
+                isAborted,
+                onProgress: p => {
+                    if (p && p.kind === 'resample' && onResample) onResample(p.b, p.n, p.t0);
+                    else if (p && p.kind === 'inner' && onInnerProgress) onInnerProgress(p.b, p.n, p.c, p.nc, p.f, p.nf);
+                }
+            });
+        } catch (e) {
+            if (!e.workerUnavailable) throw e;
+        }
+    }
+    const t = payload.tune;
+    return bootstrapOptimism({
+        ...payload, fitAndScoreMulti, isAborted, onResample, onInnerProgress,
+        tune: t ? { ...t, fitAndScore, groupOf: t.groupCol ? (r => String(r[t.groupCol] ?? '').trim()) : null } : null
+    });
+}
+
+export { fitModel, fitAndScore, fitAndScoreMulti, bootstrapRun, cancelAll, workerAvailable, describeWorker };

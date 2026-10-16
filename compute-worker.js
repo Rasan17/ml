@@ -1,6 +1,6 @@
 // Background compute worker: trains models (and scores cross-validation folds) off the page's main thread,
 // so the interface stays responsive and Force Stop can end a computation immediately.
-// Messages in:  { id, op: 'fit' | 'fitEval' | 'ping', payload }
+// Messages in:  { id, op: 'fit' | 'fitEval' | 'fitEvalMulti' | 'bootstrap' | 'ping', payload }
 // Messages out: { id, progress } during training, then { id, result } or { id, error }.
 /* global importScripts, tf, ModelEngine */
 'use strict';
@@ -9,7 +9,8 @@ self.window = self; // the engines attach themselves to window.*
 // Versioned engine URLs (passed by the page) so an update is never masked by the browser cache
 const qs = new URLSearchParams(self.location.search);
 const ver = k => (qs.get(k) ? `?h=${qs.get(k)}` : '');
-importScripts('tf.min.js', `data-engine.js${ver('de')}`, `models.js${ver('m')}`);
+importScripts('tf.min.js', `data-engine.js${ver('de')}`, `models.js${ver('m')}`, `dist/validation-core.worker.js${ver('vc')}`);
+/* global bootstrapOptimism */
 
 async function fitModel(p, onProgress) {
     const m = ModelEngine.createModel(p.modelId, p.isClassification, p.numClasses, p.hp);
@@ -23,6 +24,28 @@ async function fitModel(p, onProgress) {
         m.fit(p.X, p.y);
     }
     return m;
+}
+
+// Fit-and-score helpers with the page's signatures, run here in the worker (used by the Option C loop)
+const KEEP = ['accuracy', 'balancedAccuracy', 'macroF1', 'rocAuc', 'brierScore', 'r2', 'rmse', 'mae'];
+async function localFitAndScore(modelId, isClassification, numClasses, hp, fold, evalOptions) {
+    const m = await fitModel({ modelId, isClassification, numClasses, hp, X: fold.Xtr, y: fold.ytr }, () => {});
+    try {
+        return await ModelEngine.evaluateAsync(m, fold.Xva, fold.yva, isClassification, fold.targetClasses, evalOptions || {});
+    } finally { if (m.dispose) m.dispose(); }
+}
+async function localFitAndScoreMulti(modelId, isClassification, numClasses, hp, X, y, evalSets, evalOptions) {
+    const m = await fitModel({ modelId, isClassification, numClasses, hp, X, y }, () => {});
+    try {
+        const out = [];
+        for (const set of evalSets) {
+            const e = await ModelEngine.evaluateAsync(m, set.X, set.y, isClassification, set.targetClasses, evalOptions || {});
+            const r = {};
+            if (e) { KEEP.forEach(k => { if (e[k] !== undefined) r[k] = e[k]; }); if (e.calibration) r.calibrationSlope = e.calibration.slope; }
+            out.push(r);
+        }
+        return out;
+    } finally { if (m.dispose) m.dispose(); }
 }
 
 function extras(m) {
@@ -60,6 +83,18 @@ self.onmessage = async (ev) => {
             if (e) keep.forEach(k => { if (e[k] !== undefined) result[k] = e[k]; });
             if (m.dispose) m.dispose();
             self.postMessage({ id, result });
+            return;
+        }
+        if (op === 'bootstrap') {
+            // The whole Option C loop (validation-core.js) runs here, so the page stays responsive
+            const p = payload;
+            const tune = p.tune ? { ...p.tune, fitAndScore: localFitAndScore, groupOf: p.tune.groupCol ? (r => String(r[p.tune.groupCol] ?? '').trim()) : null } : null;
+            const run = await bootstrapOptimism({
+                ...p, tune, fitAndScoreMulti: localFitAndScoreMulti,
+                onResample: (b, n, t0) => progress({ kind: 'resample', b, n, t0 }),
+                onInnerProgress: (b, n, c, nc, f, nf) => progress({ kind: 'inner', b, n, c, nc, f, nf })
+            });
+            self.postMessage({ id, result: run });
             return;
         }
         if (op === 'fitEvalMulti') {

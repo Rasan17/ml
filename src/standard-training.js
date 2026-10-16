@@ -1,8 +1,8 @@
 // standard-training.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { fitAndScore, fitAndScoreMulti, fitModel } from './compute.js';
-import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapOptimism, bootstrapResamples, noInformationRates, plus632, selectionOptimism } from './validation-core.js';
+import { bootstrapRun, fitModel } from './compute.js';
+import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapResamples, noInformationRates, plus632, selectionOptimism } from './validation-core.js';
 import { AppState, MODEL_INFO, RANKING_METRICS, compareEvalResults, describeNNTraining, displayModelName, escapeHtml, fmtR2, parseSeed, rankingMetricKey, rankingMetricLabel, renderExploratoryCutoffTable, summariseHeldOutSet, trainingMedian, actionAttrs } from './core.js';
-import { ciScopeNote, fitRecalibrator, readRecalibration, recalibrateAndEvaluate, TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, ciSpan, cvSummaryFrom, describeSplit, formatCvScore, optionBTrainRawRows, readDecisionThreshold, renderTuningReport, runTuningOnFolds, splitGroupFunction, splitRowsForWorkflow, splitSeedForCV } from './cv-tuning.js';
+import { ciScopeNote, fitRecalibrator, readRecalibration, recalibrateAndEvaluate, TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, ciSpan, cvSummaryFrom, describeSplit, formatCvScore, optionBTrainRawRows, readDecisionThreshold, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV, splitSpec } from './cv-tuning.js';
 import { renderCalibrationPanel, renderExplainPanel, renderOddsRatioPanel, renderOptimismPanel } from './panels.js';
 import { renderPipelineLeaderboardOnly } from './pipeline.js';
 import { updatePipelineActiveDeploymentStatus, updatePredictionProvenanceBar } from './pipeline-results.js';
@@ -144,17 +144,21 @@ async function startModelTraining() {
                 const evalRes = await ModelEngine.evaluateAsync(model, prep.X, prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
                 const wasTuned = autoTune && TUNABLE_MODELS.has(mId);
                 const tuneInside = wasTuned && !slowModel(mId);
+                const spec = splitSpec('standard');
                 const inner = (tuneInside || repeatSelection)
-                    ? { k: innerK, seed: seedC, groupOf: splitGroupFunction(), metricKey, metricDefs, doTune: tuneInside, fitAndScore }
+                    ? { k: innerK, seed: seedC, groupCol: spec.method === 'group' && spec.groupCol ? spec.groupCol : null, metricKey, metricDefs, doTune: tuneInside }
                     : null;
                 const Bm = slowModel(mId) ? Math.min(B, 50) : B;
                 const what = tuneInside ? ' (tuning repeated inside each resample)' : (inner ? ' (cross-validation repeated inside each resample)' : '');
                 const say = msg => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">${msg}</span>`; if (watchdog) watchdog.tick(i + 1, msg); };
                 say(`🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample 1/${Bm}${what}...`);
-                const run = await bootstrapOptimism({
+                // The whole loop runs in the background worker (on the page if workers are unavailable)
+                const run = await bootstrapRun({
                     rows: allRaw, boots, maxResamples: Bm, configs: AppState.columnConfigs, analysis: AppState.columnAnalysis,
                     isClassification: prep.isClassification, modelId: mId, hp: tuneInside ? baseHp : hp, evalOptions: evalOptsC, keys,
-                    fitAndScoreMulti, tune: inner, isAborted,
+                    tune: inner
+                }, {
+                    isAborted,
                     onInnerProgress: (b, n, c, nc, f, nf) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: resample ${b}/${n}, ${tuneInside ? `combination ${c}/${nc}, ` : ''}fold ${f}/${nf}`); },
                     onResample: (b, n, t0) => {
                         const left = ((Date.now() - t0) / b) * (n - b) / 1000;

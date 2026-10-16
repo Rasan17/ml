@@ -395,6 +395,37 @@ async function optionC(VC, rows, cfg, modelId, hp, B, tune) {
         return `no censoring exact; ${(censored * 100).toFixed(0)}% censored: AUC ${aucC.toFixed(3)} vs true ${aucBin.toFixed(3)}, Brier ${bsC.toFixed(4)} vs ${bsBin.toFixed(4)}`;
     });
 
+    await check('Option C in the background worker: compute-worker.js runs the bootstrap loop and gives the same result as the page', async () => {
+        // Run the real worker script in a simulated worker scope (importScripts loads the project files)
+        const sent = [];
+        const scope = {
+            location: { search: '' },
+            postMessage: m => sent.push(m),
+            importScripts: (...files) => files.forEach(f => {
+                if (/tf\.min\.js/.test(f)) return; // TensorFlow.js is already loaded in this process
+                vm.runInThisContext(fs.readFileSync(path.join(dir, f.split('?')[0]), 'utf8'));
+            })
+        };
+        const workerCode = fs.readFileSync(path.join(dir, 'compute-worker.js'), 'utf8');
+        new Function('self', 'importScripts', `${workerCode}\nreturn self;`)(Object.assign(globalThis.__workerScope = {}, scope), scope.importScripts);
+        const ws = globalThis.__workerScope;
+        ws.location = scope.location; ws.postMessage = scope.postMessage;
+        const VC = loadValidationCore();
+        const { rows, cfg } = noiseCohort(60, 5, 41);
+        const analysis = DE.analyzeColumns(Object.keys(rows[0]), rows);
+        const metricDefs = { rocAuc: { label: 'ROC-AUC', higherIsBetter: true } };
+        const payload = { rows, boots: VC.bootstrapResamples(rows.length, 12, 3), configs: cfg, analysis, isClassification: true, modelId: 'glm', hp: { seed: 1 },
+            evalOptions: {}, keys: ['rocAuc', 'brierScore'], tune: { k: 3, seed: 3, groupCol: null, metricKey: 'rocAuc', metricDefs, doTune: true } };
+        await ws.onmessage({ data: { id: 1, op: 'bootstrap', payload: JSON.parse(JSON.stringify(payload)) } });
+        const done = sent.find(m => m.id === 1 && (m.result || m.error));
+        assert(done && done.result, `worker failed: ${done && done.error}`);
+        const progress = sent.filter(m => m.progress && m.progress.kind === 'resample').length;
+        const page = await VC.bootstrapOptimism({ ...payload, fitAndScoreMulti: localFitAndScoreMulti, tune: { ...payload.tune, fitAndScore: localFitAndScore } });
+        const d = Math.abs(done.result.optimism.rocAuc - page.optimism.rocAuc) + Math.abs(done.result.oobMean.rocAuc - page.oobMean.rocAuc);
+        assert(d < 1e-12 && done.result.B === page.B && progress === page.B, `worker and page differ (${d}; B ${done.result.B} vs ${page.B}; ${progress} progress messages)`);
+        return `${done.result.B} resamples with tuning repeated, ${progress} progress messages, identical optimism (${done.result.optimism.rocAuc.toFixed(4)})`;
+    });
+
     await check('Shapley explanations: exact TreeSHAP (RF, boosted trees) and sampled Shapley (logistic) match brute-force enumeration', async () => {
         const rows = cohort(200, 31, 'binary', { missing: true });
         const cfg = configs('binary');

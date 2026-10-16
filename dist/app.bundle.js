@@ -492,7 +492,7 @@ function versionedWorkerUrl() {
     try {
         const map = JSON.parse(document.querySelector('script[type="importmap"]').textContent).imports || {};
         const v = k => { const m = String(map[k] || '').match(/\?h=([0-9a-f]+)/); return m ? m[1] : ''; };
-        return `compute-worker.js?h=${v('./compute-worker.js')}&de=${v('./data-engine.js')}&m=${v('./models.js')}`;
+        return `compute-worker.js?h=${v('./compute-worker.js')}&de=${v('./data-engine.js')}&m=${v('./models.js')}&vc=${v('./dist/validation-core.worker.js')}`;
     } catch (e) {
         return 'compute-worker.js';
     }
@@ -645,6 +645,33 @@ async function fitAndScoreMulti(modelId, isClassification, numClasses, hp, X, y,
     } finally {
         if (m.dispose) m.dispose();
     }
+}
+
+/**
+ * Option C: the whole bootstrap loop of one model (validation-core.js bootstrapOptimism), run inside the
+ * worker so the page stays responsive; on the page when workers are unavailable. `payload` is the plain-data
+ * part of the options (tune.groupCol names the patient-ID column, if any); onResample(b, n, t0) and
+ * onInnerProgress(b, n, c, nc, f, nf) report progress.
+ */
+async function bootstrapRun(payload, { onResample = null, onInnerProgress = null, isAborted = null } = {}) {
+    if (workerAvailable()) {
+        try {
+            return await call('bootstrap', payload, {
+                isAborted,
+                onProgress: p => {
+                    if (p && p.kind === 'resample' && onResample) onResample(p.b, p.n, p.t0);
+                    else if (p && p.kind === 'inner' && onInnerProgress) onInnerProgress(p.b, p.n, p.c, p.nc, p.f, p.nf);
+                }
+            });
+        } catch (e) {
+            if (!e.workerUnavailable) throw e;
+        }
+    }
+    const t = payload.tune;
+    return bootstrapOptimism({
+        ...payload, fitAndScoreMulti, isAborted, onResample, onInnerProgress,
+        tune: t ? { ...t, fitAndScore, groupOf: t.groupCol ? (r => String(r[t.groupCol] ?? '').trim()) : null } : null
+    });
 }
 
 // ---- src/validation-core.js ----
@@ -4267,17 +4294,21 @@ async function startModelTraining() {
                 const evalRes = await ModelEngine.evaluateAsync(model, prep.X, prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
                 const wasTuned = autoTune && TUNABLE_MODELS.has(mId);
                 const tuneInside = wasTuned && !slowModel(mId);
+                const spec = splitSpec('standard');
                 const inner = (tuneInside || repeatSelection)
-                    ? { k: innerK, seed: seedC, groupOf: splitGroupFunction(), metricKey, metricDefs, doTune: tuneInside, fitAndScore }
+                    ? { k: innerK, seed: seedC, groupCol: spec.method === 'group' && spec.groupCol ? spec.groupCol : null, metricKey, metricDefs, doTune: tuneInside }
                     : null;
                 const Bm = slowModel(mId) ? Math.min(B, 50) : B;
                 const what = tuneInside ? ' (tuning repeated inside each resample)' : (inner ? ' (cross-validation repeated inside each resample)' : '');
                 const say = msg => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">${msg}</span>`; if (watchdog) watchdog.tick(i + 1, msg); };
                 say(`🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample 1/${Bm}${what}...`);
-                const run = await bootstrapOptimism({
+                // The whole loop runs in the background worker (on the page if workers are unavailable)
+                const run = await bootstrapRun({
                     rows: allRaw, boots, maxResamples: Bm, configs: AppState.columnConfigs, analysis: AppState.columnAnalysis,
                     isClassification: prep.isClassification, modelId: mId, hp: tuneInside ? baseHp : hp, evalOptions: evalOptsC, keys,
-                    fitAndScoreMulti, tune: inner, isAborted,
+                    tune: inner
+                }, {
+                    isAborted,
                     onInnerProgress: (b, n, c, nc, f, nf) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: resample ${b}/${n}, ${tuneInside ? `combination ${c}/${nc}, ` : ''}fold ${f}/${nf}`); },
                     onResample: (b, n, t0) => {
                         const left = ((Date.now() - t0) / b) * (n - b) / 1000;
