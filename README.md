@@ -160,6 +160,21 @@ Reproducibility is a fundamental prerequisite in scientific and clinical researc
 
 ---
 
+## 🆕 Version 2 additions
+
+- **Architecture:** the application controller is split into ES modules (`src/`, entry `src/main.js`) with no build step needed to run; `tools/build.js` generates a single-file fallback (`dist/app.bundle.js`, used when `index.html` is opened directly from disk) and a content-hash import map so browsers never run stale code after an update.
+- **Background computation:** training, cross-validation and bootstrap fits run in a Web Worker (`compute-worker.js`; TensorFlow.js on WebGL via OffscreenCanvas where available), keeping the page responsive; Force Stop terminates the worker immediately. Falls back to the page when workers are unavailable.
+- **Gradient-boosted trees:** histogram gradient boosting (binary, multiclass, regression) with early stopping; benchmarked as equivalent to scikit-learn's HistGradientBoosting.
+- **Survival analysis tab:** Cox proportional-hazards model (Efron ties) with hazard ratios, Harrell's C-index (bootstrap CI), calibration at a chosen horizon against Kaplan-Meier, Kaplan-Meier curves by risk group and single-patient survival predictions; validated against statsmodels.
+- **Option C – bootstrap internal validation:** Harrell's optimism correction using all patients (recommended by TRIPOD for small cohorts), with apparent, optimism and corrected performance and the corrected calibration slope.
+- **Recalibration:** Platt scaling or isotonic regression fitted on out-of-fold cross-validation predictions from the training set, carried through to predictions and model export.
+- **Multiple imputation:** MICE with predictive mean matching and Rubin's rules for the odds-ratio analysis; optional "was missing" indicator predictors.
+- **Minimum sample size:** Riley et al. criteria (as in pmsampsize) for binary and continuous outcomes.
+- **Exact Random Forest splits** (default below 5,000 patients).
+- **Reporting:** a pre-filled checklist aligned with TRIPOD+AI and a draft Methods paragraph.
+- **Accessibility:** labelled controls, skip link, visible keyboard focus, WCAG AA contrast in both themes.
+- **Browser tests:** Playwright smoke tests of the main user journeys run in CI.
+
 ## 📁 Pre-Loaded Sample Medical Cohorts
 
 The suite includes built-in clinical datasets for instant experimentation:
@@ -168,6 +183,7 @@ The suite includes built-in clinical datasets for instant experimentation:
 3. **📈 Functional Recovery Score Cohort (`medical_recovery_score.csv`):** Continuous regression dataset predicting post-operative clinical improvement points.
 4. **📂 Unseen Batch Cases (`medical_batch_unseen_cases.csv`):** 10 patient cases ready for immediate batch prediction.
 5. **🎗️ Breast Cancer Wisconsin Diagnostic (`breast_cancer_wisconsin.csv`):** the public UCI dataset (569 patients, 30 continuous predictors, benign vs malignant). Large enough to show stable performance estimates and meaningful calibration; the sample cohorts above are small demonstrations (20–40 patients) on which models can look unrealistically good.
+6. **⏱️ Shunt Revision Time-to-Event Cohort (`medical_shunt_revision_survival.csv`):** simulated cohort of 320 patients with time to shunt revision or censoring, for the Survival tab.
 
 ---
 
@@ -175,15 +191,16 @@ The suite includes built-in clinical datasets for instant experimentation:
 
 - **Single train/test split.** Final performance is estimated on one held-out split. With cross-validated model selection (default) the winner's test score is not selection-biased, but it is still imprecise for small test sets; if selection by Testing-set results is chosen, the winner's score is optimistic. Confirm the chosen model on an independent cohort (Option B) before reporting.
 - **Splitting design.** Random, patient-grouped and date-based splits are built in; multicentre (site-based) validation needs a separate cohort (Option B). With a date-based split, cross-validation inside the training period uses folds that are not time-ordered.
-- **Remaining gaps:** no recalibration (Platt/isotonic), no bootstrap optimism-corrected internal validation, single (not multiple) imputation, no survival (time-to-event) or gradient-boosted models, and all computation runs on the browser's main thread.
-- **Probabilities are not recalibrated.** Random Forest and hard voting give vote shares, k-NN gives neighbour shares. Calibration is assessed (plot, slope, intercept, Brier score), but no recalibration (e.g. Platt or isotonic) is applied; calibration estimates are imprecise with fewer than about 100 patients with and without the outcome.
+- **Remaining gaps:** multiple imputation is used for the explanatory odds ratios, while the predictive models use single imputation; random survival forests and time-dependent ROC curves are not included; fairness across patient subgroups is not assessed automatically; the 7-step pipeline keeps its six fixed models (gradient boosting is in the standard workflow).
+- **Probabilities:** Random Forest and hard voting give vote shares, k-NN gives neighbour shares. Calibration is assessed (plot, slope, intercept, Brier score) and optional Platt/isotonic recalibration is available; calibration estimates are imprecise with fewer than about 100 patients with and without the outcome.
+- **Survival model:** assumes proportional hazards (check that Kaplan-Meier curves do not cross); calibration is assessed at one horizon by grouped Kaplan-Meier estimates.
 - **Exploratory 2×2 for continuous outcomes.** Cut at the training-data median, not a clinical threshold; these are not diagnostic accuracy measures.
 - **Feature importance (MDI)** ranks predictors for this model and data; it is not evidence of causal or clinical effect, and it can favour features with many distinct values.
 - **Ensemble** is a voting / performance-weighted ensemble, not a cross-validated stacked Super Learner.
 - **Variance conventions.** Feature scaling and tree impurity use the population variance (÷ n, as in scikit-learn); classical statistics (skewness G₁, ANOVA, Pearson/χ² tests) use the standard sample formulas, and displayed SDs are sample SDs (÷ (n − 1)).
 - **Collinearity.** Multi-level categorical features use the Generalised VIF (Fox & Monette), shown as GVIF^(1/df) so the VIF > 5 rule applies.
 - **Univariate screening** (p < 0.05) is informational; selecting predictors by p-value can bias models and is left to the user's judgement.
-- **Scale.** Everything runs in the browser's main thread. Training and SMOTENC are optimised and yield to the browser, but very large cohorts (tens of thousands of rows, or nominal variables with many levels) can still be slow; Force Stop takes effect at the next epoch, tree or batch of iterations.
+- **Scale.** Model training runs in a background worker; data preparation (imputation, SMOTENC, fold preparation) still runs on the page and can briefly pause it for very large cohorts (tens of thousands of rows, or nominal variables with many levels).
 - **Not a medical device.** For research and education only; not for individual clinical decisions without independent validation.
 
 ## ✅ Verification Tests
@@ -191,18 +208,20 @@ The suite includes built-in clinical datasets for instant experimentation:
 From the project folder (Node.js; the reference check also needs Python with SciPy, scikit-learn and statsmodels):
 
 ```bash
-node tests/reference_check.js && python3 tests/reference_check.py   # 50 checks against SciPy / scikit-learn / statsmodels (incl. calibration, DeLong, average precision, decision curve, IRLS odds ratios)
+node tests/reference_check.js && python3 tests/reference_check.py   # 61 checks against SciPy / scikit-learn / statsmodels (incl. calibration, recalibration, DeLong, decision curve, IRLS odds ratios, Rubin's rules, t distribution, Cox model, C-index, Kaplan-Meier)
 node tests/edge_cases.js                                           # robustness: single class, all-missing, constant features, imbalance, zero-variance target
 node tests/end_to_end.js                                           # 13 end-to-end checks (incl. export/import of all six model types): binary/multiclass/regression, missing values, unseen categories, rare outcome, tiny cohort, patient/date splits, calibration, threshold, NN fallback, batch = evaluation preprocessing
 python3 tests/benchmark_vs_python.py                               # app vs scikit-learn / PyTorch / imbalanced-learn (~2 min)
 python3 tests/nn_forward_check.py                                  # exact forward pass of the trained TF.js network, recomputed in NumPy
+npm install && npx playwright install chromium && npx playwright test   # browser smoke tests of the user interface (also run in CI)
+node tools/build.js                                                # rebuild the file:// bundle and import-map versions after editing src/
 ```
 
 These checks also run automatically on every push (GitHub Actions, `.github/workflows/tests.yml`).
 
 `tests/gpu_cpu_check.html` checks, in the browser itself, that the GPU (WebGL) backend users get gives the same neural-network predictions as the CPU backend used by the automated tests. Serve the project folder (`python3 -m http.server`) and open `http://localhost:8000/tests/gpu_cpu_check.html`; it also reports whether the GPU computes in full float32 precision on that machine.
 
-The benchmark runs the app's own engine (with the real TensorFlow.js network) on three public datasets over 10 paired train/test splits and writes [`tests/BENCHMARK_REPORT.md`](tests/BENCHMARK_REPORT.md). Latest result: preprocessing, k-NN and naive Bayes match scikit-learn to rounding; Random Forest, the neural network (vs PyTorch), logistic/ridge regression and the voting ensemble are equivalent within pre-specified margins (AUC ±0.02, accuracy/F1 ±0.03, R² ±0.05); SMOTENC matches imbalanced-learn in synthetic-data distribution and downstream AUC. Additional requirements: Python packages `torch` and `imbalanced-learn`.
+The benchmark runs the app's own engine (with the real TensorFlow.js network) on three public datasets over 10 paired train/test splits and writes [`tests/BENCHMARK_REPORT.md`](tests/BENCHMARK_REPORT.md). Latest result: preprocessing, k-NN and naive Bayes match scikit-learn to rounding; Random Forest, gradient-boosted trees (vs HistGradientBoosting), the neural network (vs PyTorch), logistic/ridge regression and the voting ensemble are equivalent within pre-specified margins (AUC ±0.02, accuracy/F1 ±0.03, R² ±0.05); SMOTENC matches imbalanced-learn in synthetic-data distribution and downstream AUC. Additional requirements: Python packages `torch` and `imbalanced-learn`.
 
 ## 🚀 How to Run
 
@@ -216,7 +235,7 @@ The benchmark runs the app's own engine (with the real TensorFlow.js network) on
    python3 -m http.server 8080
    ```
    Then navigate to `http://localhost:8080`.
-3. Double-clicking `index.html` also opens the app and works with your own uploaded CSV files, but browsers block the built-in sample cohorts from loading over `file://`, so use a local server (or the online version) for those.
+3. Double-clicking `index.html` also opens the app (it then uses the single-file bundle and runs training on the page instead of a background worker) and works with your own uploaded CSV files, but browsers block the built-in sample cohorts from loading over `file://`, so use a local server (or the online version) for those.
 
 ---
 

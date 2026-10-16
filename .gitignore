@@ -5,3 +5,7 @@ tests/bench_work/
 
 __MACOSX/
 *.zip
+
+node_modules/
+test-results/
+playwright-report/

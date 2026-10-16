@@ -10,4 +10,4 @@ This application bundles the following third-party software and data. Their lice
 
 The full texts of the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0) and the MIT Licence (https://opensource.org/license/mit) apply to the respective components.
 
-The test scripts additionally use, but do not bundle, SciPy, NumPy, scikit-learn, statsmodels, PyTorch and imbalanced-learn (BSD / Apache-style licences).
+The test scripts additionally use, but do not bundle, Playwright (Apache-2.0, development only), SciPy, NumPy, scikit-learn, statsmodels, PyTorch and imbalanced-learn (BSD / Apache-style licences).

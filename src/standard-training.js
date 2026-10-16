@@ -523,8 +523,8 @@ async function startModelTraining() {
         if (testedResults.length === 1) {
             const singleRes = champion.evalRes;
             const accText = singleRes.isClassification
-                ? `Test Accuracy: ${(singleRes.accuracy * 100).toFixed(1)}% (ROC-AUC: ${singleRes.rocAuc !== null && singleRes.rocAuc !== undefined ? singleRes.rocAuc.toFixed(3) : 'N/A'})`
-                : `Test R²: ${fmtR2(singleRes.r2)} (RMSE: ${singleRes.rmse.toFixed(3)})`;
+                ? `${isOptionC ? 'Optimism-corrected accuracy' : 'Test Accuracy'}: ${(singleRes.accuracy * 100).toFixed(1)}% (ROC-AUC: ${singleRes.rocAuc !== null && singleRes.rocAuc !== undefined ? singleRes.rocAuc.toFixed(3) : 'N/A'})`
+                : `${isOptionC ? 'Optimism-corrected R²' : 'Test R²'}: ${fmtR2(singleRes.r2)} (RMSE: ${singleRes.rmse.toFixed(3)})`;
             DOM.trainStatus.innerHTML = `
                 <div style="display: flex; flex-direction: column; gap: 3px;">
                     <span style="color: var(--accent-emerald); font-weight: 700;">
@@ -1032,7 +1032,7 @@ function renderEvaluationDashboard() {
                                     ${anyCV ? `<th title="Score inside the Training set by cross-validation (mean ± SD across folds); used to choose the best model">CV ${escapeHtml(rankingMetricLabel(prep.isClassification))}</th>` : ''}
                                     <th>Model Algorithm</th>
                                     <th>Paradigm</th>
-                                    <th>${prep.isClassification ? 'Test Accuracy' : 'Test R²'}</th>
+                                    <th>${isOptionC ? (prep.isClassification ? 'Corrected Accuracy' : 'Corrected R²') : (prep.isClassification ? 'Test Accuracy' : 'Test R²')}</th>
                                     <th>${prep.isClassification ? 'ROC-AUC' : 'RMSE'}</th>
                                     <th>${prep.isClassification ? 'Macro F1' : 'MAE'}</th>
                                     <th>${prep.isClassification ? 'Precision' : 'MSE'}</th>
