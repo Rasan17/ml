@@ -1,7 +1,7 @@
 // tripod.js: pre-filled reporting checklist aligned with the TRIPOD+AI topics (Collins et al., BMJ 2024;385:e078378)
 // and a draft Methods paragraph, generated from the analysis actually run. Items are described in our own
 // words; authors must check them against the official checklist and complete the items marked for them.
-import { AppState, APP_VERSION, MODEL_INFO, rankingMetricLabel } from './core.js';
+import { AppState, APP_VERSION, MODEL_INFO, RESEARCH_USE_NOTICE, rankingMetricLabel } from './core.js';
 import { describeSplit } from './cv-tuning.js';
 
 const esc = s => String(s === null || s === undefined ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -117,6 +117,7 @@ h1{font-size:20px}h2{font-size:16px;margin-top:28px}table{border-collapse:collap
 th{background:#f1f5f9}.auto{color:#047857;font-weight:600}.partly{color:#b45309;font-weight:600}.author{color:#b91c1c;font-weight:600}.tp-author{color:#b91c1c}
 .note{color:#475569;font-size:12.5px}@media print{body{margin:0}}</style></head><body>
 <h1>Reporting checklist aligned with TRIPOD+AI, pre-filled from this analysis</h1>
+<p style="border:2px solid #b45309;padding:8px 12px;font-weight:600">${esc(RESEARCH_USE_NOTICE)}</p>
 <p class="note">Generated ${esc(new Date().toISOString().slice(0, 10))} by Universal Medical ML/NeuralNet Predictor v${esc(APP_VERSION)} (${d.source === 'pipeline' ? '7-step pipeline' : 'standard workflow'}). Items follow the topics of the TRIPOD+AI statement (Collins GS et al. BMJ 2024;385:e078378); wording is summarised. <strong>Check every item against the official checklist</strong> (tripod-statement.org) and complete those marked for the authors.</p>
 <table><thead><tr><th>Topic</th><th>What to report (summary)</th><th>From this analysis</th><th>Status</th></tr></thead><tbody>
 ${items.map(([t, w, v, st]) => `<tr><td><strong>${esc(t)}</strong></td><td>${esc(w)}</td><td>${v}</td><td class="${st}">${statusLabel[st]}</td></tr>`).join('\n')}

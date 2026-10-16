@@ -1,5 +1,6 @@
 // pipeline-train.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from pipeline.js)
 import { fitModel } from './compute.js';
+import { youdenThreshold } from './validation-core.js';
 import { AppState, actionAttrs, compareEvalResults, describeNNTraining, displayModelName, escapeHtml, fmtR2, parseSeed, rankingMetricLabel, summariseHeldOutSet, trainingMedian } from './core.js';
 import { TUNABLE_MODELS, TUNE_MAX_ROWS, bootstrapFor, buildPipelineFolds, ciScopeNote, ciSpan, cvSummaryFrom, fitRecalibrator, formatCvScore, readDecisionThreshold, readRecalibration, recalibrateAndEvaluate, renderTuningReport, runTuningOnFolds } from './cv-tuning.js';
 import { renderCalibrationPanel, renderExplainPanel } from './panels.js';
@@ -276,6 +277,7 @@ async function executePipelineStep7() {
         }
         // Cross-validated scores (model selection inside the Training set) when that mode is chosen
         benchmarkList.forEach(b => { if (cvByModel[b.id]) b.eval.cv = cvByModel[b.id]; });
+        if (isClassification && numClasses === 2) benchmarkList.forEach(b => { const y = youdenThreshold(oofByModel[b.id]); if (y) b.eval.youden = y; });
         // Bootstrap 95% confidence intervals for every test metric
         for (const b of benchmarkList) {
             if (watchdog) watchdog.tick(totalModels, `Computing 95% confidence intervals (bootstrap): ${b.name}...`);

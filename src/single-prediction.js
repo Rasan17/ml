@@ -73,12 +73,19 @@ function runSinglePrediction() {
     });
 
     const inputIssues = [];
-    const xVector = DataEngine.transformSingleRow(inputRow, AppState.prepMeta, inputIssues);
+    const outOfRange = [];
+    const xVector = DataEngine.transformSingleRow(inputRow, AppState.prepMeta, inputIssues, outOfRange);
     const result = thresholdedOutput(AppState.trainedModel.predictSingle(xVector));
     const prep = AppState.prepMeta;
     const inputWarningHtml = inputIssues.length > 0
         ? `<div style="font-size: 11.5px; color: var(--accent-amber); margin-top: 6px; font-weight: 600;">
                 ⚠️ Blank input(s) filled as in training (the fitted missing-data method); unrecognised values replaced with the most frequent training category / middle rank: ${escapeHtml(inputIssues.map(i => i.column).join(', '))}
+           </div>`
+        : '';
+    const fmtNum = v => (Math.abs(v) >= 100 ? v.toFixed(0) : Number(v.toPrecision(3)).toString());
+    const rangeWarningHtml = outOfRange.length > 0
+        ? `<div style="font-size: 11.5px; color: var(--accent-rose); margin-top: 6px; font-weight: 600;">
+                ⚠️ Outside the range of the training patients: ${outOfRange.map(o => `${escapeHtml(o.column)} = ${escapeHtml(fmtNum(o.value))} (training ${escapeHtml(fmtNum(o.min))}–${escapeHtml(fmtNum(o.max))})`).join('; ')}. Check for a typing error; if the value is correct, the prediction is an extrapolation beyond the data the model learned from and may be unreliable.
            </div>`
         : '';
 
@@ -129,7 +136,7 @@ function runSinglePrediction() {
                     Active Model: <strong>${escapeHtml(displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel))}</strong> &bull; Target: <em>${escapeHtml(prep.targetCol)}</em>${seedSnippet}
                 </div>
                 ${ensembleDetailsHtml}
-                ${inputWarningHtml}
+                ${inputWarningHtml}${rangeWarningHtml}
                 ${renderPatientExplanation(AppState.trainedModel, xVector, prep, inputRow)}
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
                     ${probabilityLabel(result.probabilityType).note}: not a calibrated clinical risk or a measure of certainty (check the calibration panel and Brier score in Step 4 / Step 7). For research and educational use only.${AppState.evalResults && AppState.evalResults.decisionThreshold && Math.abs(AppState.evalResults.decisionThreshold - 0.5) > 1e-9 ? ` Classed with a decision threshold of ${AppState.evalResults.decisionThreshold.toFixed(2)} for the positive outcome.` : ''}
@@ -155,7 +162,7 @@ function runSinglePrediction() {
                     Active Model: <strong>${escapeHtml(displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel))}</strong> &bull; Unit/Scale: <em>${escapeHtml(prep.targetCol)}</em>${seedSnippet}
                 </div>
                 ${ensembleDetailsHtml}
-                ${inputWarningHtml}
+                ${inputWarningHtml}${rangeWarningHtml}
                 ${renderPatientExplanation(AppState.trainedModel, xVector, prep, inputRow)}
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">For research and educational use only; not for decisions about an individual patient's care.</div>
             </div>

@@ -175,6 +175,8 @@ function cssEscape(value) {
 
 // Software version recorded in exported reports and settings files
 const APP_VERSION = '2026.10.16';
+// Stamped on every exported report, model file and checklist
+const RESEARCH_USE_NOTICE = 'Investigational research and education use only. Not a certified medical device; not validated for individual clinical decisions.';
 
 // Ranking policy (one policy for Step 4 and the 7-step pipeline; selectable by the user so the
 // primary metric can match the prespecified study objective)
@@ -253,4 +255,4 @@ function summariseHeldOutSet(ev) {
     return notes;
 }
 
-export { AppState, MODEL_INFO, ALL_MODEL_IDS, escapeHtml, actionAttrs, trainingMedian, renderExploratoryCutoffTable, PROBABILITY_LABELS, probabilityLabel, displayModelName, parseSeed, fmtValue, fmtR2, describeNNTraining, describeNNTrainingCore, cssEscape, APP_VERSION, RANKING_METRICS, rankingMetricKey, rankingMetricLabel, compareEvalResults, summariseHeldOutSet };
+export { RESEARCH_USE_NOTICE, AppState, MODEL_INFO, ALL_MODEL_IDS, escapeHtml, actionAttrs, trainingMedian, renderExploratoryCutoffTable, PROBABILITY_LABELS, probabilityLabel, displayModelName, parseSeed, fmtValue, fmtR2, describeNNTraining, describeNNTrainingCore, cssEscape, APP_VERSION, RANKING_METRICS, rankingMetricKey, rankingMetricLabel, compareEvalResults, summariseHeldOutSet };

@@ -62,6 +62,6 @@ out.rubin=ME.poolRubin(out.rubinIn,120); out.tq=[ME.tQuantile(0.975,4.3),ME.tQua
 // Cox proportional hazards (Efron ties), Breslow baseline, Harrell's C-index, Kaplan-Meier
 const cxX=[],cxT=[],cxE=[];for(let i=0;i<250;i++){const a=rnd()*2-1,b=rnd()<0.5?1:0,c=rnd()*2-1; const h=Math.exp(0.8*a-0.5*b+0.3*c); const t=-Math.log(rnd()||1e-9)/h, cens=rnd()*2.5; cxX.push([a,b,c]); cxT.push(Math.round(Math.min(t,cens)*20)/20+0.05); cxE.push(t<=cens?1:0);}
 const cox=new window.CoxModel().fit(cxX,cxT,cxE); out.cxX=cxX; out.cxT=cxT; out.cxE=cxE; out.cox={beta:cox.beta,se:cox.se,loglik:cox.loglik,converged:cox.converged,H:[0.3,0.8,1.5].map(t=>cox.cumHazAt(t))};
-out.cindex=ME.concordanceIndex(cxT,cxE,cxX.map(x=>cox.linearPredictor(x))); const km=ME.kaplanMeier(cxT,cxE); out.km=[0.5,1,2].map(t=>ME.kmAt(km,t));
+out.cindex=ME.concordanceIndex(cxT,cxE,cxX.map(x=>cox.linearPredictor(x))); const km=ME.kaplanMeier(cxT,cxE); out.km=[0.5,1,2].map(t=>ME.kmAt(km,t)); out.kmSE=[0.5,1,2].map(t=>ME.kmStepAt(km,t).se); out.kmCI=[0.5,1,2].map(t=>{const s=ME.kmStepAt(km,t); return [s.lower,s.upper];});
 fs.writeFileSync(path.join(__dirname,'reference_values.json'),JSON.stringify(out));
 console.log('App values written to tests/reference_values.json; now run: python3 tests/reference_check.py');

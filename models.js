@@ -1168,7 +1168,7 @@
                             val_acc: H.val_acc ? H.val_acc[0] : (H.val_accuracy ? H.val_accuracy[0] : undefined)
                         };
                         if (!Number.isFinite(logs.loss)) {
-                            throw new Error(`Neural network training diverged at epoch ${epoch + 1} (loss is not finite). Reduce the learning rate.`);
+                            throw new Error(`Neural network training diverged at epoch ${epoch + 1} (the loss became infinite or not a number, usually exploding gradients). Lower the learning rate from ${this.learningRate} to about ${Number((this.learningRate / 10).toPrecision(2))}, or check the predictors for extreme values.`);
                         }
 
                         history.loss.push(Number(logs.loss.toFixed(4)));
@@ -2837,18 +2837,36 @@
             return comp ? conc / comp : null;
         },
 
-        /** Kaplan-Meier survival estimate: [{time, survival, atRisk, events}] */
+        /**
+         * Kaplan-Meier survival estimate: [{time, survival, atRisk, events, se, lower, upper}]. se is Greenwood's
+         * standard error; lower/upper is the 95% confidence interval on the log(-log S) scale, which always
+         * stays within 0-1 (undefined once S reaches 0 or while it is 1).
+         */
         kaplanMeier(time, event) {
             const ts = [...new Set(time)].sort((a, b) => a - b);
-            let S = 1;
-            const out = [{ time: 0, survival: 1, atRisk: time.length, events: 0 }];
+            let S = 1, gw = 0;
+            const out = [{ time: 0, survival: 1, atRisk: time.length, events: 0, se: 0, lower: 1, upper: 1 }];
             ts.forEach(t => {
                 const atRisk = time.filter(v => v >= t).length;
                 const d = time.filter((v, i) => v === t && event[i] === 1).length;
-                if (d > 0 && atRisk > 0) { S *= 1 - d / atRisk; out.push({ time: t, survival: S, atRisk, events: d }); }
+                if (d > 0 && atRisk > 0) {
+                    S *= 1 - d / atRisk;
+                    if (atRisk > d) gw += d / (atRisk * (atRisk - d));
+                    const se = S * Math.sqrt(gw);
+                    let lower = null, upper = null;
+                    if (S > 0 && S < 1) {
+                        const w = 1.959964 * Math.sqrt(gw) / Math.abs(Math.log(S)); // SE of log(-log S)
+                        const ll = Math.log(-Math.log(S));
+                        lower = Math.exp(-Math.exp(ll + w));
+                        upper = Math.exp(-Math.exp(ll - w));
+                    }
+                    out.push({ time: t, survival: S, atRisk, events: d, se, lower, upper });
+                }
             });
             return out;
         },
+        /** The Kaplan-Meier step at time t (its survival, se and 95% CI) */
+        kmStepAt(km, t) { let s = km[0]; for (const k of km) { if (k.time <= t) s = k; else break; } return s; },
         kmAt(km, t) { let s = 1; for (const k of km) { if (k.time <= t) s = k.survival; else break; } return s; },
         /** Kaplan-Meier value just before t (left limit), as needed for censoring weights */
         kmBefore(km, t) { let s = 1; for (const k of km) { if (k.time < t) s = k.survival; else break; } return s; },

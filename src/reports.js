@@ -1,5 +1,5 @@
 // reports.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { APP_VERSION, AppState, MODEL_INFO, escapeHtml, rankingMetricLabel, actionAttrs } from './core.js';
+import { APP_VERSION, AppState, MODEL_INFO, RESEARCH_USE_NOTICE, escapeHtml, rankingMetricLabel, actionAttrs } from './core.js';
 import { describeSplit } from './cv-tuning.js';
 import { executePipelineStep7 } from './pipeline-train.js';
 import { SETTINGS_APP } from './settings.js';
@@ -239,6 +239,7 @@ function downloadStandardAnalysisReport() {
     const target = Object.keys(cfgs).find(c => cfgs[c].role === 'target');
     const report = {
         title: 'Standard Workflow (Step 4) Analysis Report',
+        notice: RESEARCH_USE_NOTICE,
         software: { name: SETTINGS_APP, version: APP_VERSION, url: location.href.split('?')[0] },
         generated_at: new Date().toISOString(),
         dataset: { name: AppState.fileName, records: AppState.parsedData ? AppState.parsedData.rows.length : null, columns: AppState.parsedData ? AppState.parsedData.headers.length : null },

@@ -1,5 +1,5 @@
 // model-io.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { APP_VERSION, AppState, displayModelName, rankingMetricLabel } from './core.js';
+import { APP_VERSION, AppState, RESEARCH_USE_NOTICE, displayModelName, rankingMetricLabel } from './core.js';
 import { describeSplit } from './cv-tuning.js';
 import { goToStep } from './navigation.js';
 import { updatePredictionProvenanceBar } from './pipeline-results.js';
@@ -69,7 +69,7 @@ async function exportTrainedModel() {
             : AppState.deployedSource === 'imported' && AppState.importedModelInfo ? AppState.importedModelInfo.name
             : displayModelName(AppState.deployedModelId || AppState.selectedModelId, model);
         const bundle = {
-            format: MODEL_FILE_FORMAT, formatVersion: 1,
+            format: MODEL_FILE_FORMAT, formatVersion: 1, notice: RESEARCH_USE_NOTICE,
             software: { name: SETTINGS_APP, version: APP_VERSION },
             exportedAt: new Date().toISOString(),
             model: { id: AppState.deployedModelId || AppState.selectedModelId, name, workflow: AppState.deployedSource || 'standard', seed: model.seed ?? null },
@@ -150,6 +150,7 @@ function downloadPipelineProtocolReport() {
         },
         conceived_and_directed_by: "Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)",
         generated_at: new Date().toISOString(),
+        notice: RESEARCH_USE_NOTICE,
         dataset_name: AppState.fileName,
         target_variable: AppState.pipeline.targetCol,
         reproducibility_seed: AppState.pipeline.evalSeed,

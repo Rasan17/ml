@@ -93,11 +93,23 @@ function capRows(rows, isClassification, targetCol, seed, groupOf) {
     return { rows: rows.filter((_, i) => pick[i] === 0), sampled: true };
 }
 
+// Folds for stratified cross-validation: no more folds than patients in the smaller outcome group, so that
+// every validation fold contains both outcomes (otherwise its AUC is undefined and its F1 is distorted)
+function effectiveFolds(rows, k, isClassification, targetCol) {
+    if (!isClassification) return k;
+    const counts = {};
+    rows.forEach(r => { const v = String(r[targetCol]).trim(); counts[v] = (counts[v] || 0) + 1; });
+    const minority = Math.min(...Object.values(counts));
+    return Math.max(2, Math.min(k, minority));
+}
+
 // Leak-free folds from raw rows: imputation, encoding and scaling are fitted on each fold's learning
 // rows only and then applied to that fold's validation rows
 async function buildRowFolds(rawRows, k, o, onFold) {
     const { configs, analysis, isClassification, targetCol, seed, groupOf = null, stratifyGroups = false, decisionThreshold = null } = o;
     const cap = capRows(rawRows, isClassification, targetCol, seed, groupOf);
+    const requestedFolds = k;
+    k = effectiveFolds(cap.rows, k, isClassification, targetCol);
     const fold = assignRowFolds(cap.rows, k, isClassification, targetCol, seed, groupOf, stratifyGroups);
     const sets = [];
     for (let f = 0; f < k; f++) {
@@ -111,7 +123,7 @@ async function buildRowFolds(rawRows, k, o, onFold) {
         if (onFold) onFold(f + 1, k);
         await ModelEngine.yieldToBrowser();
     }
-    return { sets, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), decisionThreshold };
+    return { sets, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), decisionThreshold, requestedFolds };
 }
 
 // Compare the grid by mean cross-validated ranking metric over pre-built folds.
@@ -178,9 +190,29 @@ async function runTuningCore(mId, baseHp, fd, isClassification, numClasses, o) {
     });
     return {
         modelId: mId, keys, results, best, own: results.find(r => r.isOwn),
-        bestHp: { ...baseHp, ...best.params }, folds: k, rowsUsed: fd.rowsUsed, rowsTotal: fd.rowsTotal,
+        bestHp: { ...baseHp, ...best.params }, folds: k, requestedFolds: fd.requestedFolds || k, rowsUsed: fd.rowsUsed, rowsTotal: fd.rowsTotal,
         sampled: fd.sampled, grouped: Boolean(fd.grouped), metricKey, metricLabel: metricDef.label, higherIsBetter: metricDef.higherIsBetter
     };
+}
+
+// Youden's J on out-of-fold training predictions: the threshold maximising sensitivity + specificity - 1.
+// Informational only (it weighs a missed case and a false alarm equally); oof = { p: [...], y: [0/1...] }
+function youdenThreshold(oof) {
+    if (!oof || !Array.isArray(oof.p) || oof.p.length < 20) return null;
+    const P = oof.y.filter(v => v === 1).length, N = oof.y.length - P;
+    if (P < 5 || N < 5) return null;
+    const order = oof.p.map((_, i) => i).sort((a, b) => oof.p[b] - oof.p[a]);
+    let tp = 0, fp = 0, best = null;
+    for (let k = 0; k < order.length; k++) {
+        const i = order[k];
+        if (oof.y[i] === 1) tp++; else fp++;
+        if (k + 1 < order.length && oof.p[order[k + 1]] === oof.p[i]) continue; // a threshold between distinct values
+        const sens = tp / P, spec = 1 - fp / N, J = sens + spec - 1;
+        const next = k + 1 < order.length ? oof.p[order[k + 1]] : 0;
+        const threshold = (oof.p[i] + next) / 2;
+        if (!best || J > best.J + 1e-12) best = { threshold, sensitivity: sens, specificity: spec, J };
+    }
+    return best ? { ...best, n: oof.p.length } : null;
 }
 
 // =========================================================================
@@ -373,4 +405,4 @@ function plus632(key, apparent, oobValue, noInfo) {
     return { value: T.from(app + w * (err1 - app)), weight: w, overfit: R };
 }
 
-export { TUNE_MAX_ROWS, TUNABLE_MODELS, FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, medianOf, tuningGrid, makeFolds, assignRowFolds, capRows, buildRowFolds, runTuningCore, bootstrapResamples, bootstrapOptimism, selectionOptimism, noInformationRates, plus632 };
+export { TUNE_MAX_ROWS, TUNABLE_MODELS, FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, medianOf, tuningGrid, makeFolds, assignRowFolds, capRows, effectiveFolds, buildRowFolds, runTuningCore, bootstrapResamples, bootstrapOptimism, selectionOptimism, noInformationRates, plus632, youdenThreshold };

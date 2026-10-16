@@ -1,6 +1,6 @@
 // cv-tuning.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { fitAndScore, fitModel } from './compute.js';
-import { TUNE_MAX_ROWS, TUNABLE_MODELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildRowFolds, runTuningCore } from './validation-core.js';
+import { TUNE_MAX_ROWS, TUNABLE_MODELS, tuningGrid, makeFolds, assignRowFolds, capRows, effectiveFolds, buildRowFolds, runTuningCore } from './validation-core.js';
 import { AppState, MODEL_INFO, RANKING_METRICS, escapeHtml, parseSeed, rankingMetricKey } from './core.js';
 import { disposeModels, evalAbortOpts, fitWithYields } from './training-actions.js';
 // =========================================================================
@@ -242,6 +242,8 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const cap = capRows(trainRows, isClassification, targetCol, seed, groupOf);
     const rows = cap.rows;
     const sampled = cap.sampled;
+    const requestedFolds = k;
+    k = effectiveFolds(rows, k, isClassification, targetCol);
     const fold = assignRowFolds(rows, k, isClassification, targetCol, seed, groupOf);
     const cfg = {};
     cols.forEach(c => { cfg[c] = p.columnConfigs[c]; });
@@ -268,7 +270,7 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
         if (onFold) onFold(f + 1, k);
         await ModelEngine.yieldToBrowser(); // keep the page responsive between folds
     }
-    return { sets, rowsUsed: rows.length, rowsTotal: trainRows.length, sampled, grouped: Boolean(groupOf), selections: inFoldSelection ? selections : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold') };
+    return { sets, rowsUsed: rows.length, rowsTotal: trainRows.length, sampled, grouped: Boolean(groupOf), selections: inFoldSelection ? selections : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds };
 }
 
 // Show the chosen settings in the model's settings panel (so they are visible and saved with Save settings)
@@ -318,7 +320,7 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
                     <span class="pill" style="font-size: 10px; ${changed ? 'background: rgba(16,185,129,0.15); color: var(--accent-emerald);' : 'background: rgba(100,116,139,0.15); color: var(--text-muted);'}">${changed ? 'Settings changed' : (report.pipeline ? 'Protocol default kept' : 'Your settings kept')}</span></div>
                 <div>Chosen: ${describe(t, t.best.params)} &mdash; cross-validated ${escapeHtml(t.metricLabel)} ${fmtScore(t.best, t)}</div>
                 ${changed ? `<div class="tune-muted">${report.pipeline ? 'Protocol default' : 'Your settings'} (${describe(t, t.own.params)}) scored ${fmtScore(t.own, t)}.</div>` : ''}
-                <div class="tune-muted">${t.results.length} combination(s) × ${t.folds} folds on ${t.rowsUsed.toLocaleString('en-GB')}${t.sampled ? ` (a stratified sample of ${t.rowsTotal.toLocaleString('en-GB')})` : ''} training cases.</div>
+                <div class="tune-muted">${t.results.length} combination(s) × ${t.folds} folds${t.requestedFolds > t.folds ? ` (reduced from ${t.requestedFolds}: the smaller outcome group has too few patients to place some in every fold)` : ''} on ${t.rowsUsed.toLocaleString('en-GB')}${t.sampled ? ` (a stratified sample of ${t.rowsTotal.toLocaleString('en-GB')})` : ''} training cases.</div>
                 <details><summary>Show all combinations tried</summary>
                     <table class="data-table tune-table"><thead><tr>${t.keys.map(k => `<th>${escapeHtml(TUNE_LABELS[k] || k)}</th>`).join('')}<th>CV ${escapeHtml(t.metricLabel)} (mean ± SD)</th><th></th></tr></thead>
                     <tbody>${sorted.map(r => `<tr${r === t.best ? ' class="tune-best"' : ''}>${t.keys.map(k => `<td>${escapeHtml(fmtTuneValue(k, r.params[k]))}</td>`).join('')}<td>${fmtScore(r, t)}</td><td>${r === t.best ? '✓ chosen' : ''}${r.isOwn ? (report.pipeline ? ' (protocol default)' : ' (your settings)') : ''}</td></tr>`).join('')}</tbody></table>

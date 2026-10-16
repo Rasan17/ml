@@ -178,6 +178,8 @@ function cssEscape(value) {
 
 // Software version recorded in exported reports and settings files
 const APP_VERSION = '2026.10.16';
+// Stamped on every exported report, model file and checklist
+const RESEARCH_USE_NOTICE = 'Investigational research and education use only. Not a certified medical device; not validated for individual clinical decisions.';
 
 // Ranking policy (one policy for Step 4 and the 7-step pipeline; selectable by the user so the
 // primary metric can match the prespecified study objective)
@@ -511,6 +513,11 @@ function createWorker() {
             clearInterval(job.timer);
             if (error !== undefined) job.reject(new Error(error)); else job.resolve(result);
         };
+        // A result that cannot be read (e.g. it could not be copied between threads): fail the jobs, never hang
+        w.onmessageerror = () => {
+            pending.forEach(job => { clearInterval(job.timer); job.reject(new Error('The background worker sent a result that could not be read.')); });
+            pending.clear();
+        };
         w.onerror = (e) => {
             // A worker that cannot start (e.g. blocked script) is not used again; pending jobs fall back
             workerBroken = true;
@@ -788,11 +795,23 @@ function capRows(rows, isClassification, targetCol, seed, groupOf) {
     return { rows: rows.filter((_, i) => pick[i] === 0), sampled: true };
 }
 
+// Folds for stratified cross-validation: no more folds than patients in the smaller outcome group, so that
+// every validation fold contains both outcomes (otherwise its AUC is undefined and its F1 is distorted)
+function effectiveFolds(rows, k, isClassification, targetCol) {
+    if (!isClassification) return k;
+    const counts = {};
+    rows.forEach(r => { const v = String(r[targetCol]).trim(); counts[v] = (counts[v] || 0) + 1; });
+    const minority = Math.min(...Object.values(counts));
+    return Math.max(2, Math.min(k, minority));
+}
+
 // Leak-free folds from raw rows: imputation, encoding and scaling are fitted on each fold's learning
 // rows only and then applied to that fold's validation rows
 async function buildRowFolds(rawRows, k, o, onFold) {
     const { configs, analysis, isClassification, targetCol, seed, groupOf = null, stratifyGroups = false, decisionThreshold = null } = o;
     const cap = capRows(rawRows, isClassification, targetCol, seed, groupOf);
+    const requestedFolds = k;
+    k = effectiveFolds(cap.rows, k, isClassification, targetCol);
     const fold = assignRowFolds(cap.rows, k, isClassification, targetCol, seed, groupOf, stratifyGroups);
     const sets = [];
     for (let f = 0; f < k; f++) {
@@ -806,7 +825,7 @@ async function buildRowFolds(rawRows, k, o, onFold) {
         if (onFold) onFold(f + 1, k);
         await ModelEngine.yieldToBrowser();
     }
-    return { sets, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), decisionThreshold };
+    return { sets, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), decisionThreshold, requestedFolds };
 }
 
 // Compare the grid by mean cross-validated ranking metric over pre-built folds.
@@ -873,9 +892,29 @@ async function runTuningCore(mId, baseHp, fd, isClassification, numClasses, o) {
     });
     return {
         modelId: mId, keys, results, best, own: results.find(r => r.isOwn),
-        bestHp: { ...baseHp, ...best.params }, folds: k, rowsUsed: fd.rowsUsed, rowsTotal: fd.rowsTotal,
+        bestHp: { ...baseHp, ...best.params }, folds: k, requestedFolds: fd.requestedFolds || k, rowsUsed: fd.rowsUsed, rowsTotal: fd.rowsTotal,
         sampled: fd.sampled, grouped: Boolean(fd.grouped), metricKey, metricLabel: metricDef.label, higherIsBetter: metricDef.higherIsBetter
     };
+}
+
+// Youden's J on out-of-fold training predictions: the threshold maximising sensitivity + specificity - 1.
+// Informational only (it weighs a missed case and a false alarm equally); oof = { p: [...], y: [0/1...] }
+function youdenThreshold(oof) {
+    if (!oof || !Array.isArray(oof.p) || oof.p.length < 20) return null;
+    const P = oof.y.filter(v => v === 1).length, N = oof.y.length - P;
+    if (P < 5 || N < 5) return null;
+    const order = oof.p.map((_, i) => i).sort((a, b) => oof.p[b] - oof.p[a]);
+    let tp = 0, fp = 0, best = null;
+    for (let k = 0; k < order.length; k++) {
+        const i = order[k];
+        if (oof.y[i] === 1) tp++; else fp++;
+        if (k + 1 < order.length && oof.p[order[k + 1]] === oof.p[i]) continue; // a threshold between distinct values
+        const sens = tp / P, spec = 1 - fp / N, J = sens + spec - 1;
+        const next = k + 1 < order.length ? oof.p[order[k + 1]] : 0;
+        const threshold = (oof.p[i] + next) / 2;
+        if (!best || J > best.J + 1e-12) best = { threshold, sensitivity: sens, specificity: spec, J };
+    }
+    return best ? { ...best, n: oof.p.length } : null;
 }
 
 // =========================================================================
@@ -2218,6 +2257,16 @@ function renderDataOverview() {
             <span class="stat-desc">${colsWithMissing} variable(s) with empty values</span>
         </div>
     `;
+    // One-line summary of what will need attention (missing values, columns excluded automatically)
+    const incompleteRows = rows.filter(r => headers.some(h => DataEngine.isMissing(r[h]))).length;
+    const missingCols = headers.filter(h => analysis[h].missingCount > 0);
+    const autoExcluded = headers.filter(h => analysis[h].role === 'meta' || analysis[h].autoMetaReason);
+    const summaryParts = [`Cohort loaded: ${totalRows.toLocaleString('en-GB')} rows and ${totalCols} variables.`];
+    summaryParts.push(incompleteRows
+        ? `${incompleteRows.toLocaleString('en-GB')} row(s) (${(100 * incompleteRows / Math.max(1, totalRows)).toFixed(1)}%) have at least one missing value, in ${missingCols.length} variable(s)${missingCols.length <= 6 ? ` (${missingCols.map(escapeHtml).join(', ')})` : ''}; choose how to handle them in Step 3.`
+        : 'No missing values.');
+    if (autoExcluded.length) summaryParts.push(`Excluded from the predictors by default (identifier or date): ${autoExcluded.map(escapeHtml).join(', ')}; you can change this in Step 2.`);
+    DOM.dataStatsGrid.insertAdjacentHTML('beforeend', `<div class="stat-summary" style="grid-column: 1 / -1; font-size: 12.5px; color: var(--text-secondary);">ℹ️ ${summaryParts.join(' ')}</div>`);
 
     // Render Data Preview Table (first rows, in a scrollable box with visible scrollbars)
     const PREVIEW_ROWS = 200;
@@ -3106,6 +3155,7 @@ function calibrationBody(item, positiveLabel) {
         <div class="cal-thr">
             <div class="cmp-guide-title" style="font-size: 13px;">Sensitivity and specificity at different thresholds (Testing set)</div>
             ${thresholdTable(ev)}
+            ${ev.youden ? `<p class="tune-muted">ℹ️ <strong>Youden's J</strong> on the cross-validated Training-set predictions (${ev.youden.n} patients, not the Testing set) would put the threshold at <strong>${(ev.youden.threshold * 100).toFixed(1)}%</strong> (sensitivity ${(ev.youden.sensitivity * 100).toFixed(0)}%, specificity ${(ev.youden.specificity * 100).toFixed(0)}%). This treats a missed case and a false alarm as equally bad, which is rarely true clinically; use it as a starting point, not a substitute for a clinical choice (the decision curve below helps).</p>` : ''}
             <p class="tune-muted">This table shows the trade-off: a lower threshold catches more true cases (higher sensitivity) at the cost of more false alarms (lower specificity). Use it to understand the trade-off and choose the threshold on <strong>clinical grounds</strong>. Picking the "best" row here and reporting its results would make the Testing-set results optimistic; confirm any chosen threshold on new patients.</p>
         </div>
         ${decisionCurveSection(ev, positiveLabel)}`;
@@ -4155,6 +4205,8 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const cap = capRows(trainRows, isClassification, targetCol, seed, groupOf);
     const rows = cap.rows;
     const sampled = cap.sampled;
+    const requestedFolds = k;
+    k = effectiveFolds(rows, k, isClassification, targetCol);
     const fold = assignRowFolds(rows, k, isClassification, targetCol, seed, groupOf);
     const cfg = {};
     cols.forEach(c => { cfg[c] = p.columnConfigs[c]; });
@@ -4181,7 +4233,7 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
         if (onFold) onFold(f + 1, k);
         await ModelEngine.yieldToBrowser(); // keep the page responsive between folds
     }
-    return { sets, rowsUsed: rows.length, rowsTotal: trainRows.length, sampled, grouped: Boolean(groupOf), selections: inFoldSelection ? selections : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold') };
+    return { sets, rowsUsed: rows.length, rowsTotal: trainRows.length, sampled, grouped: Boolean(groupOf), selections: inFoldSelection ? selections : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds };
 }
 
 // Show the chosen settings in the model's settings panel (so they are visible and saved with Save settings)
@@ -4231,7 +4283,7 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
                     <span class="pill" style="font-size: 10px; ${changed ? 'background: rgba(16,185,129,0.15); color: var(--accent-emerald);' : 'background: rgba(100,116,139,0.15); color: var(--text-muted);'}">${changed ? 'Settings changed' : (report.pipeline ? 'Protocol default kept' : 'Your settings kept')}</span></div>
                 <div>Chosen: ${describe(t, t.best.params)} &mdash; cross-validated ${escapeHtml(t.metricLabel)} ${fmtScore(t.best, t)}</div>
                 ${changed ? `<div class="tune-muted">${report.pipeline ? 'Protocol default' : 'Your settings'} (${describe(t, t.own.params)}) scored ${fmtScore(t.own, t)}.</div>` : ''}
-                <div class="tune-muted">${t.results.length} combination(s) × ${t.folds} folds on ${t.rowsUsed.toLocaleString('en-GB')}${t.sampled ? ` (a stratified sample of ${t.rowsTotal.toLocaleString('en-GB')})` : ''} training cases.</div>
+                <div class="tune-muted">${t.results.length} combination(s) × ${t.folds} folds${t.requestedFolds > t.folds ? ` (reduced from ${t.requestedFolds}: the smaller outcome group has too few patients to place some in every fold)` : ''} on ${t.rowsUsed.toLocaleString('en-GB')}${t.sampled ? ` (a stratified sample of ${t.rowsTotal.toLocaleString('en-GB')})` : ''} training cases.</div>
                 <details><summary>Show all combinations tried</summary>
                     <table class="data-table tune-table"><thead><tr>${t.keys.map(k => `<th>${escapeHtml(TUNE_LABELS[k] || k)}</th>`).join('')}<th>CV ${escapeHtml(t.metricLabel)} (mean ± SD)</th><th></th></tr></thead>
                     <tbody>${sorted.map(r => `<tr${r === t.best ? ' class="tune-best"' : ''}>${t.keys.map(k => `<td>${escapeHtml(fmtTuneValue(k, r.params[k]))}</td>`).join('')}<td>${fmtScore(r, t)}</td><td>${r === t.best ? '✓ chosen' : ''}${r.isOwn ? (report.pipeline ? ' (protocol default)' : ' (your settings)') : ''}</td></tr>`).join('')}</tbody></table>
@@ -4464,6 +4516,7 @@ async function startModelTraining() {
                 evalRes.splitSeed = seedC;
                 evalRes.seed = hp.seed;
                 if (tuned.cv) evalRes.cv = tuned.cv;
+                if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration is not combined with bootstrap internal validation (it would need to be repeated inside every resample); use Option A or B to recalibrate.';
                 if (model.trainingInfo) evalRes.nnNote = describeNNTraining(model.trainingInfo);
                 if (model.usedFallback) evalRes.fallbackNote = `TensorFlow.js training failed (${model.fallbackReason}); a linear (logistic/ridge) fallback model was evaluated instead of a neural network.`;
@@ -4614,6 +4667,7 @@ async function startModelTraining() {
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
                 evalRes.splitInfo = rowSplit.info;
                 if (tuned.cv) evalRes.cv = tuned.cv;
+                if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 evalRes.testImputedCells = testImp.audit.filter(a => a.type === 'impute_column').reduce((acc, a) => acc + a.imputedCount, 0);
                 evalRes.testDroppedRows = miM ? 0 : rowSplit.testX.length - testImp.imputedRows.length;
                 if (miM) evalRes.multipleImputation = { m: miM, imputedColumns: miSplit.imputedColumns };
@@ -4793,6 +4847,7 @@ async function startModelTraining() {
                 if (miB) evalRes.multipleImputation = { m: miMB, imputedColumns: miB.imputedColumns };
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
                 if (tuned.cv) evalRes.cv = tuned.cv;
+                if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 evalRes.retrainOn100 = false;
                 evalRes.trainCount = prep.X.length;
                 evalRes.testCount = testPrep.totalEvaluated;
@@ -5736,12 +5791,19 @@ function runSinglePrediction() {
     });
 
     const inputIssues = [];
-    const xVector = DataEngine.transformSingleRow(inputRow, AppState.prepMeta, inputIssues);
+    const outOfRange = [];
+    const xVector = DataEngine.transformSingleRow(inputRow, AppState.prepMeta, inputIssues, outOfRange);
     const result = thresholdedOutput(AppState.trainedModel.predictSingle(xVector));
     const prep = AppState.prepMeta;
     const inputWarningHtml = inputIssues.length > 0
         ? `<div style="font-size: 11.5px; color: var(--accent-amber); margin-top: 6px; font-weight: 600;">
                 ⚠️ Blank input(s) filled as in training (the fitted missing-data method); unrecognised values replaced with the most frequent training category / middle rank: ${escapeHtml(inputIssues.map(i => i.column).join(', '))}
+           </div>`
+        : '';
+    const fmtNum = v => (Math.abs(v) >= 100 ? v.toFixed(0) : Number(v.toPrecision(3)).toString());
+    const rangeWarningHtml = outOfRange.length > 0
+        ? `<div style="font-size: 11.5px; color: var(--accent-rose); margin-top: 6px; font-weight: 600;">
+                ⚠️ Outside the range of the training patients: ${outOfRange.map(o => `${escapeHtml(o.column)} = ${escapeHtml(fmtNum(o.value))} (training ${escapeHtml(fmtNum(o.min))}–${escapeHtml(fmtNum(o.max))})`).join('; ')}. Check for a typing error; if the value is correct, the prediction is an extrapolation beyond the data the model learned from and may be unreliable.
            </div>`
         : '';
 
@@ -5792,7 +5854,7 @@ function runSinglePrediction() {
                     Active Model: <strong>${escapeHtml(displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel))}</strong> &bull; Target: <em>${escapeHtml(prep.targetCol)}</em>${seedSnippet}
                 </div>
                 ${ensembleDetailsHtml}
-                ${inputWarningHtml}
+                ${inputWarningHtml}${rangeWarningHtml}
                 ${renderPatientExplanation(AppState.trainedModel, xVector, prep, inputRow)}
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
                     ${probabilityLabel(result.probabilityType).note}: not a calibrated clinical risk or a measure of certainty (check the calibration panel and Brier score in Step 4 / Step 7). For research and educational use only.${AppState.evalResults && AppState.evalResults.decisionThreshold && Math.abs(AppState.evalResults.decisionThreshold - 0.5) > 1e-9 ? ` Classed with a decision threshold of ${AppState.evalResults.decisionThreshold.toFixed(2)} for the positive outcome.` : ''}
@@ -5818,7 +5880,7 @@ function runSinglePrediction() {
                     Active Model: <strong>${escapeHtml(displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel))}</strong> &bull; Unit/Scale: <em>${escapeHtml(prep.targetCol)}</em>${seedSnippet}
                 </div>
                 ${ensembleDetailsHtml}
-                ${inputWarningHtml}
+                ${inputWarningHtml}${rangeWarningHtml}
                 ${renderPatientExplanation(AppState.trainedModel, xVector, prep, inputRow)}
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">For research and educational use only; not for decisions about an individual patient's care.</div>
             </div>
@@ -5897,7 +5959,9 @@ async function executeBatchPrediction() {
 
     // Encode every row, then predict in one batched pass (one GPU call for neural networks)
     const rowIssueLists = rows.map(() => []);
-    const xMatrix = rows.map((r, i) => DataEngine.transformSingleRow(r, prep, rowIssueLists[i]));
+    const rowRangeLists = rows.map(() => []);
+    const xMatrix = rows.map((r, i) => DataEngine.transformSingleRow(r, prep, rowIssueLists[i], rowRangeLists[i]));
+    const rowsOutOfRange = rowRangeLists.filter(l => l.length).length;
     // Asynchronous, chunked prediction keeps the page responsive for large files
     let outputs = [];
     if (rows.length) {
@@ -5936,6 +6000,7 @@ async function executeBatchPrediction() {
         rowCopy[`Prediction_Probability`] = confidence;
         rowCopy[`Probability_Type`] = prep.isClassification ? probabilityLabel(predRes.probabilityType).title : 'N/A (continuous outcome)';
         rowCopy[`Imputed_Inputs`] = rowIssues.length > 0 ? rowIssues.map(i => `${i.column}:${i.kind}`).join('; ') : '';
+        rowCopy[`Outside_Training_Range`] = rowRangeLists[rowIdx].map(o => `${o.column}=${o.value} (training ${o.min}-${o.max})`).join('; ');
         rowCopy[`Model`] = batchModelName;
         rowCopy[`Model_Seed`] = activeSeed;
         results.push(rowCopy);
@@ -5945,11 +6010,12 @@ async function executeBatchPrediction() {
         alert("The batch file contains no data rows.");
         return;
     }
-    if (rowsWithImputation > 0 || absentCols.length > 0) {
-        alert(`Batch prediction completed with substituted inputs:\n` +
+    if (rowsWithImputation > 0 || absentCols.length > 0 || rowsOutOfRange > 0) {
+        alert(`Batch prediction completed with warnings:\n` +
             (absentCols.length > 0 ? `• Columns missing from the file (filled for every row): ${absentCols.join(', ')}\n` : '') +
-            `• ${rowsWithImputation} of ${results.length} row(s) had ${totalImputedCells} blank or unrecognised predictor value(s) replaced with training-cohort values.\n` +
-            `See the 'Imputed_Inputs' column. Predictions for these rows are less reliable.`);
+            (rowsWithImputation > 0 ? `• ${rowsWithImputation} of ${results.length} row(s) had ${totalImputedCells} blank or unrecognised predictor value(s) replaced with training-cohort values (see the 'Imputed_Inputs' column).\n` : '') +
+            (rowsOutOfRange > 0 ? `• ${rowsOutOfRange} row(s) have values outside the range of the training patients (see 'Outside_Training_Range'): check for typing errors; otherwise those predictions are extrapolations.\n` : '') +
+            `Predictions for these rows are less reliable.`);
     }
 
     AppState.batchPredictions = results;
@@ -7001,6 +7067,7 @@ function renderRfImportanceChart() {
 
 
 
+
 // =========================================================================
 // STEP 7: Algorithm-Specific Training & Constraints
 // =========================================================================
@@ -7267,6 +7334,7 @@ async function executePipelineStep7() {
         }
         // Cross-validated scores (model selection inside the Training set) when that mode is chosen
         benchmarkList.forEach(b => { if (cvByModel[b.id]) b.eval.cv = cvByModel[b.id]; });
+        if (isClassification && numClasses === 2) benchmarkList.forEach(b => { const y = youdenThreshold(oofByModel[b.id]); if (y) b.eval.youden = y; });
         // Bootstrap 95% confidence intervals for every test metric
         for (const b of benchmarkList) {
             if (watchdog) watchdog.tick(totalModels, `Computing 95% confidence intervals (bootstrap): ${b.name}...`);
@@ -8223,6 +8291,7 @@ function downloadStandardAnalysisReport() {
     const target = Object.keys(cfgs).find(c => cfgs[c].role === 'target');
     const report = {
         title: 'Standard Workflow (Step 4) Analysis Report',
+        notice: RESEARCH_USE_NOTICE,
         software: { name: SETTINGS_APP, version: APP_VERSION, url: location.href.split('?')[0] },
         generated_at: new Date().toISOString(),
         dataset: { name: AppState.fileName, records: AppState.parsedData ? AppState.parsedData.rows.length : null, columns: AppState.parsedData ? AppState.parsedData.headers.length : null },
@@ -8344,7 +8413,7 @@ async function exportTrainedModel() {
             : AppState.deployedSource === 'imported' && AppState.importedModelInfo ? AppState.importedModelInfo.name
             : displayModelName(AppState.deployedModelId || AppState.selectedModelId, model);
         const bundle = {
-            format: MODEL_FILE_FORMAT, formatVersion: 1,
+            format: MODEL_FILE_FORMAT, formatVersion: 1, notice: RESEARCH_USE_NOTICE,
             software: { name: SETTINGS_APP, version: APP_VERSION },
             exportedAt: new Date().toISOString(),
             model: { id: AppState.deployedModelId || AppState.selectedModelId, name, workflow: AppState.deployedSource || 'standard', seed: model.seed ?? null },
@@ -8425,6 +8494,7 @@ function downloadPipelineProtocolReport() {
         },
         conceived_and_directed_by: "Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)",
         generated_at: new Date().toISOString(),
+        notice: RESEARCH_USE_NOTICE,
         dataset_name: AppState.fileName,
         target_variable: AppState.pipeline.targetCol,
         reproducibility_seed: AppState.pipeline.evalSeed,
@@ -8685,16 +8755,19 @@ async function runSurvival() {
     const groups = Array.from({ length: nG }, (_, g) => order.slice(Math.round(g * order.length / nG), Math.round((g + 1) * order.length / nG)));
     const calib = groups.map(g => {
         const km = ModelEngine.kaplanMeier(g.map(i => tTe[i]), g.map(i => eTe[i]));
-        return { predicted: g.reduce((a, i) => a + risk[i], 0) / g.length, observed: 1 - ModelEngine.kmAt(km, horizon), n: g.length };
+        const st = ModelEngine.kmStepAt(km, horizon);
+        return { predicted: g.reduce((a, i) => a + risk[i], 0) / g.length, observed: 1 - st.survival, observedCI: st.lower !== null ? [1 - st.upper, 1 - st.lower] : null, n: g.length };
     });
     const kmAll = ModelEngine.kaplanMeier(tTe, eTe);
     const meanPred = risk.reduce((a, b) => a + b, 0) / (risk.length || 1);
     const obsAll = 1 - ModelEngine.kmAt(kmAll, horizon);
+    const stAll = ModelEngine.kmStepAt(kmAll, horizon);
+    const obsAllCI = stAll.lower !== null ? [1 - stAll.upper, 1 - stAll.lower] : null;
     // Kaplan-Meier curves by risk tertile (test patients)
     const tert = [0, 1, 2].map(g => order.slice(Math.round(g * order.length / 3), Math.round((g + 1) * order.length / 3)));
     const kmGroups = tert.map(g => ModelEngine.kaplanMeier(g.map(i => tTe[i]), g.map(i => eTe[i])));
     const maxFollow = Math.max(...tTr, ...tTe);
-    SURV.result = { tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, meanPred, obsAll, kmGroups, maxFollow,
+    SURV.result = { tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, obsAllCI, meanPred, obsAll, kmGroups, maxFollow,
         nTrain: Xtr.length, nTest: Xte.length, eventsTrain: events, eventsTest: eTe.reduce((a, b) => a + b, 0), excluded };
     renderSurvivalResults();
     status.textContent = '';
@@ -8736,12 +8809,14 @@ function renderSurvivalResults() {
             <div class="cal-stats"><div><strong>Harrell's C-index</strong>: ${r.cIndex !== null ? r.cIndex.toFixed(3) : 'N/A'}${r.cCI ? ` <span class="tune-sd">(95% CI ${r.cCI[0].toFixed(3)}–${r.cCI[1].toFixed(3)})</span>` : ''} &mdash; the probability that, of two comparable patients, the one with the event first had the higher predicted risk (0.5 = chance, 1 = perfect).</div>
             <div><strong>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.tdAuc === 'number' ? r.tdAuc.toFixed(3) : 'N/A'}${r.tdCI ? ` <span class="tune-sd">(95% CI ${r.tdCI[0].toFixed(3)}–${r.tdCI[1].toFixed(3)})</span>` : ''} &mdash; of a patient who had the event by ${escapeHtml(String(r.horizon))} and one still event-free after it, how often the first had the higher predicted risk.</div>
             <div><strong>Brier score at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.brier === 'number' ? r.brier.toFixed(3) : 'N/A'} (lower is better; giving everyone the overall Kaplan-Meier risk scores ${typeof r.brierNull === 'number' ? r.brierNull.toFixed(3) : 'N/A'})${typeof r.scaledBrier === 'number' ? `; <strong>scaled Brier</strong> ${(r.scaledBrier * 100).toFixed(1)}% (share of that error the model removes; 0% = no better than the overall risk)` : ''}.</div>
-            <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pctTxt(r.meanPred)} vs observed ${pctTxt(r.obsAll)} (Kaplan-Meier).</div>
+            <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pctTxt(r.meanPred)} vs observed ${pctTxt(r.obsAll)}${r.obsAllCI ? ` <span class="tune-sd">(95% CI ${pctTxt(r.obsAllCI[0])}–${pctTxt(r.obsAllCI[1])})</span>` : ''} (Kaplan-Meier).</div>
             <div class="tune-muted">The time-dependent AUC and Brier score weight each patient for censoring (inverse probability of censoring weights, with the censoring pattern estimated from the training patients), so patients lost to follow-up before ${escapeHtml(String(r.horizon))} do not bias them.</div></div>
             <div class="cal-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
                 <div>${lineChartSvg({ series: [{ name: 'cal', colour: 'var(--accent-cyan)', points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }, { name: 'calpts', colour: 'var(--accent-cyan)', scatter: true, points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }],
                     xLabel: `Predicted risk by ${r.horizon}`, yLabel: 'Observed risk (Kaplan-Meier)', xMax: calMax, yMax: calMax, diagonal: true, aria: 'Survival calibration at the horizon' })}
-                    <p class="tune-muted">Calibration at ${escapeHtml(String(r.horizon))}: test patients are grouped by predicted risk; each point compares the group's average predicted risk with its Kaplan-Meier observed risk. Points near the diagonal mean the predicted risks can be taken at face value.</p></div>
+                    <p class="tune-muted">Calibration at ${escapeHtml(String(r.horizon))}: test patients are grouped by predicted risk; each point compares the group's average predicted risk with its Kaplan-Meier observed risk. Points near the diagonal mean the predicted risks can be taken at face value.</p>
+                    <table class="data-table thr-table"><thead><tr><th>Risk group</th><th>Patients</th><th>Mean predicted</th><th>Observed (95% CI)</th></tr></thead><tbody>${r.calib.map((c, i) => `<tr><td>${i + 1} of ${r.calib.length}</td><td>${c.n}</td><td>${pctTxt(c.predicted)}</td><td>${pctTxt(c.observed)}${c.observedCI ? ` <span class="tune-sd">(${pctTxt(c.observedCI[0])}–${pctTxt(c.observedCI[1])})</span>` : ''}</td></tr>`).join('')}</tbody></table>
+                    <p class="tune-muted">Observed risks come with 95% confidence intervals (Greenwood's formula on the log(−log) scale), so a group whose interval includes its predicted risk is consistent with good calibration.</p></div>
                 <div>${lineChartSvg({ series: r.kmGroups.map((km, g) => ({ name: tertNames[g], colour: tertCols[g], points: stepPoints(km) })), xLabel: `${r.tc}`, yLabel: 'Event-free (Kaplan-Meier)', xMax: r.maxFollow, yMax: 1, aria: 'Kaplan-Meier curves by predicted risk group' })}
                     ${chartLegend(tertNames.map((n, g) => ({ colour: tertCols[g], label: n })))}
                     <p class="tune-muted">Test patients split into thirds by predicted risk. Well-separated curves show the model distinguishes patients with early and late events.</p></div>
@@ -8786,7 +8861,7 @@ function downloadSurvivalReport() {
         generated_at: new Date().toISOString(), dataset: AppState.fileName, time_column: r.tc, event_column: r.ec, event_value: r.ev, predictors: r.preds,
         design: { split: `${Math.round(r.ratio * 100)}/${Math.round((1 - r.ratio) * 100)} stratified by event`, seed: r.seed, train_patients: r.nTrain, train_events: r.eventsTrain, test_patients: r.nTest, test_events: r.eventsTest, excluded_rows: r.excluded, ties: 'Efron', penalty: r.penalised ? 0.1 : 0 },
         hazard_ratios: summary.map((s, i) => ({ term: s.name, scale: r.cols[i].note, coef: s.coef, se: s.se, hr: s.hr, hr_95ci: [s.hrLow, s.hrHigh], p: s.p })),
-        test_performance: { c_index: r.cIndex, c_index_95ci_bootstrap: r.cCI, horizon: r.horizon, time_dependent_auc: r.tdAuc, time_dependent_auc_95ci_bootstrap: r.tdCI, brier_score_ipcw: r.brier, brier_score_null_km: r.brierNull, scaled_brier: r.scaledBrier, mean_predicted_risk: r.meanPred, observed_risk_kaplan_meier: r.obsAll, calibration_groups: r.calib }
+        test_performance: { c_index: r.cIndex, c_index_95ci_bootstrap: r.cCI, horizon: r.horizon, time_dependent_auc: r.tdAuc, time_dependent_auc_95ci_bootstrap: r.tdCI, brier_score_ipcw: r.brier, brier_score_null_km: r.brierNull, scaled_brier: r.scaledBrier, mean_predicted_risk: r.meanPred, observed_risk_kaplan_meier: r.obsAll, observed_risk_95ci: r.obsAllCI, calibration_groups: r.calib }
     };
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -8916,6 +8991,7 @@ h1{font-size:20px}h2{font-size:16px;margin-top:28px}table{border-collapse:collap
 th{background:#f1f5f9}.auto{color:#047857;font-weight:600}.partly{color:#b45309;font-weight:600}.author{color:#b91c1c;font-weight:600}.tp-author{color:#b91c1c}
 .note{color:#475569;font-size:12.5px}@media print{body{margin:0}}</style></head><body>
 <h1>Reporting checklist aligned with TRIPOD+AI, pre-filled from this analysis</h1>
+<p style="border:2px solid #b45309;padding:8px 12px;font-weight:600">${esc(RESEARCH_USE_NOTICE)}</p>
 <p class="note">Generated ${esc(new Date().toISOString().slice(0, 10))} by Universal Medical ML/NeuralNet Predictor v${esc(APP_VERSION)} (${d.source === 'pipeline' ? '7-step pipeline' : 'standard workflow'}). Items follow the topics of the TRIPOD+AI statement (Collins GS et al. BMJ 2024;385:e078378); wording is summarised. <strong>Check every item against the official checklist</strong> (tripod-statement.org) and complete those marked for the authors.</p>
 <table><thead><tr><th>Topic</th><th>What to report (summary)</th><th>From this analysis</th><th>Status</th></tr></thead><tbody>
 ${items.map(([t, w, v, st]) => `<tr><td><strong>${esc(t)}</strong></td><td>${esc(w)}</td><td>${v}</td><td class="${st}">${statusLabel[st]}</td></tr>`).join('\n')}

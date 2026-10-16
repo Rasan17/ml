@@ -109,7 +109,7 @@ async function trainEval(id, w, isClassification) {
 // training functions, so the test runs the same code as Option C in the browser
 function loadValidationCore() {
     const code = fs.readFileSync(path.join(dir, 'src', 'validation-core.js'), 'utf8').replace(/^export\s*\{[^}]*\};?\s*$/gm, '');
-    return new Function(`${code}\nreturn { bootstrapResamples, bootstrapOptimism, selectionOptimism, tuningGrid, noInformationRates, plus632 };`)();
+    return new Function(`${code}\nreturn { bootstrapResamples, bootstrapOptimism, selectionOptimism, tuningGrid, noInformationRates, plus632, youdenThreshold, effectiveFolds, buildRowFolds };`)();
 }
 async function fitLocal(id, isClf, nc, hp, X, y) {
     const m = ME.createModel(id, isClf, nc, hp);
@@ -504,6 +504,35 @@ async function optionC(VC, rows, cfg, modelId, hp, B, tune) {
         const secs = (Date.now() - t0) / 1000;
         assert(secs < 30, `multiple imputation of 5,000 patients took ${secs.toFixed(1)} s`);
         return `identical in worker and page (${progress} progress messages); 5,000 patients imputed 5 times in ${secs.toFixed(1)} s`;
+    });
+
+    await check('Safeguards: Youden threshold, fewer folds for a rare outcome, out-of-range inputs, near-constant predictors', async () => {
+        const VC = loadValidationCore();
+        const rng = DE.createPRNG(4);
+        // Youden's J equals a brute-force search over every threshold
+        const p = Array.from({ length: 200 }, () => Math.round(rng() * 50) / 50), y = p.map(v => (rng() < v ? 1 : 0));
+        const yd = VC.youdenThreshold({ p, y });
+        let bestJ = -1;
+        [...new Set(p)].forEach(t => { const P = y.filter(v => v).length, N = y.length - P; const tp = p.filter((v, i) => v >= t && y[i]).length, fp = p.filter((v, i) => v >= t && !y[i]).length; bestJ = Math.max(bestJ, tp / P - fp / N); });
+        assert(Math.abs(yd.J - bestJ) < 1e-12, `Youden J ${yd.J} vs brute force ${bestJ}`);
+        // Rare outcome: 3 events cannot fill 5 folds; folds are reduced so each holds an event
+        const rows = Array.from({ length: 60 }, (_, i) => ({ A: String(rng()), B: String(rng()), Y: i < 3 ? 'Yes' : 'No' }));
+        const cfg = { A: { role: 'feature', type: 'continuous', imputationStrategy: 'median' }, B: { role: 'feature', type: 'continuous', imputationStrategy: 'median' }, Y: { role: 'target', type: 'nominal' } };
+        const fd = await VC.buildRowFolds(rows, 5, { configs: cfg, analysis: DE.analyzeColumns(['A', 'B', 'Y'], rows), isClassification: true, targetCol: 'Y', seed: 1 });
+        assert(fd.sets.length === 3 && fd.requestedFolds === 5 && fd.sets.every(f => f.yva.some(v => v === 1)), `folds ${fd.sets.length}, events per fold ${fd.sets.map(f => f.yva.filter(v => v === 1).length)}`);
+        // Out-of-range inputs are flagged (Age 650 with training 60-90); blanks are not
+        const train = Array.from({ length: 50 }, () => ({ Age: String(60 + Math.round(rng() * 30)), Const: '5.000000001', Y: rng() < 0.5 ? 'a' : 'b' }));
+        train[0].Const = '5.000000002';
+        const c2 = { Age: { role: 'feature', type: 'continuous', imputationStrategy: 'median' }, Const: { role: 'feature', type: 'continuous', imputationStrategy: 'median' }, Y: { role: 'target', type: 'nominal' } };
+        const prep = DE.prepareFeaturesAndTarget(train, c2);
+        const ranges = [];
+        const x = DE.transformSingleRow({ Age: '650', Const: '5' }, prep, [], ranges);
+        const r2 = [];
+        DE.transformSingleRow({ Age: '', Const: '5.000000001' }, prep, [], r2);
+        assert(ranges.length === 2 && ranges[0].column === 'Age' && r2.length === 0, `range flags ${JSON.stringify(ranges)} / ${JSON.stringify(r2)}`);
+        // A near-constant predictor is not blown up by dividing by a tiny spread
+        assert(x.every(v => Number.isFinite(v) && Math.abs(v) < 1e6), `encoded values ${x}`);
+        return `Youden J exact; 5 folds reduced to 3 for 3 events; Age 650 flagged; near-constant predictor encoded as ${x[1]}`;
     });
 
     await check('Shapley explanations: exact TreeSHAP (RF, boosted trees) and sampled Shapley (logistic) match brute-force enumeration', async () => {

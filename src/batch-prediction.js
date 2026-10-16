@@ -70,7 +70,9 @@ async function executeBatchPrediction() {
 
     // Encode every row, then predict in one batched pass (one GPU call for neural networks)
     const rowIssueLists = rows.map(() => []);
-    const xMatrix = rows.map((r, i) => DataEngine.transformSingleRow(r, prep, rowIssueLists[i]));
+    const rowRangeLists = rows.map(() => []);
+    const xMatrix = rows.map((r, i) => DataEngine.transformSingleRow(r, prep, rowIssueLists[i], rowRangeLists[i]));
+    const rowsOutOfRange = rowRangeLists.filter(l => l.length).length;
     // Asynchronous, chunked prediction keeps the page responsive for large files
     let outputs = [];
     if (rows.length) {
@@ -109,6 +111,7 @@ async function executeBatchPrediction() {
         rowCopy[`Prediction_Probability`] = confidence;
         rowCopy[`Probability_Type`] = prep.isClassification ? probabilityLabel(predRes.probabilityType).title : 'N/A (continuous outcome)';
         rowCopy[`Imputed_Inputs`] = rowIssues.length > 0 ? rowIssues.map(i => `${i.column}:${i.kind}`).join('; ') : '';
+        rowCopy[`Outside_Training_Range`] = rowRangeLists[rowIdx].map(o => `${o.column}=${o.value} (training ${o.min}-${o.max})`).join('; ');
         rowCopy[`Model`] = batchModelName;
         rowCopy[`Model_Seed`] = activeSeed;
         results.push(rowCopy);
@@ -118,11 +121,12 @@ async function executeBatchPrediction() {
         alert("The batch file contains no data rows.");
         return;
     }
-    if (rowsWithImputation > 0 || absentCols.length > 0) {
-        alert(`Batch prediction completed with substituted inputs:\n` +
+    if (rowsWithImputation > 0 || absentCols.length > 0 || rowsOutOfRange > 0) {
+        alert(`Batch prediction completed with warnings:\n` +
             (absentCols.length > 0 ? `• Columns missing from the file (filled for every row): ${absentCols.join(', ')}\n` : '') +
-            `• ${rowsWithImputation} of ${results.length} row(s) had ${totalImputedCells} blank or unrecognised predictor value(s) replaced with training-cohort values.\n` +
-            `See the 'Imputed_Inputs' column. Predictions for these rows are less reliable.`);
+            (rowsWithImputation > 0 ? `• ${rowsWithImputation} of ${results.length} row(s) had ${totalImputedCells} blank or unrecognised predictor value(s) replaced with training-cohort values (see the 'Imputed_Inputs' column).\n` : '') +
+            (rowsOutOfRange > 0 ? `• ${rowsOutOfRange} row(s) have values outside the range of the training patients (see 'Outside_Training_Range'): check for typing errors; otherwise those predictions are extrapolations.\n` : '') +
+            `Predictions for these rows are less reliable.`);
     }
 
     AppState.batchPredictions = results;

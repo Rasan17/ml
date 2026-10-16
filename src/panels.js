@@ -75,6 +75,7 @@ function calibrationBody(item, positiveLabel) {
         <div class="cal-thr">
             <div class="cmp-guide-title" style="font-size: 13px;">Sensitivity and specificity at different thresholds (Testing set)</div>
             ${thresholdTable(ev)}
+            ${ev.youden ? `<p class="tune-muted">ℹ️ <strong>Youden's J</strong> on the cross-validated Training-set predictions (${ev.youden.n} patients, not the Testing set) would put the threshold at <strong>${(ev.youden.threshold * 100).toFixed(1)}%</strong> (sensitivity ${(ev.youden.sensitivity * 100).toFixed(0)}%, specificity ${(ev.youden.specificity * 100).toFixed(0)}%). This treats a missed case and a false alarm as equally bad, which is rarely true clinically; use it as a starting point, not a substitute for a clinical choice (the decision curve below helps).</p>` : ''}
             <p class="tune-muted">This table shows the trade-off: a lower threshold catches more true cases (higher sensitivity) at the cost of more false alarms (lower specificity). Use it to understand the trade-off and choose the threshold on <strong>clinical grounds</strong>. Picking the "best" row here and reporting its results would make the Testing-set results optimistic; confirm any chosen threshold on new patients.</p>
         </div>
         ${decisionCurveSection(ev, positiveLabel)}`;

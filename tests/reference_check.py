@@ -125,6 +125,10 @@ for i in range(len(cT)):
 chk("Harrell's C-index",o['cindex'],conc/comp,1e-12)
 sf=SurvfuncRight(cT,cE)
 chk('Kaplan-Meier survival (vs statsmodels SurvfuncRight)',o['km'],[sf.surv_prob[sf.surv_times<=t][-1] for t in [0.5,1,2]],1e-12)
+chk('Kaplan-Meier Greenwood standard error (vs statsmodels SurvfuncRight)',o['kmSE'],[sf.surv_prob_se[sf.surv_times<=t][-1] for t in [0.5,1,2]],1e-10)
+def _loglog(S,se):
+    w=1.959964*se/(S*abs(np.log(S))); ll=np.log(-np.log(S)); return [np.exp(-np.exp(ll+w)),np.exp(-np.exp(ll-w))]
+chk('Kaplan-Meier 95% CI on the log(-log) scale (from statsmodels S and SE)',[v for p in o['kmCI'] for v in p],[v for t in [0.5,1,2] for v in _loglog(sf.surv_prob[sf.surv_times<=t][-1],sf.surv_prob_se[sf.surv_times<=t][-1])],1e-9)
 w=max(len(x[1]) for x in res)
 for st,nm,d,t in res: print(f'{st}  {nm:<{w}}  max|diff|={d:.2e}  (tol {t:.0e})')
 print(f"\n{sum(1 for x in res if x[0]=='PASS')}/{len(res)} checks passed")

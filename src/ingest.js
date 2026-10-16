@@ -202,6 +202,16 @@ function renderDataOverview() {
             <span class="stat-desc">${colsWithMissing} variable(s) with empty values</span>
         </div>
     `;
+    // One-line summary of what will need attention (missing values, columns excluded automatically)
+    const incompleteRows = rows.filter(r => headers.some(h => DataEngine.isMissing(r[h]))).length;
+    const missingCols = headers.filter(h => analysis[h].missingCount > 0);
+    const autoExcluded = headers.filter(h => analysis[h].role === 'meta' || analysis[h].autoMetaReason);
+    const summaryParts = [`Cohort loaded: ${totalRows.toLocaleString('en-GB')} rows and ${totalCols} variables.`];
+    summaryParts.push(incompleteRows
+        ? `${incompleteRows.toLocaleString('en-GB')} row(s) (${(100 * incompleteRows / Math.max(1, totalRows)).toFixed(1)}%) have at least one missing value, in ${missingCols.length} variable(s)${missingCols.length <= 6 ? ` (${missingCols.map(escapeHtml).join(', ')})` : ''}; choose how to handle them in Step 3.`
+        : 'No missing values.');
+    if (autoExcluded.length) summaryParts.push(`Excluded from the predictors by default (identifier or date): ${autoExcluded.map(escapeHtml).join(', ')}; you can change this in Step 2.`);
+    DOM.dataStatsGrid.insertAdjacentHTML('beforeend', `<div class="stat-summary" style="grid-column: 1 / -1; font-size: 12.5px; color: var(--text-secondary);">ℹ️ ${summaryParts.join(' ')}</div>`);
 
     // Render Data Preview Table (first rows, in a scrollable box with visible scrollbars)
     const PREVIEW_ROWS = 200;

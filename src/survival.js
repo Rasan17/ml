@@ -156,16 +156,19 @@ async function runSurvival() {
     const groups = Array.from({ length: nG }, (_, g) => order.slice(Math.round(g * order.length / nG), Math.round((g + 1) * order.length / nG)));
     const calib = groups.map(g => {
         const km = ModelEngine.kaplanMeier(g.map(i => tTe[i]), g.map(i => eTe[i]));
-        return { predicted: g.reduce((a, i) => a + risk[i], 0) / g.length, observed: 1 - ModelEngine.kmAt(km, horizon), n: g.length };
+        const st = ModelEngine.kmStepAt(km, horizon);
+        return { predicted: g.reduce((a, i) => a + risk[i], 0) / g.length, observed: 1 - st.survival, observedCI: st.lower !== null ? [1 - st.upper, 1 - st.lower] : null, n: g.length };
     });
     const kmAll = ModelEngine.kaplanMeier(tTe, eTe);
     const meanPred = risk.reduce((a, b) => a + b, 0) / (risk.length || 1);
     const obsAll = 1 - ModelEngine.kmAt(kmAll, horizon);
+    const stAll = ModelEngine.kmStepAt(kmAll, horizon);
+    const obsAllCI = stAll.lower !== null ? [1 - stAll.upper, 1 - stAll.lower] : null;
     // Kaplan-Meier curves by risk tertile (test patients)
     const tert = [0, 1, 2].map(g => order.slice(Math.round(g * order.length / 3), Math.round((g + 1) * order.length / 3)));
     const kmGroups = tert.map(g => ModelEngine.kaplanMeier(g.map(i => tTe[i]), g.map(i => eTe[i])));
     const maxFollow = Math.max(...tTr, ...tTe);
-    SURV.result = { tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, meanPred, obsAll, kmGroups, maxFollow,
+    SURV.result = { tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, obsAllCI, meanPred, obsAll, kmGroups, maxFollow,
         nTrain: Xtr.length, nTest: Xte.length, eventsTrain: events, eventsTest: eTe.reduce((a, b) => a + b, 0), excluded };
     renderSurvivalResults();
     status.textContent = '';
@@ -207,12 +210,14 @@ function renderSurvivalResults() {
             <div class="cal-stats"><div><strong>Harrell's C-index</strong>: ${r.cIndex !== null ? r.cIndex.toFixed(3) : 'N/A'}${r.cCI ? ` <span class="tune-sd">(95% CI ${r.cCI[0].toFixed(3)}–${r.cCI[1].toFixed(3)})</span>` : ''} &mdash; the probability that, of two comparable patients, the one with the event first had the higher predicted risk (0.5 = chance, 1 = perfect).</div>
             <div><strong>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.tdAuc === 'number' ? r.tdAuc.toFixed(3) : 'N/A'}${r.tdCI ? ` <span class="tune-sd">(95% CI ${r.tdCI[0].toFixed(3)}–${r.tdCI[1].toFixed(3)})</span>` : ''} &mdash; of a patient who had the event by ${escapeHtml(String(r.horizon))} and one still event-free after it, how often the first had the higher predicted risk.</div>
             <div><strong>Brier score at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.brier === 'number' ? r.brier.toFixed(3) : 'N/A'} (lower is better; giving everyone the overall Kaplan-Meier risk scores ${typeof r.brierNull === 'number' ? r.brierNull.toFixed(3) : 'N/A'})${typeof r.scaledBrier === 'number' ? `; <strong>scaled Brier</strong> ${(r.scaledBrier * 100).toFixed(1)}% (share of that error the model removes; 0% = no better than the overall risk)` : ''}.</div>
-            <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pctTxt(r.meanPred)} vs observed ${pctTxt(r.obsAll)} (Kaplan-Meier).</div>
+            <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pctTxt(r.meanPred)} vs observed ${pctTxt(r.obsAll)}${r.obsAllCI ? ` <span class="tune-sd">(95% CI ${pctTxt(r.obsAllCI[0])}–${pctTxt(r.obsAllCI[1])})</span>` : ''} (Kaplan-Meier).</div>
             <div class="tune-muted">The time-dependent AUC and Brier score weight each patient for censoring (inverse probability of censoring weights, with the censoring pattern estimated from the training patients), so patients lost to follow-up before ${escapeHtml(String(r.horizon))} do not bias them.</div></div>
             <div class="cal-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
                 <div>${lineChartSvg({ series: [{ name: 'cal', colour: 'var(--accent-cyan)', points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }, { name: 'calpts', colour: 'var(--accent-cyan)', scatter: true, points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }],
                     xLabel: `Predicted risk by ${r.horizon}`, yLabel: 'Observed risk (Kaplan-Meier)', xMax: calMax, yMax: calMax, diagonal: true, aria: 'Survival calibration at the horizon' })}
-                    <p class="tune-muted">Calibration at ${escapeHtml(String(r.horizon))}: test patients are grouped by predicted risk; each point compares the group's average predicted risk with its Kaplan-Meier observed risk. Points near the diagonal mean the predicted risks can be taken at face value.</p></div>
+                    <p class="tune-muted">Calibration at ${escapeHtml(String(r.horizon))}: test patients are grouped by predicted risk; each point compares the group's average predicted risk with its Kaplan-Meier observed risk. Points near the diagonal mean the predicted risks can be taken at face value.</p>
+                    <table class="data-table thr-table"><thead><tr><th>Risk group</th><th>Patients</th><th>Mean predicted</th><th>Observed (95% CI)</th></tr></thead><tbody>${r.calib.map((c, i) => `<tr><td>${i + 1} of ${r.calib.length}</td><td>${c.n}</td><td>${pctTxt(c.predicted)}</td><td>${pctTxt(c.observed)}${c.observedCI ? ` <span class="tune-sd">(${pctTxt(c.observedCI[0])}–${pctTxt(c.observedCI[1])})</span>` : ''}</td></tr>`).join('')}</tbody></table>
+                    <p class="tune-muted">Observed risks come with 95% confidence intervals (Greenwood's formula on the log(−log) scale), so a group whose interval includes its predicted risk is consistent with good calibration.</p></div>
                 <div>${lineChartSvg({ series: r.kmGroups.map((km, g) => ({ name: tertNames[g], colour: tertCols[g], points: stepPoints(km) })), xLabel: `${r.tc}`, yLabel: 'Event-free (Kaplan-Meier)', xMax: r.maxFollow, yMax: 1, aria: 'Kaplan-Meier curves by predicted risk group' })}
                     ${chartLegend(tertNames.map((n, g) => ({ colour: tertCols[g], label: n })))}
                     <p class="tune-muted">Test patients split into thirds by predicted risk. Well-separated curves show the model distinguishes patients with early and late events.</p></div>
@@ -257,7 +262,7 @@ function downloadSurvivalReport() {
         generated_at: new Date().toISOString(), dataset: AppState.fileName, time_column: r.tc, event_column: r.ec, event_value: r.ev, predictors: r.preds,
         design: { split: `${Math.round(r.ratio * 100)}/${Math.round((1 - r.ratio) * 100)} stratified by event`, seed: r.seed, train_patients: r.nTrain, train_events: r.eventsTrain, test_patients: r.nTest, test_events: r.eventsTest, excluded_rows: r.excluded, ties: 'Efron', penalty: r.penalised ? 0.1 : 0 },
         hazard_ratios: summary.map((s, i) => ({ term: s.name, scale: r.cols[i].note, coef: s.coef, se: s.se, hr: s.hr, hr_95ci: [s.hrLow, s.hrHigh], p: s.p })),
-        test_performance: { c_index: r.cIndex, c_index_95ci_bootstrap: r.cCI, horizon: r.horizon, time_dependent_auc: r.tdAuc, time_dependent_auc_95ci_bootstrap: r.tdCI, brier_score_ipcw: r.brier, brier_score_null_km: r.brierNull, scaled_brier: r.scaledBrier, mean_predicted_risk: r.meanPred, observed_risk_kaplan_meier: r.obsAll, calibration_groups: r.calib }
+        test_performance: { c_index: r.cIndex, c_index_95ci_bootstrap: r.cCI, horizon: r.horizon, time_dependent_auc: r.tdAuc, time_dependent_auc_95ci_bootstrap: r.tdCI, brier_score_ipcw: r.brier, brier_score_null_km: r.brierNull, scaled_brier: r.scaledBrier, mean_predicted_risk: r.meanPred, observed_risk_kaplan_meier: r.obsAll, observed_risk_95ci: r.obsAllCI, calibration_groups: r.calib }
     };
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);

@@ -822,7 +822,9 @@
                     const sum = nums.reduce((a, b) => a + b, 0);
                     const mean = sum / (nums.length || 1);
                     const variance = nums.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (nums.length || 1);
-                    const std = Math.sqrt(variance) || 1;
+                    // A (near-)constant predictor: no scaling (avoids dividing by a tiny spread from rounding noise)
+                    const sdRaw = Math.sqrt(variance);
+                    const std = sdRaw > 1e-8 * Math.max(1, Math.abs(mean)) ? sdRaw : 1;
                     featureMetadata[col] = {
                         type: 'continuous',
                         mean,
@@ -905,7 +907,9 @@
          * training category). If an `issues` array is supplied, each substitution is recorded
          * so the caller can warn the user.
          */
-        transformSingleRow(inputRow, prepMeta, issues = null) {
+        // ranges (optional array): numeric inputs outside the training range are listed in it
+        // ({ column, value, min, max }): the prediction is then an extrapolation (or the value is a typing error)
+        transformSingleRow(inputRow, prepMeta, issues = null, ranges = null) {
             const { featureCols, featureMetadata, totalDimensions } = prepMeta;
             const xRow = new Array(totalDimensions).fill(0);
             const note = (col, kind, rawVal) => {
@@ -929,7 +933,7 @@
             const mice = prepMeta.imputation && prepMeta.imputation.mice;
             if (mice && missingCols.length) {
                 const plain = { ...prepMeta, imputation: null, fillValues: null, derivedIndicators: {} };
-                const versions = mice.chains.map((_, l) => this.transformSingleRow(this.miceApplyRow(inputRow, mice, l), plain));
+                const versions = mice.chains.map((_, l) => this.transformSingleRow(this.miceApplyRow(inputRow, mice, l), plain, null, l === 0 ? ranges : null));
                 missingCols.forEach(c => note(c, 'missing', inputRow[c]));
                 const first = versions[0].slice();
                 Object.defineProperty(first, '__mi', { value: versions, enumerable: false });
@@ -987,6 +991,9 @@
                     } else {
                         const scaled = (num - meta.mean) / meta.std;
                         xRow[meta.startIndex] = isNaN(scaled) ? 0 : Number(scaled.toFixed(5));
+                        if (ranges && !prefilled.has(col) && typeof meta.min === 'number' && typeof meta.max === 'number' && (num < meta.min || num > meta.max)) {
+                            ranges.push({ column: col, value: num, min: meta.min, max: meta.max });
+                        }
                     }
                 }
             });

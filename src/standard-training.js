@@ -8,7 +8,7 @@ import { saveSettingsToBrowser } from './settings.js';
 import { DOM } from './shell.js';
 import { disposeModels, evalAbortOpts, markBaselineDeployed, setupTrainingLossChart, updateLossChart } from './training-actions.js';
 import { getHyperparamsForModel } from './training-setup.js';
-import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapResamples, noInformationRates, plus632, selectionOptimism } from './validation-core.js';
+import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapResamples, noInformationRates, plus632, selectionOptimism, youdenThreshold } from './validation-core.js';
 
 async function startModelTraining() {
     if (!AppState.imputedData) {
@@ -213,6 +213,7 @@ async function startModelTraining() {
                 evalRes.splitSeed = seedC;
                 evalRes.seed = hp.seed;
                 if (tuned.cv) evalRes.cv = tuned.cv;
+                if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration is not combined with bootstrap internal validation (it would need to be repeated inside every resample); use Option A or B to recalibrate.';
                 if (model.trainingInfo) evalRes.nnNote = describeNNTraining(model.trainingInfo);
                 if (model.usedFallback) evalRes.fallbackNote = `TensorFlow.js training failed (${model.fallbackReason}); a linear (logistic/ridge) fallback model was evaluated instead of a neural network.`;
@@ -363,6 +364,7 @@ async function startModelTraining() {
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
                 evalRes.splitInfo = rowSplit.info;
                 if (tuned.cv) evalRes.cv = tuned.cv;
+                if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 evalRes.testImputedCells = testImp.audit.filter(a => a.type === 'impute_column').reduce((acc, a) => acc + a.imputedCount, 0);
                 evalRes.testDroppedRows = miM ? 0 : rowSplit.testX.length - testImp.imputedRows.length;
                 if (miM) evalRes.multipleImputation = { m: miM, imputedColumns: miSplit.imputedColumns };
@@ -542,6 +544,7 @@ async function startModelTraining() {
                 if (miB) evalRes.multipleImputation = { m: miMB, imputedColumns: miB.imputedColumns };
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
                 if (tuned.cv) evalRes.cv = tuned.cv;
+                if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 evalRes.retrainOn100 = false;
                 evalRes.trainCount = prep.X.length;
                 evalRes.testCount = testPrep.totalEvaluated;

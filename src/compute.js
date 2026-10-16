@@ -35,6 +35,11 @@ function createWorker() {
             clearInterval(job.timer);
             if (error !== undefined) job.reject(new Error(error)); else job.resolve(result);
         };
+        // A result that cannot be read (e.g. it could not be copied between threads): fail the jobs, never hang
+        w.onmessageerror = () => {
+            pending.forEach(job => { clearInterval(job.timer); job.reject(new Error('The background worker sent a result that could not be read.')); });
+            pending.clear();
+        };
         w.onerror = (e) => {
             // A worker that cannot start (e.g. blocked script) is not used again; pending jobs fall back
             workerBroken = true;
