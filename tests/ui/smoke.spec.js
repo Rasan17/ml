@@ -130,6 +130,26 @@ test('recalibration, subgroup analysis and Shapley explanation in the standard w
     expect(errors).toEqual([]);
 });
 
+test('multiple imputation: pooled models on the iNPH cohort, with blanks at prediction time', async ({ page }) => {
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await page.click('#sample-shunt-large-btn');
+    await expect(page.locator('#data-stats-grid')).toContainText('420');
+    await page.click('button.step-tab[data-step="3"]');
+    await page.click('#apply-imputation-btn');
+    await page.click('button.step-tab[data-step="4"]');
+    await page.selectOption('#mi-select', 'mice5');
+    await selectModels(page, ['glm', 'rf']);
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText('Tournament Complete', { timeout: 150000 });
+    await expect(page.locator('body')).toContainText('Multiple imputation:');
+    await page.click('button.step-tab[data-step="5"]');
+    await page.fill('#predict-field-11', '');
+    await page.click('#run-single-predict-btn');
+    await expect(page.locator('#single-result-banner .pred-outcome-val')).toBeVisible();
+    expect(errors).toEqual([]);
+});
+
 test('7-step pipeline runs to the benchmark', async ({ page }) => {
     const errors = watch(page);
     await page.goto('/index.html');

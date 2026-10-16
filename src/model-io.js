@@ -29,7 +29,14 @@ function sanitizedPrep(prep) {
             plan: { columns: JSON.parse(JSON.stringify(cols)), referenceRows: knnImputation ? JSON.parse(JSON.stringify(prep.imputation.plan.referenceRows || [])) : [] }
         };
     }
-    return { prep: out, knnImputation };
+    // Multiple imputation: the fitted imputation models, including their donor values (observed values of
+    // training patients, one predictor at a time), are needed to impute new patients
+    const miceImputation = Boolean(prep.imputation && prep.imputation.mice);
+    if (miceImputation) {
+        out.imputation = { ...(out.imputation || { configs: JSON.parse(JSON.stringify(prep.imputation.configs)) }), mice: JSON.parse(JSON.stringify(prep.imputation.mice)) };
+        if (prep.multipleImputation) out.multipleImputation = JSON.parse(JSON.stringify(prep.multipleImputation));
+    }
+    return { prep: out, knnImputation: knnImputation || miceImputation, miceImputation };
 }
 
 function evaluationSummary(ev) {
@@ -54,10 +61,10 @@ async function exportTrainedModel() {
     try {
         if (btn) btn.disabled = true;
         const ser = await ModelEngine.serializeModel(model);
-        const { prep: cleanPrep, knnImputation } = sanitizedPrep(prep);
+        const { prep: cleanPrep, knnImputation, miceImputation } = sanitizedPrep(prep);
         const containsPatientData = knnImputation || modelContainsKnn(ser);
         if (containsPatientData && !confirm('This model file will contain the training patients\' predictor values (needed by ' +
-            (modelContainsKnn(ser) ? 'k-Nearest Neighbours' : 'k-NN missing-value filling') + '). Share it only where your data-governance rules allow. Continue?')) return;
+            (modelContainsKnn(ser) ? 'k-Nearest Neighbours' : miceImputation ? 'multiple imputation, which fills a new patient\'s gaps with values observed in similar training patients' : 'k-NN missing-value filling') + '). Share it only where your data-governance rules allow. Continue?')) return;
         const name = AppState.deployedSource === '7step' && AppState.deployedPipelineModel ? AppState.deployedPipelineModel.name
             : AppState.deployedSource === 'imported' && AppState.importedModelInfo ? AppState.importedModelInfo.name
             : displayModelName(AppState.deployedModelId || AppState.selectedModelId, model);

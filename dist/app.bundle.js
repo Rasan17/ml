@@ -3482,7 +3482,13 @@ async function permutationImportance(model, prep, rows, isClassification, seed, 
         for (let r = 0; r < repeats; r++) {
             const perm = X.map((_, i) => i);
             for (let i = perm.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [perm[i], perm[j]] = [perm[j], perm[i]]; }
-            const Xp = X.map((row, i) => { const nr = row.slice(); for (let j = 0; j < meta.length; j++) nr[meta.startIndex + j] = X[perm[i]][meta.startIndex + j]; return nr; });
+            // Multiply imputed patients carry one version per imputation (x.__mi): shuffle the column in each
+            const swap = (row, src) => { const nr = row.slice(); for (let j = 0; j < meta.length; j++) nr[meta.startIndex + j] = src[meta.startIndex + j]; return nr; };
+            const Xp = X.map((row, i) => {
+                const nr = swap(row, X[perm[i]]);
+                if (row.__mi) Object.defineProperty(nr, '__mi', { value: row.__mi.map((v, l) => swap(v, X[perm[i]].__mi ? X[perm[i]].__mi[l] : X[perm[i]])), enumerable: false });
+                return nr;
+            });
             const sc = await score(Xp);
             if (typeof sc === 'number') drops.push(base - sc);
         }
@@ -3816,6 +3822,48 @@ function runSubgroupAnalysis(containerId) {
     } catch (e) {
         out.innerHTML = `<p class="tune-muted">Subgroup analysis failed: ${escapeHtml(e.message || String(e))}</p>`;
     }
+}
+
+// ---- src/multiple-imputation.js ----
+// multiple-imputation.js: multiple imputation (MICE) for the prediction models in the standard workflow.
+// The imputation models are fitted on the training patients only (without the outcome); one model is
+// trained per completed dataset and the predictions are pooled (ModelEngine.createMIPooled). Testing and new
+// patients are imputed with the same fitted chains by DataEngine.transformSingleRow.
+/* global DataEngine, ModelEngine */
+
+// Number of imputations chosen in Step 4 (0 = single imputation)
+function readMultipleImputation() {
+    const v = document.getElementById('mi-select')?.value || 'single';
+    return v === 'mice10' ? 10 : v === 'mice5' ? 5 : 0;
+}
+
+/**
+ * Multiply imputes raw training rows and returns the encoding fitted on all completed copies (prep, whose
+ * X / y are the first copy, for counts and displays) and the encoded copies (sets) to train on.
+ */
+function prepareMultipleImputation(rawRows, columnConfigs, m, seed) {
+    const mi = DataEngine.miceFit(rawRows, columnConfigs, { m, seed });
+    const stacked = [].concat(...mi.datasets);
+    const prep = DataEngine.prepareFeaturesAndTarget(stacked, columnConfigs);
+    prep.imputation = { configs: JSON.parse(JSON.stringify(columnConfigs)), mice: mi.imputer };
+    const sets = mi.datasets.map(d => {
+        const t = DataEngine.prepareTestingDataset(d, prep);
+        return { X: t.X, y: t.y };
+    });
+    prep.X = sets[0].X;
+    prep.y = sets[0].y;
+    prep.multipleImputation = { m, imputedColumns: mi.imputedColumns, rows: rawRows.length };
+    return { prep, sets, imputedColumns: mi.imputedColumns };
+}
+
+/** Trains one model per completed copy and returns the pooled model */
+async function fitPooledModel(modelId, isClassification, numClasses, hp, sets, opts = {}) {
+    const models = [];
+    for (let l = 0; l < sets.length; l++) {
+        if (opts.onImputation) opts.onImputation(l + 1, sets.length);
+        models.push(await fitModel(modelId, isClassification, numClasses, hp, sets[l].X, sets[l].y, opts));
+    }
+    return ModelEngine.createMIPooled(models);
 }
 
 // ---- src/cv-tuning.js ----
@@ -4168,6 +4216,7 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
 
 
 
+
 async function startModelTraining() {
     if (!AppState.imputedData) {
         alert("Please execute Data Imputation first.");
@@ -4181,7 +4230,7 @@ async function startModelTraining() {
         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan); display: inline-flex; align-items: center; gap: 6px;">⚙️ Initializing multi-model tournament and data partitions...</span>`;
 
         // Prepare features and target from training cohort
-        const prep = DataEngine.prepareFeaturesAndTarget(AppState.imputedData.imputedRows, AppState.columnConfigs);
+        let prep = DataEngine.prepareFeaturesAndTarget(AppState.imputedData.imputedRows, AppState.columnConfigs);
         // New patients' blank predictors are filled with the same fitted imputation as the training data
         prep.imputation = { configs: JSON.parse(JSON.stringify(AppState.columnConfigs)), plan: AppState.imputedData.plan };
         AppState.prepMeta = prep;
@@ -4347,6 +4396,7 @@ async function startModelTraining() {
                     tuning: !wasTuned ? 'none' : (tuneInside ? 'repeated' : 'once'), innerFolds: inner ? innerK : null, sameSettingsShare
                 };
                 evalRes.protocol = 'option-c';
+                if (readMultipleImputation()) evalRes.multipleImputationSkipped = 'Multiple imputation is not combined with bootstrap internal validation (it would multiply the work in every resample); single imputation (the Step 3 choices) was refitted inside each resample. Use Option A or B for multiple imputation.';
                 evalRes.accuracyCI = null; // a CI of the apparent accuracy would be misleading
                 evalRes.ci = null;
                 evalRes.trainCount = prep.X.length;
@@ -4404,10 +4454,10 @@ async function startModelTraining() {
             );
             const trainImp = DataEngine.imputeDataset(rowSplit.trainX, AppState.columnConfigs, AppState.columnAnalysis);
             const testImp = DataEngine.imputeDataset(rowSplit.testX, AppState.columnConfigs, AppState.columnAnalysis, trainImp.plan);
-            const splitPrep = DataEngine.prepareFeaturesAndTarget(trainImp.imputedRows, AppState.columnConfigs);
+            let splitPrep = DataEngine.prepareFeaturesAndTarget(trainImp.imputedRows, AppState.columnConfigs);
             splitPrep.imputation = { configs: JSON.parse(JSON.stringify(AppState.columnConfigs)), plan: trainImp.plan };
-            const testData = DataEngine.prepareTestingDataset(testImp.imputedRows, splitPrep);
-            const split = { trainX: splitPrep.X, trainY: splitPrep.y, testX: testData.X, testY: testData.y };
+            let testData = DataEngine.prepareTestingDataset(testImp.imputedRows, splitPrep);
+            let split = { trainX: splitPrep.X, trainY: splitPrep.y, testX: testData.X, testY: testData.y };
             AppState.trainTestData = split;
             AppState.lastTestRows = testImp.imputedRows; // for permutation importance
             AppState.baselineTestRawRows = testImp.imputedRows.length === rowSplit.testX.length ? rowSplit.testX : null; // for the pipeline comparison
@@ -4421,6 +4471,29 @@ async function startModelTraining() {
             const splitThreshold = prep.isClassification ? null : trainingMedian(split.trainY);
 
             const shouldRetrain = DOM.retrainYes ? DOM.retrainYes.checked : true;
+
+            // Multiple imputation (Step 4 choice): imputation models fitted on the Training rows only; the
+            // Testing rows are imputed with them (several times each) and the predictions pooled
+            const miM = readMultipleImputation();
+            let miSplit = null, miFull = null;
+            if (miM) {
+                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">🧩 Multiple imputation of the Training set (${miM} imputations)...</span>`;
+                await ModelEngine.yieldToBrowser();
+                miSplit = prepareMultipleImputation(rowSplit.trainX, AppState.columnConfigs, miM, splitSeed);
+                splitPrep = miSplit.prep;
+                testData = DataEngine.prepareTestingDataset(rowSplit.testX, splitPrep);
+                split = { trainX: miSplit.sets[0].X, trainY: miSplit.sets[0].y, testX: testData.X, testY: testData.y };
+                AppState.trainTestData = split;
+                AppState.lastTestRows = rowSplit.testX; // raw: imputed per chain when scored
+                AppState.baselineTestRawRows = rowSplit.testX;
+                if (shouldRetrain) {
+                    DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">🧩 Multiple imputation of all patients for the final models (${miM} imputations)...</span>`;
+                    await ModelEngine.yieldToBrowser();
+                    miFull = prepareMultipleImputation(rawRows, AppState.columnConfigs, miM, splitSeed);
+                    prep = miFull.prep;
+                }
+            }
+            const miLabel = l => (miM ? ` (imputed dataset ${l}/${miM})` : '');
 
             for (let i = 0; i < modelsToTest.length; i++) {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
@@ -4441,7 +4514,8 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                let valModel = await fitModel(mId, prep.isClassification, splitPrep.targetClasses.length || 2, hyperparams, split.trainX, split.trainY, {
+                let valModel = await (miSplit ? fitPooledModel : fitModel)(mId, prep.isClassification, splitPrep.targetClasses.length || 2, hyperparams, miSplit ? miSplit.sets : split.trainX, ...(miSplit ? [] : [split.trainY]), {
+                    onImputation: (l) => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">🚀 [${i + 1}/${modelsToTest.length}] Training ${mInfo.name}${miLabel(l)}...</span>`; if (watchdog) watchdog.tick(i + 1, `${mInfo.name}${miLabel(l)}`); },
                     isAborted: () => Boolean(watchdog && watchdog.aborted),
                     onProgress: (a, b, c) => {
                         if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -4486,7 +4560,8 @@ async function startModelTraining() {
                 evalRes.splitInfo = rowSplit.info;
                 if (tuned.cv) evalRes.cv = tuned.cv;
                 evalRes.testImputedCells = testImp.audit.filter(a => a.type === 'impute_column').reduce((acc, a) => acc + a.imputedCount, 0);
-                evalRes.testDroppedRows = rowSplit.testX.length - testImp.imputedRows.length;
+                evalRes.testDroppedRows = miM ? 0 : rowSplit.testX.length - testImp.imputedRows.length;
+                if (miM) evalRes.multipleImputation = { m: miM, imputedColumns: miSplit.imputedColumns };
                 evalRes.unknownClassCount = testData.unknownClassCount;
                 evalRes.retrainOn100 = shouldRetrain;
                 evalRes.trainRatio = trainRatio;
@@ -4514,7 +4589,8 @@ async function startModelTraining() {
                     DOM.trainStatus.innerHTML = `<span style="color: var(--accent-amber); font-weight: 600;">✓ [${i + 1}/${modelsToTest.length}] ${mInfo.name} benchmarked. Retraining on 100% of cohort (N=${prep.X.length})...</span>`;
                     await new Promise(r => setTimeout(r, 40));
 
-                    const fullModel = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
+                    const fullModel = await (miFull ? fitPooledModel : fitModel)(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, miFull ? miFull.sets : prep.X, ...(miFull ? [] : [prep.y]), {
+                        onImputation: (l) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name} 100% retrain${miLabel(l)}`); },
                         isAborted: () => Boolean(watchdog && watchdog.aborted),
                         onProgress: (a, b, c) => {
                             if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -4575,6 +4651,15 @@ async function startModelTraining() {
                 optionBRows = optionBRows.filter(r => predictors.every(c => !DataEngine.isMissing(r[c])));
                 completeCaseDropped = AppState.separateTestRawRows.length - optionBRows.length;
             }
+            // Multiple imputation (Step 4 choice): fitted on Dataset (i) only, then applied to Dataset (ii)
+            const miMB = readMultipleImputation();
+            let miB = null;
+            if (miMB) {
+                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">🧩 Multiple imputation of Training Dataset (i) (${miMB} imputations)...</span>`;
+                await ModelEngine.yieldToBrowser();
+                miB = prepareMultipleImputation(optionBTrainRawRows(prep), AppState.columnConfigs, miMB, 42);
+                prep = miB.prep;
+            }
             // Transform separate test data using training metadata (strict zero leakage)
             const testPrep = DataEngine.prepareTestingDataset(optionBRows, prep);
             AppState.lastTestRows = optionBRows; // for permutation importance
@@ -4609,7 +4694,8 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                let model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
+                let model = await (miB ? fitPooledModel : fitModel)(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, miB ? miB.sets : prep.X, ...(miB ? [] : [prep.y]), {
+                    onImputation: (l) => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">🚀 [${i + 1}/${modelsToTest.length}] Fitting ${mInfo.name} (imputed dataset ${l}/${miMB})...</span>`; if (watchdog) watchdog.tick(i + 1, `${mInfo.name} (imputed dataset ${l}/${miMB})`); },
                     isAborted: () => Boolean(watchdog && watchdog.aborted),
                     onProgress: (a, b, c) => {
                         if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -4650,6 +4736,7 @@ async function startModelTraining() {
                     if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration was not applied: too few out-of-fold predictions or events to fit it reliably.';
                 }
                 evalRes.protocol = 'option-b';
+                if (miB) evalRes.multipleImputation = { m: miMB, imputedColumns: miB.imputedColumns };
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
                 if (tuned.cv) evalRes.cv = tuned.cv;
                 evalRes.retrainOn100 = false;
@@ -5092,6 +5179,11 @@ function renderEvaluationDashboard() {
                 notes.push(`⚠️ <strong>Small sample for the number of predictors:</strong> the smaller outcome group has ${minority} patient(s) for ${nPred} encoded predictor column(s) (${epv.toFixed(1)} per predictor; at least 10–20 is a common rule of thumb). Models may overfit; consider fewer predictors or more patients, and treat the results as exploratory.`);
             }
         }
+        if (evalRes && evalRes.multipleImputation) {
+            const mi = evalRes.multipleImputation;
+            notes.push(`🧩 <strong>Multiple imputation:</strong> missing predictor values${mi.imputedColumns && mi.imputedColumns.length ? ` (${mi.imputedColumns.map(escapeHtml).join(', ')})` : ''} were imputed ${mi.m} times by chained equations with predictive mean matching, fitted on the Training patients only and without the outcome. One model was trained on each completed dataset and the predictions are averaged; Testing and new patients with missing values are imputed in the same way.${evalRes.cv ? ' Model selection and tuning used single imputation inside the cross-validation folds.' : ''}`);
+        }
+        if (evalRes && evalRes.multipleImputationSkipped) notes.push(`🧩 ${escapeHtml(evalRes.multipleImputationSkipped)}`);
         if (evalRes && evalRes.cv) {
             notes.push(`Best model chosen by ${evalRes.cv.folds}-fold cross-validation inside the Training set${evalRes.cv.grouped ? ' (each patient\'s records kept in one fold)' : ''}; missing-value filling, encoding and scaling were refitted inside every fold.`);
         }
@@ -8158,7 +8250,14 @@ function sanitizedPrep(prep) {
             plan: { columns: JSON.parse(JSON.stringify(cols)), referenceRows: knnImputation ? JSON.parse(JSON.stringify(prep.imputation.plan.referenceRows || [])) : [] }
         };
     }
-    return { prep: out, knnImputation };
+    // Multiple imputation: the fitted imputation models, including their donor values (observed values of
+    // training patients, one predictor at a time), are needed to impute new patients
+    const miceImputation = Boolean(prep.imputation && prep.imputation.mice);
+    if (miceImputation) {
+        out.imputation = { ...(out.imputation || { configs: JSON.parse(JSON.stringify(prep.imputation.configs)) }), mice: JSON.parse(JSON.stringify(prep.imputation.mice)) };
+        if (prep.multipleImputation) out.multipleImputation = JSON.parse(JSON.stringify(prep.multipleImputation));
+    }
+    return { prep: out, knnImputation: knnImputation || miceImputation, miceImputation };
 }
 
 function evaluationSummary(ev) {
@@ -8183,10 +8282,10 @@ async function exportTrainedModel() {
     try {
         if (btn) btn.disabled = true;
         const ser = await ModelEngine.serializeModel(model);
-        const { prep: cleanPrep, knnImputation } = sanitizedPrep(prep);
+        const { prep: cleanPrep, knnImputation, miceImputation } = sanitizedPrep(prep);
         const containsPatientData = knnImputation || modelContainsKnn(ser);
         if (containsPatientData && !confirm('This model file will contain the training patients\' predictor values (needed by ' +
-            (modelContainsKnn(ser) ? 'k-Nearest Neighbours' : 'k-NN missing-value filling') + '). Share it only where your data-governance rules allow. Continue?')) return;
+            (modelContainsKnn(ser) ? 'k-Nearest Neighbours' : miceImputation ? 'multiple imputation, which fills a new patient\'s gaps with values observed in similar training patients' : 'k-NN missing-value filling') + '). Share it only where your data-governance rules allow. Continue?')) return;
         const name = AppState.deployedSource === '7step' && AppState.deployedPipelineModel ? AppState.deployedPipelineModel.name
             : AppState.deployedSource === 'imported' && AppState.importedModelInfo ? AppState.importedModelInfo.name
             : displayModelName(AppState.deployedModelId || AppState.selectedModelId, model);
@@ -8686,7 +8785,7 @@ function collect(source) {
         split: top && top.protocol === 'option-a' ? describeSplit(top.splitInfo) : null, seed: top ? top.splitSeed : null,
         models: res.map(r => ({ name: (MODEL_INFO[r.modelId] || {}).name || r.modelId, ev: r.evalRes, hp: r.hyperparams })),
         best: res[0] ? { name: (MODEL_INFO[res[0].modelId] || {}).name || res[0].modelId, ev: res[0].evalRes } : null,
-        missing: AppState.completeCase ? 'complete-case analysis (rows with an empty cell removed)' : `single imputation with the methods chosen per predictor, fitted on the training data only${AppState.missingIndicators ? ', with "was missing" indicator predictors' : ''}`,
+        missing: AppState.completeCase ? 'complete-case analysis (rows with an empty cell removed)' : top && top.multipleImputation ? `multiple imputation by chained equations with predictive mean matching (${top.multipleImputation.m} imputations), fitted on the training patients without the outcome; one model was fitted per imputed dataset and predictions were pooled by averaging; test and new patients were imputed with the same imputation models` : `single imputation with the methods chosen per predictor, fitted on the training data only${AppState.missingIndicators ? ', with "was missing" indicator predictors' : ''}`,
         imbalance: 'no resampling in the standard workflow',
         selection: top && top.cv ? `${top.cv.folds}-fold cross-validation within the training set (imputation, encoding and scaling refitted in each fold)` : (res.length > 1 ? 'best test-set result (optimistic)' : 'single prespecified model'),
         tuning: AppState.tuningReport ? 'key hyperparameters tuned by cross-validation within the training set' : 'user-specified hyperparameters',
@@ -9109,6 +9208,7 @@ function handleUnexpectedError(err) {
 // ---- src/main.js ----
 // main.js: entry point of the Universal Medical ML/NeuralNet Predictor application controller.
 // Loads every module, initialises the shared state and starts the interface once the page is ready.
+
 
 
 

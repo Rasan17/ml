@@ -12,6 +12,7 @@ import './imputation.js';
 import './training-setup.js';
 import { renderSampleSizePanel } from './panels.js';
 import './subgroups.js';
+import './multiple-imputation.js';
 import './cv-tuning.js';
 import './standard-training.js';
 import './training-actions.js';

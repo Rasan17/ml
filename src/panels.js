@@ -470,7 +470,13 @@ async function permutationImportance(model, prep, rows, isClassification, seed, 
         for (let r = 0; r < repeats; r++) {
             const perm = X.map((_, i) => i);
             for (let i = perm.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [perm[i], perm[j]] = [perm[j], perm[i]]; }
-            const Xp = X.map((row, i) => { const nr = row.slice(); for (let j = 0; j < meta.length; j++) nr[meta.startIndex + j] = X[perm[i]][meta.startIndex + j]; return nr; });
+            // Multiply imputed patients carry one version per imputation (x.__mi): shuffle the column in each
+            const swap = (row, src) => { const nr = row.slice(); for (let j = 0; j < meta.length; j++) nr[meta.startIndex + j] = src[meta.startIndex + j]; return nr; };
+            const Xp = X.map((row, i) => {
+                const nr = swap(row, X[perm[i]]);
+                if (row.__mi) Object.defineProperty(nr, '__mi', { value: row.__mi.map((v, l) => swap(v, X[perm[i]].__mi ? X[perm[i]].__mi[l] : X[perm[i]])), enumerable: false });
+                return nr;
+            });
             const sc = await score(Xp);
             if (typeof sc === 'number') drops.push(base - sc);
         }

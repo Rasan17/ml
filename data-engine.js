@@ -924,6 +924,17 @@
             let row = inputRow;
             const prefilled = new Set();
             const missingCols = featureCols.filter(c => this.isMissing(inputRow[c]));
+            // Multiple imputation: the patient is imputed once per imputation chain and encoded each time; the
+            // first version is returned, carrying all of them (x.__mi) for the pooled model to average over
+            const mice = prepMeta.imputation && prepMeta.imputation.mice;
+            if (mice && missingCols.length) {
+                const plain = { ...prepMeta, imputation: null, fillValues: null, derivedIndicators: {} };
+                const versions = mice.chains.map((_, l) => this.transformSingleRow(this.miceApplyRow(inputRow, mice, l), plain));
+                missingCols.forEach(c => note(c, 'missing', inputRow[c]));
+                const first = versions[0].slice();
+                Object.defineProperty(first, '__mi', { value: versions, enumerable: false });
+                return first;
+            }
             if (missingCols.length) {
                 let filled = null;
                 if (prepMeta.imputation && prepMeta.imputation.plan) {
@@ -1143,6 +1154,175 @@
                 datasets.push(data);
             }
             return { datasets, imputedColumns: targets, m, iterations };
+        },
+
+        /**
+         * Multiple imputation for PREDICTION models (MICE with predictive mean matching), fitted on the training
+         * patients only. Unlike miceImpute (used for the explanatory odds ratios), the outcome is NOT used in
+         * the imputation models, so that test patients and new patients, whose outcome is unknown, are imputed
+         * in exactly the same way as the training patients. Returns the m completed training datasets and a
+         * fitted "imputer" (one set of imputation models per completed dataset, for every predictor) that
+         * miceApplyRow uses to impute any new patient.
+         */
+        miceFit(rows, columnConfigs, { m = 5, iterations = 10, seed = 2024, donors = 5, maxDonors = 500 } = {}) {
+            const cols = Object.keys(columnConfigs).filter(c => columnConfigs[c].role === 'feature');
+            const numeric = {}, levels = {}, start = {};
+            cols.forEach(c => {
+                const obs = rows.filter(r => !this.isMissing(r[c]));
+                numeric[c] = columnConfigs[c].type !== 'nominal' && obs.every(r => !isNaN(Number(r[c])));
+                if (!numeric[c]) levels[c] = [...new Set(obs.map(r => String(r[c]).trim()))].sort();
+                if (numeric[c]) { const v = obs.map(r => Number(r[c])).sort((a, b) => a - b); start[c] = v.length ? v[Math.floor(v.length / 2)] : 0; }
+                else { const cnt = {}; obs.forEach(r => { const k = String(r[c]).trim(); cnt[k] = (cnt[k] || 0) + 1; }); start[c] = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a] || (a < b ? -1 : 1))[0] ?? ''; }
+            });
+            const n = rows.length;
+            const missingIdx = {};
+            cols.forEach(c => { missingIdx[c] = rows.map((r, i) => (this.isMissing(r[c]) ? i : -1)).filter(i => i >= 0); });
+            const usable = cols.filter(c => missingIdx[c].length < n);            // has observed values
+            const incomplete = usable.filter(c => missingIdx[c].length > 0);
+            const ridge = this._ridgeSolve;
+            const fitModel = (data, c, rng, obsIdxAll) => {
+                // Imputation model for c on all other usable predictors (current completed values)
+                const others = usable.filter(o => o !== c);
+                const stats = {};
+                others.forEach(o => {
+                    if (numeric[o]) {
+                        const v = data.map(r => Number(r[o]));
+                        const mu = v.reduce((a, b) => a + b, 0) / n;
+                        const sd = Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / n) || 1;
+                        stats[o] = { mu, sd };
+                    }
+                });
+                const spec = { c, others, stats };
+                const design = r => this._miceDesign(r, spec, numeric, levels);
+                const resp = r => (numeric[c] ? [Number(r[c])] : levels[c].map(lv => (String(r[c]).trim() === lv ? 1 : 0)));
+                const obsIdx = obsIdxAll;
+                const Xall = data.map(design);
+                const lam = 1e-3 * obsIdx.length;
+                const betaHat = ridge(obsIdx.map(i => Xall[i]), obsIdx.map(i => resp(rows[i])), lam);
+                const boot = obsIdx.map(() => obsIdx[Math.floor(rng() * obsIdx.length)]);
+                const betaStar = ridge(boot.map(i => Xall[i]), boot.map(i => resp(rows[i])), lam);
+                return { spec, Xall, betaHat, betaStar, obsIdx };
+            };
+            const pred = (x, B) => B[0].map((_, k) => x.reduce((a, xv, j) => a + xv * B[j][k], 0));
+            const nearest = (target, preds, rng) => {
+                const best = [];
+                preds.forEach((pv, k) => {
+                    const d = pv.reduce((a, v, j) => a + (v - target[j]) ** 2, 0);
+                    if (best.length < donors) { best.push({ k, d }); best.sort((a, b) => a.d - b.d); }
+                    else if (d < best[donors - 1].d) { best[donors - 1] = { k, d }; best.sort((a, b) => a.d - b.d); }
+                });
+                return best[Math.floor(rng() * best.length)].k;
+            };
+            const obsOf = {};
+            usable.forEach(c => { const mis = new Set(missingIdx[c]); obsOf[c] = []; for (let i = 0; i < n; i++) if (!mis.has(i)) obsOf[c].push(i); });
+
+            const datasets = [], chains = [];
+            for (let l = 0; l < m; l++) {
+                const rng = this.createPRNG(seed + 1009 * l);
+                const data = rows.map(r => ({ ...r }));
+                incomplete.forEach(c => {
+                    const obs = obsOf[c].map(i => rows[i][c]);
+                    missingIdx[c].forEach(i => { data[i][c] = obs[Math.floor(rng() * obs.length)]; });
+                });
+                cols.filter(c => missingIdx[c].length === n).forEach(c => missingIdx[c].forEach(i => { data[i][c] = start[c]; }));
+                for (let it = 0; it < iterations; it++) {
+                    incomplete.forEach(c => {
+                        const f = fitModel(data, c, rng, obsOf[c]);
+                        const obsPred = f.obsIdx.map(i => pred(f.Xall[i], f.betaHat));
+                        missingIdx[c].forEach(i => { data[i][c] = rows[f.obsIdx[nearest(pred(f.Xall[i], f.betaStar), obsPred, rng)]][c]; });
+                    });
+                }
+                datasets.push(data);
+                // Imputation models kept for new patients: every usable predictor, fitted on the completed data
+                const models = {};
+                usable.forEach(c => {
+                    const f = fitModel(data, c, rng, obsOf[c]);
+                    const take = f.obsIdx.length > maxDonors ? Array.from({ length: maxDonors }, () => Math.floor(rng() * f.obsIdx.length)) : f.obsIdx.map((_, k) => k);
+                    const r4 = v => Number(v.toPrecision(6));
+                    models[c] = {
+                        others: f.spec.others, stats: f.spec.stats, beta: f.betaStar.map(row => row.map(r4)),
+                        donorPred: take.map(k => pred(f.Xall[f.obsIdx[k]], f.betaHat).map(r4)),
+                        donorVal: take.map(k => rows[f.obsIdx[k]][c])
+                    };
+                });
+                chains.push(models);
+            }
+            return {
+                datasets, imputedColumns: incomplete,
+                imputer: { kind: 'mice', m, iterations: Math.min(iterations, 5), donors, columns: usable, numeric, levels, start, chains, seed }
+            };
+        },
+
+        /** Design row of an imputation model: intercept, standardised numbers, one-hot categories (first level as reference) */
+        _miceDesign(r, spec, numeric, levels) {
+            const x = [1];
+            spec.others.forEach(o => {
+                if (numeric[o]) x.push((Number(r[o]) - spec.stats[o].mu) / spec.stats[o].sd);
+                else levels[o].slice(1).forEach(lv => x.push(String(r[o]).trim() === lv ? 1 : 0));
+            });
+            return x;
+        },
+
+        /**
+         * Imputes one patient's missing predictors with imputation chain l of a fitted imputer (miceFit). The
+         * choice among the closest donors is seeded from the patient's own values, so the same patient always
+         * gets the same imputations. Returns a completed copy of the row (unchanged if nothing is missing).
+         */
+        miceApplyRow(row, imputer, l) {
+            const miss = imputer.columns.filter(c => this.isMissing(row[c]));
+            const out = { ...row };
+            if (!miss.length) return out;
+            let h = 2166136261 ^ (l + 1);
+            const key = imputer.columns.map(c => String(row[c] ?? '')).join('|');
+            for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619); }
+            const rng = this.createPRNG(((h >>> 0) + (imputer.seed || 0)) >>> 0);
+            miss.forEach(c => { out[c] = imputer.start[c]; });
+            const models = imputer.chains[l];
+            for (let it = 0; it < (imputer.iterations || 5); it++) {
+                miss.forEach(c => {
+                    const md = models[c];
+                    if (!md || !md.donorVal.length) return;
+                    const x = this._miceDesign(out, md, imputer.numeric, imputer.levels);
+                    const target = md.beta[0].map((_, k) => x.reduce((a, xv, j) => a + xv * md.beta[j][k], 0));
+                    const best = [];
+                    md.donorPred.forEach((pv, k) => {
+                        const d = pv.reduce((a, v, j) => a + (v - target[j]) ** 2, 0);
+                        if (best.length < imputer.donors) { best.push({ k, d }); best.sort((a, b) => a.d - b.d); }
+                        else if (d < best[imputer.donors - 1].d) { best[imputer.donors - 1] = { k, d }; best.sort((a, b) => a.d - b.d); }
+                    });
+                    out[c] = md.donorVal[best[Math.floor(rng() * best.length)].k];
+                });
+            }
+            return out;
+        },
+
+        /** Ridge regression by the normal equations (no penalty on the intercept); coefficients p x q */
+        _ridgeSolve(X, Y, lam) {
+            const p = X[0].length, q = Y[0].length;
+            const A = Array.from({ length: p }, () => new Array(p).fill(0));
+            const Bm = Array.from({ length: p }, () => new Array(q).fill(0));
+            for (let i = 0; i < X.length; i++) {
+                const xi = X[i];
+                for (let a = 0; a < p; a++) {
+                    if (xi[a] === 0) continue;
+                    for (let b = a; b < p; b++) A[a][b] += xi[a] * xi[b];
+                    for (let k = 0; k < q; k++) Bm[a][k] += xi[a] * Y[i][k];
+                }
+            }
+            for (let a = 0; a < p; a++) { for (let b = 0; b < a; b++) A[a][b] = A[b][a]; if (a > 0) A[a][a] += lam; }
+            const M = A.map((r, i) => [...r, ...Bm[i]]);
+            for (let c = 0; c < p; c++) {
+                let piv = c;
+                for (let r = c + 1; r < p; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+                if (Math.abs(M[piv][c]) < 1e-12) { M[piv][c] = 1e-12; }
+                [M[c], M[piv]] = [M[piv], M[c]];
+                for (let r = 0; r < p; r++) {
+                    if (r === c) continue;
+                    const f = M[r][c] / M[c][c];
+                    if (f) for (let k = c; k < p + q; k++) M[r][k] -= f * M[c][k];
+                }
+            }
+            return M.map((r, i) => r.slice(p).map(v => v / r[i]));
         },
 
         /** Parses common date formats (ISO yyyy-mm-dd, dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy, "15 Oct 2026"); null if not a date */

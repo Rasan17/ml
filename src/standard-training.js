@@ -1,5 +1,6 @@
 // standard-training.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { bootstrapRun, fitModel } from './compute.js';
+import { fitPooledModel, prepareMultipleImputation, readMultipleImputation } from './multiple-imputation.js';
 import { AppState, MODEL_INFO, RANKING_METRICS, compareEvalResults, describeNNTraining, escapeHtml, fmtR2, parseSeed, rankingMetricKey, rankingMetricLabel, trainingMedian } from './core.js';
 import { TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, cvSummaryFrom, fitRecalibrator, optionBTrainRawRows, readDecisionThreshold, readRecalibration, recalibrateAndEvaluate, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV, splitSpec } from './cv-tuning.js';
 import { renderEvaluationDashboard } from './evaluation-dashboard.js';
@@ -22,7 +23,7 @@ async function startModelTraining() {
         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan); display: inline-flex; align-items: center; gap: 6px;">⚙️ Initializing multi-model tournament and data partitions...</span>`;
 
         // Prepare features and target from training cohort
-        const prep = DataEngine.prepareFeaturesAndTarget(AppState.imputedData.imputedRows, AppState.columnConfigs);
+        let prep = DataEngine.prepareFeaturesAndTarget(AppState.imputedData.imputedRows, AppState.columnConfigs);
         // New patients' blank predictors are filled with the same fitted imputation as the training data
         prep.imputation = { configs: JSON.parse(JSON.stringify(AppState.columnConfigs)), plan: AppState.imputedData.plan };
         AppState.prepMeta = prep;
@@ -188,6 +189,7 @@ async function startModelTraining() {
                     tuning: !wasTuned ? 'none' : (tuneInside ? 'repeated' : 'once'), innerFolds: inner ? innerK : null, sameSettingsShare
                 };
                 evalRes.protocol = 'option-c';
+                if (readMultipleImputation()) evalRes.multipleImputationSkipped = 'Multiple imputation is not combined with bootstrap internal validation (it would multiply the work in every resample); single imputation (the Step 3 choices) was refitted inside each resample. Use Option A or B for multiple imputation.';
                 evalRes.accuracyCI = null; // a CI of the apparent accuracy would be misleading
                 evalRes.ci = null;
                 evalRes.trainCount = prep.X.length;
@@ -245,10 +247,10 @@ async function startModelTraining() {
             );
             const trainImp = DataEngine.imputeDataset(rowSplit.trainX, AppState.columnConfigs, AppState.columnAnalysis);
             const testImp = DataEngine.imputeDataset(rowSplit.testX, AppState.columnConfigs, AppState.columnAnalysis, trainImp.plan);
-            const splitPrep = DataEngine.prepareFeaturesAndTarget(trainImp.imputedRows, AppState.columnConfigs);
+            let splitPrep = DataEngine.prepareFeaturesAndTarget(trainImp.imputedRows, AppState.columnConfigs);
             splitPrep.imputation = { configs: JSON.parse(JSON.stringify(AppState.columnConfigs)), plan: trainImp.plan };
-            const testData = DataEngine.prepareTestingDataset(testImp.imputedRows, splitPrep);
-            const split = { trainX: splitPrep.X, trainY: splitPrep.y, testX: testData.X, testY: testData.y };
+            let testData = DataEngine.prepareTestingDataset(testImp.imputedRows, splitPrep);
+            let split = { trainX: splitPrep.X, trainY: splitPrep.y, testX: testData.X, testY: testData.y };
             AppState.trainTestData = split;
             AppState.lastTestRows = testImp.imputedRows; // for permutation importance
             AppState.baselineTestRawRows = testImp.imputedRows.length === rowSplit.testX.length ? rowSplit.testX : null; // for the pipeline comparison
@@ -262,6 +264,29 @@ async function startModelTraining() {
             const splitThreshold = prep.isClassification ? null : trainingMedian(split.trainY);
 
             const shouldRetrain = DOM.retrainYes ? DOM.retrainYes.checked : true;
+
+            // Multiple imputation (Step 4 choice): imputation models fitted on the Training rows only; the
+            // Testing rows are imputed with them (several times each) and the predictions pooled
+            const miM = readMultipleImputation();
+            let miSplit = null, miFull = null;
+            if (miM) {
+                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">🧩 Multiple imputation of the Training set (${miM} imputations)...</span>`;
+                await ModelEngine.yieldToBrowser();
+                miSplit = prepareMultipleImputation(rowSplit.trainX, AppState.columnConfigs, miM, splitSeed);
+                splitPrep = miSplit.prep;
+                testData = DataEngine.prepareTestingDataset(rowSplit.testX, splitPrep);
+                split = { trainX: miSplit.sets[0].X, trainY: miSplit.sets[0].y, testX: testData.X, testY: testData.y };
+                AppState.trainTestData = split;
+                AppState.lastTestRows = rowSplit.testX; // raw: imputed per chain when scored
+                AppState.baselineTestRawRows = rowSplit.testX;
+                if (shouldRetrain) {
+                    DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">🧩 Multiple imputation of all patients for the final models (${miM} imputations)...</span>`;
+                    await ModelEngine.yieldToBrowser();
+                    miFull = prepareMultipleImputation(rawRows, AppState.columnConfigs, miM, splitSeed);
+                    prep = miFull.prep;
+                }
+            }
+            const miLabel = l => (miM ? ` (imputed dataset ${l}/${miM})` : '');
 
             for (let i = 0; i < modelsToTest.length; i++) {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
@@ -282,7 +307,8 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                let valModel = await fitModel(mId, prep.isClassification, splitPrep.targetClasses.length || 2, hyperparams, split.trainX, split.trainY, {
+                let valModel = await (miSplit ? fitPooledModel : fitModel)(mId, prep.isClassification, splitPrep.targetClasses.length || 2, hyperparams, miSplit ? miSplit.sets : split.trainX, ...(miSplit ? [] : [split.trainY]), {
+                    onImputation: (l) => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">🚀 [${i + 1}/${modelsToTest.length}] Training ${mInfo.name}${miLabel(l)}...</span>`; if (watchdog) watchdog.tick(i + 1, `${mInfo.name}${miLabel(l)}`); },
                     isAborted: () => Boolean(watchdog && watchdog.aborted),
                     onProgress: (a, b, c) => {
                         if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -327,7 +353,8 @@ async function startModelTraining() {
                 evalRes.splitInfo = rowSplit.info;
                 if (tuned.cv) evalRes.cv = tuned.cv;
                 evalRes.testImputedCells = testImp.audit.filter(a => a.type === 'impute_column').reduce((acc, a) => acc + a.imputedCount, 0);
-                evalRes.testDroppedRows = rowSplit.testX.length - testImp.imputedRows.length;
+                evalRes.testDroppedRows = miM ? 0 : rowSplit.testX.length - testImp.imputedRows.length;
+                if (miM) evalRes.multipleImputation = { m: miM, imputedColumns: miSplit.imputedColumns };
                 evalRes.unknownClassCount = testData.unknownClassCount;
                 evalRes.retrainOn100 = shouldRetrain;
                 evalRes.trainRatio = trainRatio;
@@ -355,7 +382,8 @@ async function startModelTraining() {
                     DOM.trainStatus.innerHTML = `<span style="color: var(--accent-amber); font-weight: 600;">✓ [${i + 1}/${modelsToTest.length}] ${mInfo.name} benchmarked. Retraining on 100% of cohort (N=${prep.X.length})...</span>`;
                     await new Promise(r => setTimeout(r, 40));
 
-                    const fullModel = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
+                    const fullModel = await (miFull ? fitPooledModel : fitModel)(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, miFull ? miFull.sets : prep.X, ...(miFull ? [] : [prep.y]), {
+                        onImputation: (l) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name} 100% retrain${miLabel(l)}`); },
                         isAborted: () => Boolean(watchdog && watchdog.aborted),
                         onProgress: (a, b, c) => {
                             if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -416,6 +444,15 @@ async function startModelTraining() {
                 optionBRows = optionBRows.filter(r => predictors.every(c => !DataEngine.isMissing(r[c])));
                 completeCaseDropped = AppState.separateTestRawRows.length - optionBRows.length;
             }
+            // Multiple imputation (Step 4 choice): fitted on Dataset (i) only, then applied to Dataset (ii)
+            const miMB = readMultipleImputation();
+            let miB = null;
+            if (miMB) {
+                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">🧩 Multiple imputation of Training Dataset (i) (${miMB} imputations)...</span>`;
+                await ModelEngine.yieldToBrowser();
+                miB = prepareMultipleImputation(optionBTrainRawRows(prep), AppState.columnConfigs, miMB, 42);
+                prep = miB.prep;
+            }
             // Transform separate test data using training metadata (strict zero leakage)
             const testPrep = DataEngine.prepareTestingDataset(optionBRows, prep);
             AppState.lastTestRows = optionBRows; // for permutation importance
@@ -450,7 +487,8 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                let model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
+                let model = await (miB ? fitPooledModel : fitModel)(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, miB ? miB.sets : prep.X, ...(miB ? [] : [prep.y]), {
+                    onImputation: (l) => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">🚀 [${i + 1}/${modelsToTest.length}] Fitting ${mInfo.name} (imputed dataset ${l}/${miMB})...</span>`; if (watchdog) watchdog.tick(i + 1, `${mInfo.name} (imputed dataset ${l}/${miMB})`); },
                     isAborted: () => Boolean(watchdog && watchdog.aborted),
                     onProgress: (a, b, c) => {
                         if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -491,6 +529,7 @@ async function startModelTraining() {
                     if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration was not applied: too few out-of-fold predictions or events to fit it reliably.';
                 }
                 evalRes.protocol = 'option-b';
+                if (miB) evalRes.multipleImputation = { m: miMB, imputedColumns: miB.imputedColumns };
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
                 if (tuned.cv) evalRes.cv = tuned.cv;
                 evalRes.retrainOn100 = false;

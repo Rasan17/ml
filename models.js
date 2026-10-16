@@ -2123,6 +2123,56 @@
         return { phi: phi.map(v => v / n), base: base / n, value: out[plan[0].start + nGroups], exact: false, orderings: n };
     }
 
+    // ==========================================
+    // MULTIPLE-IMPUTATION POOLED MODEL
+    // ==========================================
+    // One model per multiply-imputed training dataset; the prediction is the average over them. A patient
+    // with missing predictors arrives with one encoded version per imputation (x.__mi, from
+    // DataEngine.transformSingleRow), and model l is applied to version l (pooling of predictions, as in
+    // Wood et al. 2015); a complete patient is the same in every version.
+    class MIPooledModel {
+        constructor(models) {
+            this.models = models;
+            this.isClassification = models[0].isClassification;
+            this.seed = models[0].seed;
+            ['trainingInfo', 'usedFallback', 'fallbackReason', 'weightingNote', 'fallbackNote'].forEach(k => { if (models[0][k] !== undefined) this[k] = models[0][k]; });
+            const imps = models.map(m => m.featureImportances).filter(Array.isArray);
+            if (imps.length === models.length) this.featureImportances = imps[0].map((_, j) => Number((imps.reduce((a, v) => a + (v[j] || 0), 0) / imps.length).toFixed(4)));
+        }
+        get m() { return this.models.length; }
+        _versions(X, l) { return X.map(x => (x && x.__mi ? x.__mi[l] : x)); }
+        _combine(outs) {
+            if (!this.isClassification) {
+                const pred = outs.reduce((a, o) => a + Number(o.pred), 0) / outs.length;
+                return { pred: Number(pred.toFixed(4)), confidence: null };
+            }
+            const probabilities = {};
+            const keys = new Set();
+            outs.forEach(o => { if (o.probabilities) Object.keys(o.probabilities).forEach(k => keys.add(k)); else keys.add(String(o.pred)); });
+            keys.forEach(k => {
+                probabilities[k] = outs.reduce((a, o) => a + (o.probabilities ? Number(o.probabilities[k]) || 0 : (String(o.pred) === k ? 1 : 0)), 0) / outs.length;
+            });
+            let pred = null, best = -1;
+            Object.keys(probabilities).forEach(k => { if (probabilities[k] > best) { best = probabilities[k]; pred = Number(k); } });
+            return { pred, probabilities, confidence: best, probabilityType: outs[0].probabilityType || 'model' };
+        }
+        predictSingle(x) {
+            const xs = x && x.__mi ? x.__mi : null;
+            return this._combine(this.models.map((md, l) => md.predictSingle(xs ? xs[l] : x)));
+        }
+        predict(X) { return X.map(x => this.predictSingle(x).pred); }
+        predictOutputs(X) {
+            const per = this.models.map((md, l) => batchOutputs(md, this._versions(X, l)));
+            return X.map((_, i) => this._combine(per.map(o => o[i])));
+        }
+        async predictOutputsAsync(X, opts = {}) {
+            const per = [];
+            for (let l = 0; l < this.models.length; l++) per.push(await batchOutputsAsync(this.models[l], this._versions(X, l), opts));
+            return X.map((_, i) => this._combine(per.map(o => o[i])));
+        }
+        dispose() { this.models.forEach(md => { if (md && md.dispose) md.dispose(); }); }
+    }
+
     const ModelEngine = {
         treeShap,
         sampledShapley,
@@ -2643,6 +2693,11 @@
                 }
                 return out;
             }
+            if (model instanceof MIPooledModel) {
+                const models = [];
+                for (const md of model.models) models.push(await this.serializeModel(md));
+                return { type: 'mi-pooled', models };
+            }
             if (model instanceof CalibratedModel) {
                 return { type: 'calibrated', calibrator: model.calibrator, base: await this.serializeModel(model.base) };
             }
@@ -2687,6 +2742,11 @@
                     m.tfModel = await tf.loadLayersModel(tf.io.fromMemory({ modelTopology: obj.tf.modelTopology, weightSpecs: obj.tf.weightSpecs, weightData: bytes.buffer }));
                 }
                 return m;
+            }
+            if (obj.type === 'mi-pooled') {
+                const models = [];
+                for (const md of obj.models) models.push(await this.deserializeModel(md));
+                return new MIPooledModel(models);
             }
             if (obj.type === 'calibrated') {
                 return new CalibratedModel(await this.deserializeModel(obj.base), obj.calibrator);
@@ -2863,6 +2923,7 @@
         },
 
         wrapCalibrated(model, calibrator) { return new CalibratedModel(model, calibrator); },
+        createMIPooled(models) { return new MIPooledModel(models); },
         applyCalibrator(cal, p) { return applyCalibrator(cal, p); },
 
         /** Re-labels one binary output with a decision threshold on the positive-class probability */
@@ -2985,6 +3046,7 @@
     window.GaussianNaiveBayes = GaussianNaiveBayes;
     window.EnsembleModel = EnsembleModel;
     window.CalibratedModel = CalibratedModel;
+    window.MIPooledModel = MIPooledModel;
     window.GradientBoostingModel = GradientBoostingModel;
     window.CoxModel = CoxModel;
 })(window);

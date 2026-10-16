@@ -121,6 +121,11 @@ function renderEvaluationDashboard() {
                 notes.push(`⚠️ <strong>Small sample for the number of predictors:</strong> the smaller outcome group has ${minority} patient(s) for ${nPred} encoded predictor column(s) (${epv.toFixed(1)} per predictor; at least 10–20 is a common rule of thumb). Models may overfit; consider fewer predictors or more patients, and treat the results as exploratory.`);
             }
         }
+        if (evalRes && evalRes.multipleImputation) {
+            const mi = evalRes.multipleImputation;
+            notes.push(`🧩 <strong>Multiple imputation:</strong> missing predictor values${mi.imputedColumns && mi.imputedColumns.length ? ` (${mi.imputedColumns.map(escapeHtml).join(', ')})` : ''} were imputed ${mi.m} times by chained equations with predictive mean matching, fitted on the Training patients only and without the outcome. One model was trained on each completed dataset and the predictions are averaged; Testing and new patients with missing values are imputed in the same way.${evalRes.cv ? ' Model selection and tuning used single imputation inside the cross-validation folds.' : ''}`);
+        }
+        if (evalRes && evalRes.multipleImputationSkipped) notes.push(`🧩 ${escapeHtml(evalRes.multipleImputationSkipped)}`);
         if (evalRes && evalRes.cv) {
             notes.push(`Best model chosen by ${evalRes.cv.folds}-fold cross-validation inside the Training set${evalRes.cv.grouped ? ' (each patient\'s records kept in one fold)' : ''}; missing-value filling, encoding and scaling were refitted inside every fold.`);
         }

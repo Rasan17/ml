@@ -426,6 +426,56 @@ async function optionC(VC, rows, cfg, modelId, hp, B, tune) {
         return `${done.result.B} resamples with tuning repeated, ${progress} progress messages, identical optimism (${done.result.optimism.rocAuc.toFixed(4)})`;
     });
 
+    await check('Multiple imputation for prediction: leak-free, reproducible, survives export, and helps when data are missing at random', async () => {
+        // Missing at random: X1 (strongly predictive) is missing more often when X2 is high; X2 carries information about X1
+        const rng = DE.createPRNG(77);
+        const g = () => Math.sqrt(-2 * Math.log(rng() || 1e-12)) * Math.cos(2 * Math.PI * rng());
+        const make = n => Array.from({ length: n }, (_, i) => {
+            const x2 = g(), x1 = 0.8 * x2 + 0.6 * g(), x3 = g();
+            const y = rng() < 1 / (1 + Math.exp(-(1.6 * x1 + 0.3 * x3))) ? 'Yes' : 'No';
+            return { ID: `P${i}`, X1: rng() < 1 / (1 + Math.exp(-(1.5 * x2 - 0.2))) ? '' : x1.toFixed(3), X2: x2.toFixed(3), X3: x3.toFixed(3), Outcome: y };
+        });
+        const train = make(600), test = make(1500);
+        const cfg = { ID: { role: 'meta', type: 'nominal' }, Outcome: { role: 'target', type: 'nominal' } };
+        ['X1', 'X2', 'X3'].forEach(c => { cfg[c] = { role: 'feature', type: 'continuous', imputationStrategy: 'median' }; });
+        const analysis = DE.analyzeColumns(Object.keys(train[0]), train);
+        // Single (median) imputation, as before
+        const sImp = DE.imputeDataset(train, cfg, analysis);
+        const sPrep = DE.prepareFeaturesAndTarget(sImp.imputedRows, cfg);
+        sPrep.imputation = { configs: cfg, plan: sImp.plan };
+        const sTest = DE.prepareTestingDataset(test, sPrep);
+        const sModel = ME.createModel('glm', true, 2, { seed: 1 }); sModel.fit(sPrep.X, sPrep.y);
+        const sEv = await ME.evaluateAsync(sModel, sTest.X, sTest.y, true, sPrep.targetClasses, {});
+        // Multiple imputation: m models on m completed training sets, pooled predictions
+        const mi = DE.miceFit(train, cfg, { m: 5, seed: 11 });
+        const mPrep = DE.prepareFeaturesAndTarget([].concat(...mi.datasets), cfg);
+        mPrep.imputation = { configs: cfg, plan: sImp.plan, mice: mi.imputer };
+        const models = mi.datasets.map(d => { const t = DE.prepareTestingDataset(d, mPrep); const md = ME.createModel('glm', true, 2, { seed: 1 }); md.fit(t.X, t.y); return md; });
+        const pooled = ME.createMIPooled(models);
+        const mTest = DE.prepareTestingDataset(test, mPrep);
+        const mEv = await ME.evaluateAsync(pooled, mTest.X, mTest.y, true, mPrep.targetClasses, {});
+        assert(mTest.X.some(x => x.__mi && x.__mi.length === 5), 'test patients with missing values were not imputed 5 times');
+        // Leak-free: a test patient's outcome does not affect their prediction
+        const flipped = test.map(r => ({ ...r, Outcome: r.Outcome === 'Yes' ? 'No' : 'Yes' }));
+        const fTest = DE.prepareTestingDataset(flipped, mPrep);
+        const p1 = X => X.map(x => pooled.predictSingle(x).probabilities[1]);
+        const a = p1(mTest.X), b = p1(fTest.X);
+        assert(a.every((v, i) => Math.abs(v - b[i]) < 1e-15), 'predictions changed when the test outcomes changed');
+        // Reproducible: the same patient gets the same prediction every time
+        const again = p1(DE.prepareTestingDataset(test, mPrep).X);
+        assert(a.every((v, i) => v === again[i]), 'predictions for patients with missing values are not reproducible');
+        // Export and reload (model and preprocessing as JSON) give identical predictions
+        const back = await ME.deserializeModel(JSON.parse(JSON.stringify(await ME.serializeModel(pooled))));
+        const prepBack = JSON.parse(JSON.stringify({ ...mPrep, X: undefined, y: undefined }));
+        const c = p1(DE.prepareTestingDataset(test, prepBack).X).map((v, i) => v); // eslint-disable-line no-unused-vars
+        const c2 = DE.prepareTestingDataset(test, prepBack).X.map(x => back.predictSingle(x).probabilities[1]);
+        assert(a.every((v, i) => Math.abs(v - c2[i]) < 1e-12), 'pooled model or imputer changed after export and reload');
+        // Better or equal performance than median imputation when data are missing at random
+        assert(mEv.rocAuc >= sEv.rocAuc - 0.005 && mEv.brierScore <= sEv.brierScore + 0.005, `MI AUC ${mEv.rocAuc} Brier ${mEv.brierScore} vs median ${sEv.rocAuc} ${sEv.brierScore}`);
+        const missShare = train.filter(r => r.X1 === '').length / train.length;
+        return `${Math.round(missShare * 100)}% of X1 missing (MAR); test AUC ${mEv.rocAuc.toFixed(3)} with MI vs ${sEv.rocAuc.toFixed(3)} with median, Brier ${mEv.brierScore.toFixed(3)} vs ${sEv.brierScore.toFixed(3)}; outcome-blind, reproducible, export-safe`;
+    });
+
     await check('Shapley explanations: exact TreeSHAP (RF, boosted trees) and sampled Shapley (logistic) match brute-force enumeration', async () => {
         const rows = cohort(200, 31, 'binary', { missing: true });
         const cfg = configs('binary');
