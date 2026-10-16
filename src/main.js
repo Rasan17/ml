@@ -2,6 +2,7 @@
 // Loads every module, initialises the shared state and starts the interface once the page is ready.
 import { AppState } from './core.js';
 import './watchdog.js';
+import './compute.js';
 import { initDOM, setupEventListeners } from './shell.js';
 import './navigation.js';
 import { createEmptyPipelineState } from './ingest.js';

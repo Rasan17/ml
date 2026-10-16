@@ -1,4 +1,5 @@
 // standard-training.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+import { fitModel } from './compute.js';
 import { AppState, MODEL_INFO, compareEvalResults, describeNNTraining, displayModelName, escapeHtml, fmtR2, parseSeed, rankingMetricKey, rankingMetricLabel, renderExploratoryCutoffTable, summariseHeldOutSet, trainingMedian } from './core.js';
 import { TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, ciSpan, cvSummaryFrom, describeSplit, formatCvScore, optionBTrainRawRows, readDecisionThreshold, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV } from './cv-tuning.js';
 import { renderCalibrationPanel, renderExplainPanel, renderOddsRatioPanel } from './panels.js';
@@ -167,34 +168,27 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                const valModel = ModelEngine.createModel(
-                    mId,
-                    prep.isClassification,
-                    splitPrep.targetClasses.length || 2,
-                    hyperparams
-                );
-
-                if (mId === 'nn') {
-                    // Test split is never shown to the model: the NN carves its own validation split from the training data
-                    await valModel.fit(split.trainX, split.trainY, null, null, (epoch, total, logs) => {
-                        if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                const valModel = await fitModel(mId, prep.isClassification, splitPrep.targetClasses.length || 2, hyperparams, split.trainX, split.trainY, {
+                    isAborted: () => Boolean(watchdog && watchdog.aborted),
+                    onProgress: (a, b, c) => {
+                        if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
+                        if (mId === 'nn') {
+                            const epoch = a, total = b, logs = c || {};
+                            if (typeof logs.loss !== 'number') return;
                         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">[${i + 1}/${modelsToTest.length}] ${mInfo.name}: Epoch ${epoch}/${total} &mdash; Train Loss: ${logs.loss.toFixed(4)} ${logs.val_loss !== undefined ? `| Internal Val Loss: ${logs.val_loss.toFixed(4)}` : ''}</span>`;
                         if (modelsToTest.length === 1) updateLossChart(epoch, logs.loss, logs.val_loss);
                         if (watchdog && (epoch % 4 === 0 || epoch === total)) {
                             watchdog.tick(i + 1, `${mInfo.name}: Epoch ${epoch}/${total} (Loss: ${logs.loss.toFixed(4)})`);
                         }
-                    });
-                } else if (mId === 'ensemble') {
-                    await valModel.fit(split.trainX, split.trainY, null, null, (curr, total, info) => {
-                        if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                        } else if (mId === 'ensemble') {
+                            const curr = a, total = b, info = c || {};
                         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">[${i + 1}/${modelsToTest.length}] ${mInfo.name}: Sub-Model ${curr}/${total} (${info.stage || ''})...</span>`;
                         if (watchdog) {
                             watchdog.tick(i + 1, `${mInfo.name}: Sub-Model ${curr}/${total} (${info.stage || ''})`);
                         }
-                    });
-                } else {
-                    await fitWithYields(valModel, split.trainX, split.trainY, watchdog);
-                }
+                        }
+                    }
+                });
 
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
 
@@ -237,32 +231,26 @@ async function startModelTraining() {
                     DOM.trainStatus.innerHTML = `<span style="color: var(--accent-amber); font-weight: 600;">✓ [${i + 1}/${modelsToTest.length}] ${mInfo.name} benchmarked. Retraining on 100% of cohort (N=${prep.X.length})...</span>`;
                     await new Promise(r => setTimeout(r, 40));
 
-                    const fullModel = ModelEngine.createModel(
-                        mId,
-                        prep.isClassification,
-                        prep.targetClasses.length || 2,
-                        hyperparams
-                    );
-
-                    if (mId === 'nn') {
-                        await fullModel.fit(prep.X, prep.y, null, null, (epoch, total, logs) => {
-                            if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                    const fullModel = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
+                        isAborted: () => Boolean(watchdog && watchdog.aborted),
+                        onProgress: (a, b, c) => {
+                            if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
+                            if (mId === 'nn') {
+                                const epoch = a, total = b, logs = c || {};
+                                if (typeof logs.loss !== 'number') return;
                             DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">[${i + 1}/${modelsToTest.length}] ${mInfo.name} 100% Retrain: Epoch ${epoch}/${total} &mdash; Loss: ${logs.loss.toFixed(4)}</span>`;
                             if (watchdog && (epoch % 4 === 0 || epoch === total)) {
                                 watchdog.tick(i + 1, `${mInfo.name} 100% Retrain: Epoch ${epoch}/${total}`);
                             }
-                        });
-                    } else if (mId === 'ensemble') {
-                        await fullModel.fit(prep.X, prep.y, null, null, (curr, total, info) => {
-                            if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                            } else if (mId === 'ensemble') {
+                                const curr = a, total = b, info = c || {};
                             DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">[${i + 1}/${modelsToTest.length}] ${mInfo.name} 100% Retrain: Base ${curr}/${total} (${info.stage || ''})...</span>`;
                             if (watchdog) {
                                 watchdog.tick(i + 1, `${mInfo.name} 100% Retrain: Base ${curr}/${total} (${info.stage || ''})`);
                             }
-                        });
-                    } else {
-                        await fitWithYields(fullModel, prep.X, prep.y, watchdog);
-                    }
+                            }
+                        }
+                    });
                     activeModelInstance = fullModel;
                     // The split-phase model has been evaluated and is replaced: free its GPU memory
                     disposeModels([valModel]);
@@ -336,34 +324,27 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                const model = ModelEngine.createModel(
-                    mId,
-                    prep.isClassification,
-                    prep.targetClasses.length || 2,
-                    hyperparams
-                );
-
-                if (mId === 'nn') {
-                    // Dataset (ii) is never shown to the model: the NN carves its own validation split from Dataset (i)
-                    await model.fit(prep.X, prep.y, null, null, (epoch, total, logs) => {
-                        if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                const model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
+                    isAborted: () => Boolean(watchdog && watchdog.aborted),
+                    onProgress: (a, b, c) => {
+                        if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
+                        if (mId === 'nn') {
+                            const epoch = a, total = b, logs = c || {};
+                            if (typeof logs.loss !== 'number') return;
                         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">[${i + 1}/${modelsToTest.length}] ${mInfo.name}: Epoch ${epoch}/${total} &mdash; Train Loss: ${logs.loss.toFixed(4)} ${logs.val_loss !== undefined ? `| Internal Val Loss: ${logs.val_loss.toFixed(4)}` : ''}</span>`;
                         if (modelsToTest.length === 1) updateLossChart(epoch, logs.loss, logs.val_loss);
                         if (watchdog && (epoch % 4 === 0 || epoch === total)) {
                             watchdog.tick(i + 1, `${mInfo.name}: Epoch ${epoch}/${total}`);
                         }
-                    });
-                } else if (mId === 'ensemble') {
-                    await model.fit(prep.X, prep.y, null, null, (curr, total, info) => {
-                        if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                        } else if (mId === 'ensemble') {
+                            const curr = a, total = b, info = c || {};
                         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">[${i + 1}/${modelsToTest.length}] ${mInfo.name}: Base ${curr}/${total} (${info.stage || ''})...</span>`;
                         if (watchdog) {
                             watchdog.tick(i + 1, `${mInfo.name}: Base ${curr}/${total} (${info.stage || ''})`);
                         }
-                    });
-                } else {
-                    await fitWithYields(model, prep.X, prep.y, watchdog);
-                }
+                        }
+                    }
+                });
 
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
 

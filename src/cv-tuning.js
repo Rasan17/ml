@@ -1,4 +1,5 @@
 // cv-tuning.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+import { fitAndScore, fitModel } from './compute.js';
 import { AppState, MODEL_INFO, RANKING_METRICS, escapeHtml, parseSeed, rankingMetricKey, trainingMedian } from './core.js';
 import { disposeModels, evalAbortOpts, fitWithYields } from './standard-training.js';
 
@@ -139,26 +140,17 @@ async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, w
             const { Xtr, ytr, Xva, yva, targetClasses } = fd.sets[f];
             if (!Xtr.length || !Xva.length) continue;
             if (progress) progress(c + 1, candidates.length, f + 1, k, eta());
-            const m = ModelEngine.createModel(mId, isClassification, numClasses, hp);
-            try {
-                if (mId === 'nn' || mId === 'ensemble') {
-                    await m.fit(Xtr, ytr, null, null, (ep, tot) => {
-                        if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
-                        // Heartbeat every few epochs so the monitor never mistakes a long fold for a stall
-                        if (progress && (ep % 3 === 0 || ep === tot)) progress(c + 1, candidates.length, f + 1, k, `${eta()} &middot; ${mId === 'nn' ? 'epoch' : 'base model'} ${ep}/${tot}`);
-                    });
-                } else {
-                    await fitWithYields(m, Xtr, ytr, watchdog);
-                }
-                const ev = await ModelEngine.evaluateAsync(m, Xva, yva, isClassification, targetClasses,
-                    isClassification ? { decisionThreshold: fd.decisionThreshold } : { regressionThreshold: trainingMedian(ytr), thresholdSource: 'median of the fold training outcomes' },
-                    evalAbortOpts(watchdog));
-                const v = ev ? ev[metricKey] : null;
-                if (typeof v === 'number' && isFinite(v)) scores.push(v);
-                if (ev) Object.keys(all).forEach(key => { if (typeof ev[key] === 'number' && isFinite(ev[key])) all[key].push(ev[key]); });
-            } finally {
-                disposeModels([m]);
-            }
+            // Fit on the fold's learning rows and score its validation rows (in the background worker when available)
+            const ev = await fitAndScore(mId, isClassification, numClasses, hp, fd.sets[f],
+                isClassification ? { decisionThreshold: fd.decisionThreshold } : { regressionThreshold: trainingMedian(ytr), thresholdSource: 'median of the fold training outcomes' },
+                {
+                    isAborted: () => Boolean(watchdog && watchdog.aborted),
+                    // Heartbeat every few epochs so the monitor never mistakes a long fold for a stall
+                    onProgress: (ep, tot) => { if (progress && (mId === 'nn' || mId === 'ensemble') && (ep % 3 === 0 || ep === tot)) progress(c + 1, candidates.length, f + 1, k, `${eta()} &middot; ${mId === 'nn' ? 'epoch' : 'base model'} ${ep}/${tot}`); }
+                });
+            const v = ev ? ev[metricKey] : null;
+            if (typeof v === 'number' && isFinite(v)) scores.push(v);
+            if (ev) Object.keys(all).forEach(key => { if (typeof ev[key] === 'number' && isFinite(ev[key])) all[key].push(ev[key]); });
             fitsDone++;
             await ModelEngine.yieldToBrowser(); // background-tab safe (plain timers are throttled in hidden tabs)
         }
@@ -336,8 +328,8 @@ async function selectTop70InFold(balancedRows, activeCols, targetCol, seed) {
     activeCols.forEach(c => { cfg[c] = p.columnConfigs[c]; });
     cfg[targetCol] = p.columnConfigs[targetCol];
     const prep = DataEngine.prepareDataset(balancedRows, cfg, activeCols, targetCol);
-    const rf = new RandomForest(prep.isClassification, 40, 6, 2, 'sqrt', seed);
-    await rf.fitAsync(prep.X, prep.y);
+    // Scout trained in the background worker when available
+    const rf = await fitModel('rf', prep.isClassification, prep.targetClasses.length || 2, { numTrees: 40, maxDepth: 6, minSamplesSplit: 2, featureRatio: 'sqrt', seed: seed }, prep.X, prep.y);
     const imp = activeCols.map(col => {
         const meta = prep.featureMetadata[col];
         let sum = 0;

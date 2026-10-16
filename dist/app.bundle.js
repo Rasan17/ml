@@ -471,6 +471,142 @@ class ExecutionWatchdog {
     }
 }
 
+// ---- src/compute.js ----
+// compute.js: runs model training and cross-validation fits in a background Web Worker (compute-worker.js),
+// so the page stays responsive and Force Stop takes effect at once (the worker is terminated). When workers
+// are unavailable (e.g. the app opened directly from disk) or fail, the same code runs on the page instead.
+/* global ModelEngine */
+
+let worker = null;
+let workerBroken = false;
+let nextId = 1;
+const pending = new Map();
+let workerInfo = null;
+
+function createWorker() {
+    if (workerBroken || typeof Worker === 'undefined' || location.protocol === 'file:') return null;
+    try {
+        const w = new Worker('compute-worker.js');
+        w.onmessage = (ev) => {
+            const { id, progress, result, error } = ev.data || {};
+            const job = pending.get(id);
+            if (!job) return;
+            if (progress !== undefined) { if (job.onProgress) { try { job.onProgress(progress); } catch (e) { /* ignore */ } } return; }
+            pending.delete(id);
+            clearInterval(job.timer);
+            if (error !== undefined) job.reject(new Error(error)); else job.resolve(result);
+        };
+        w.onerror = (e) => {
+            // A worker that cannot start (e.g. blocked script) is not used again; pending jobs fall back
+            workerBroken = true;
+            e.preventDefault && e.preventDefault();
+            pending.forEach(job => { clearInterval(job.timer); job.reject(Object.assign(new Error('Background worker unavailable'), { workerUnavailable: true })); });
+            pending.clear();
+            try { w.terminate(); } catch (err) { /* ignore */ }
+            worker = null;
+        };
+        return w;
+    } catch (e) {
+        workerBroken = true;
+        return null;
+    }
+}
+
+function call(op, payload, { onProgress = null, isAborted = null } = {}) {
+    if (!worker) worker = createWorker();
+    if (!worker) return Promise.reject(Object.assign(new Error('Background worker unavailable'), { workerUnavailable: true }));
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+        const job = { resolve, reject, onProgress, timer: null };
+        // Force Stop: terminate the worker immediately (a new one is created for the next job)
+        if (isAborted) {
+            job.timer = setInterval(() => {
+                if (isAborted()) cancelAll('Training aborted by user.');
+            }, 150);
+        }
+        pending.set(id, job);
+        worker.postMessage({ id, op, payload });
+    });
+}
+
+function cancelAll(message = 'Training aborted by user.') {
+    if (worker) { try { worker.terminate(); } catch (e) { /* ignore */ } }
+    worker = null;
+    pending.forEach(job => { clearInterval(job.timer); job.reject(new Error(message)); });
+    pending.clear();
+}
+
+function workerAvailable() {
+    return !workerBroken && typeof Worker !== 'undefined' && location.protocol !== 'file:';
+}
+
+// Which backend the worker's TensorFlow.js uses (for display); null if not started
+async function describeWorker() {
+    if (workerInfo) return workerInfo;
+    try { workerInfo = await call('ping', {}); } catch (e) { workerInfo = null; }
+    return workerInfo;
+}
+
+function applyExtras(model, r) {
+    ['trainingInfo', 'usedFallback', 'fallbackReason', 'weightingNote', 'fallbackNote'].forEach(k => {
+        if (r[k] !== undefined && r[k] !== null) model[k] = r[k];
+    });
+    return model;
+}
+
+// Local (main-thread) training, used when the worker is unavailable
+async function fitLocal(modelId, isClassification, numClasses, hp, X, y, onProgress, isAborted) {
+    const m = ModelEngine.createModel(modelId, isClassification, numClasses, hp);
+    if (modelId === 'nn' || modelId === 'ensemble') {
+        await m.fit(X, y, null, null, (a, b, c) => {
+            if (isAborted && isAborted()) throw new Error('Training aborted by user.');
+            if (onProgress) onProgress(a, b, c);
+        });
+    } else if (typeof m.fitAsync === 'function') {
+        await m.fitAsync(X, y, { onYield: () => { if (isAborted && isAborted()) throw new Error('Training aborted by user.'); } });
+    } else {
+        m.fit(X, y);
+    }
+    return m;
+}
+
+/**
+ * Trains a model and returns it ready for prediction on the page.
+ * onProgress(a, b, c): neural network (epoch, total, logs) or ensemble (current, total, info).
+ */
+async function fitModel(modelId, isClassification, numClasses, hp, X, y, { onProgress = null, isAborted = null } = {}) {
+    if (workerAvailable()) {
+        try {
+            const r = await call('fit', { modelId, isClassification, numClasses, hp, X, y },
+                { onProgress: p => onProgress && onProgress(p.a, p.b, p.c), isAborted });
+            return applyExtras(await ModelEngine.deserializeModel(r.serialized), r);
+        } catch (e) {
+            if (!e.workerUnavailable) throw e;
+        }
+    }
+    return fitLocal(modelId, isClassification, numClasses, hp, X, y, onProgress, isAborted);
+}
+
+/** Trains on a fold's learning rows and returns the fold's validation metrics (no model is kept) */
+async function fitAndScore(modelId, isClassification, numClasses, hp, fold, evalOptions, { onProgress = null, isAborted = null } = {}) {
+    if (workerAvailable()) {
+        try {
+            return await call('fitEval', {
+                modelId, isClassification, numClasses, hp, X: fold.Xtr, y: fold.ytr,
+                Xva: fold.Xva, yva: fold.yva, targetClasses: fold.targetClasses, evalOptions
+            }, { onProgress: p => onProgress && onProgress(p.a, p.b, p.c), isAborted });
+        } catch (e) {
+            if (!e.workerUnavailable) throw e;
+        }
+    }
+    const m = await fitLocal(modelId, isClassification, numClasses, hp, fold.Xtr, fold.ytr, onProgress, isAborted);
+    try {
+        return await ModelEngine.evaluateAsync(m, fold.Xva, fold.yva, isClassification, fold.targetClasses, evalOptions);
+    } finally {
+        if (m.dispose) m.dispose();
+    }
+}
+
 // ---- src/shell.js ----
 // shell.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 
@@ -2797,6 +2933,7 @@ function renderExplainPanel(containerId, items, rows, isClassification) {
 // cv-tuning.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 
 
+
 // =========================================================================
 // AUTOMATIC TUNING (standard workflow, Step 4): k-fold cross-validation inside the Training set
 // =========================================================================
@@ -2933,26 +3070,17 @@ async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, w
             const { Xtr, ytr, Xva, yva, targetClasses } = fd.sets[f];
             if (!Xtr.length || !Xva.length) continue;
             if (progress) progress(c + 1, candidates.length, f + 1, k, eta());
-            const m = ModelEngine.createModel(mId, isClassification, numClasses, hp);
-            try {
-                if (mId === 'nn' || mId === 'ensemble') {
-                    await m.fit(Xtr, ytr, null, null, (ep, tot) => {
-                        if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
-                        // Heartbeat every few epochs so the monitor never mistakes a long fold for a stall
-                        if (progress && (ep % 3 === 0 || ep === tot)) progress(c + 1, candidates.length, f + 1, k, `${eta()} &middot; ${mId === 'nn' ? 'epoch' : 'base model'} ${ep}/${tot}`);
-                    });
-                } else {
-                    await fitWithYields(m, Xtr, ytr, watchdog);
-                }
-                const ev = await ModelEngine.evaluateAsync(m, Xva, yva, isClassification, targetClasses,
-                    isClassification ? { decisionThreshold: fd.decisionThreshold } : { regressionThreshold: trainingMedian(ytr), thresholdSource: 'median of the fold training outcomes' },
-                    evalAbortOpts(watchdog));
-                const v = ev ? ev[metricKey] : null;
-                if (typeof v === 'number' && isFinite(v)) scores.push(v);
-                if (ev) Object.keys(all).forEach(key => { if (typeof ev[key] === 'number' && isFinite(ev[key])) all[key].push(ev[key]); });
-            } finally {
-                disposeModels([m]);
-            }
+            // Fit on the fold's learning rows and score its validation rows (in the background worker when available)
+            const ev = await fitAndScore(mId, isClassification, numClasses, hp, fd.sets[f],
+                isClassification ? { decisionThreshold: fd.decisionThreshold } : { regressionThreshold: trainingMedian(ytr), thresholdSource: 'median of the fold training outcomes' },
+                {
+                    isAborted: () => Boolean(watchdog && watchdog.aborted),
+                    // Heartbeat every few epochs so the monitor never mistakes a long fold for a stall
+                    onProgress: (ep, tot) => { if (progress && (mId === 'nn' || mId === 'ensemble') && (ep % 3 === 0 || ep === tot)) progress(c + 1, candidates.length, f + 1, k, `${eta()} &middot; ${mId === 'nn' ? 'epoch' : 'base model'} ${ep}/${tot}`); }
+                });
+            const v = ev ? ev[metricKey] : null;
+            if (typeof v === 'number' && isFinite(v)) scores.push(v);
+            if (ev) Object.keys(all).forEach(key => { if (typeof ev[key] === 'number' && isFinite(ev[key])) all[key].push(ev[key]); });
             fitsDone++;
             await ModelEngine.yieldToBrowser(); // background-tab safe (plain timers are throttled in hidden tabs)
         }
@@ -3130,8 +3258,8 @@ async function selectTop70InFold(balancedRows, activeCols, targetCol, seed) {
     activeCols.forEach(c => { cfg[c] = p.columnConfigs[c]; });
     cfg[targetCol] = p.columnConfigs[targetCol];
     const prep = DataEngine.prepareDataset(balancedRows, cfg, activeCols, targetCol);
-    const rf = new RandomForest(prep.isClassification, 40, 6, 2, 'sqrt', seed);
-    await rf.fitAsync(prep.X, prep.y);
+    // Scout trained in the background worker when available
+    const rf = await fitModel('rf', prep.isClassification, prep.targetClasses.length || 2, { numTrees: 40, maxDepth: 6, minSamplesSplit: 2, featureRatio: 'sqrt', seed: seed }, prep.X, prep.y);
     const imp = activeCols.map(col => {
         const meta = prep.featureMetadata[col];
         let sum = 0;
@@ -3247,6 +3375,7 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
 
 // ---- src/standard-training.js ----
 // standard-training.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+
 
 
 
@@ -3413,34 +3542,27 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                const valModel = ModelEngine.createModel(
-                    mId,
-                    prep.isClassification,
-                    splitPrep.targetClasses.length || 2,
-                    hyperparams
-                );
-
-                if (mId === 'nn') {
-                    // Test split is never shown to the model: the NN carves its own validation split from the training data
-                    await valModel.fit(split.trainX, split.trainY, null, null, (epoch, total, logs) => {
-                        if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                const valModel = await fitModel(mId, prep.isClassification, splitPrep.targetClasses.length || 2, hyperparams, split.trainX, split.trainY, {
+                    isAborted: () => Boolean(watchdog && watchdog.aborted),
+                    onProgress: (a, b, c) => {
+                        if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
+                        if (mId === 'nn') {
+                            const epoch = a, total = b, logs = c || {};
+                            if (typeof logs.loss !== 'number') return;
                         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">[${i + 1}/${modelsToTest.length}] ${mInfo.name}: Epoch ${epoch}/${total} &mdash; Train Loss: ${logs.loss.toFixed(4)} ${logs.val_loss !== undefined ? `| Internal Val Loss: ${logs.val_loss.toFixed(4)}` : ''}</span>`;
                         if (modelsToTest.length === 1) updateLossChart(epoch, logs.loss, logs.val_loss);
                         if (watchdog && (epoch % 4 === 0 || epoch === total)) {
                             watchdog.tick(i + 1, `${mInfo.name}: Epoch ${epoch}/${total} (Loss: ${logs.loss.toFixed(4)})`);
                         }
-                    });
-                } else if (mId === 'ensemble') {
-                    await valModel.fit(split.trainX, split.trainY, null, null, (curr, total, info) => {
-                        if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                        } else if (mId === 'ensemble') {
+                            const curr = a, total = b, info = c || {};
                         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">[${i + 1}/${modelsToTest.length}] ${mInfo.name}: Sub-Model ${curr}/${total} (${info.stage || ''})...</span>`;
                         if (watchdog) {
                             watchdog.tick(i + 1, `${mInfo.name}: Sub-Model ${curr}/${total} (${info.stage || ''})`);
                         }
-                    });
-                } else {
-                    await fitWithYields(valModel, split.trainX, split.trainY, watchdog);
-                }
+                        }
+                    }
+                });
 
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
 
@@ -3483,32 +3605,26 @@ async function startModelTraining() {
                     DOM.trainStatus.innerHTML = `<span style="color: var(--accent-amber); font-weight: 600;">✓ [${i + 1}/${modelsToTest.length}] ${mInfo.name} benchmarked. Retraining on 100% of cohort (N=${prep.X.length})...</span>`;
                     await new Promise(r => setTimeout(r, 40));
 
-                    const fullModel = ModelEngine.createModel(
-                        mId,
-                        prep.isClassification,
-                        prep.targetClasses.length || 2,
-                        hyperparams
-                    );
-
-                    if (mId === 'nn') {
-                        await fullModel.fit(prep.X, prep.y, null, null, (epoch, total, logs) => {
-                            if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                    const fullModel = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
+                        isAborted: () => Boolean(watchdog && watchdog.aborted),
+                        onProgress: (a, b, c) => {
+                            if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
+                            if (mId === 'nn') {
+                                const epoch = a, total = b, logs = c || {};
+                                if (typeof logs.loss !== 'number') return;
                             DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">[${i + 1}/${modelsToTest.length}] ${mInfo.name} 100% Retrain: Epoch ${epoch}/${total} &mdash; Loss: ${logs.loss.toFixed(4)}</span>`;
                             if (watchdog && (epoch % 4 === 0 || epoch === total)) {
                                 watchdog.tick(i + 1, `${mInfo.name} 100% Retrain: Epoch ${epoch}/${total}`);
                             }
-                        });
-                    } else if (mId === 'ensemble') {
-                        await fullModel.fit(prep.X, prep.y, null, null, (curr, total, info) => {
-                            if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                            } else if (mId === 'ensemble') {
+                                const curr = a, total = b, info = c || {};
                             DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">[${i + 1}/${modelsToTest.length}] ${mInfo.name} 100% Retrain: Base ${curr}/${total} (${info.stage || ''})...</span>`;
                             if (watchdog) {
                                 watchdog.tick(i + 1, `${mInfo.name} 100% Retrain: Base ${curr}/${total} (${info.stage || ''})`);
                             }
-                        });
-                    } else {
-                        await fitWithYields(fullModel, prep.X, prep.y, watchdog);
-                    }
+                            }
+                        }
+                    });
                     activeModelInstance = fullModel;
                     // The split-phase model has been evaluated and is replaced: free its GPU memory
                     disposeModels([valModel]);
@@ -3582,34 +3698,27 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                const model = ModelEngine.createModel(
-                    mId,
-                    prep.isClassification,
-                    prep.targetClasses.length || 2,
-                    hyperparams
-                );
-
-                if (mId === 'nn') {
-                    // Dataset (ii) is never shown to the model: the NN carves its own validation split from Dataset (i)
-                    await model.fit(prep.X, prep.y, null, null, (epoch, total, logs) => {
-                        if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                const model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
+                    isAborted: () => Boolean(watchdog && watchdog.aborted),
+                    onProgress: (a, b, c) => {
+                        if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
+                        if (mId === 'nn') {
+                            const epoch = a, total = b, logs = c || {};
+                            if (typeof logs.loss !== 'number') return;
                         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">[${i + 1}/${modelsToTest.length}] ${mInfo.name}: Epoch ${epoch}/${total} &mdash; Train Loss: ${logs.loss.toFixed(4)} ${logs.val_loss !== undefined ? `| Internal Val Loss: ${logs.val_loss.toFixed(4)}` : ''}</span>`;
                         if (modelsToTest.length === 1) updateLossChart(epoch, logs.loss, logs.val_loss);
                         if (watchdog && (epoch % 4 === 0 || epoch === total)) {
                             watchdog.tick(i + 1, `${mInfo.name}: Epoch ${epoch}/${total}`);
                         }
-                    });
-                } else if (mId === 'ensemble') {
-                    await model.fit(prep.X, prep.y, null, null, (curr, total, info) => {
-                        if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stops training at this epoch/tree
+                        } else if (mId === 'ensemble') {
+                            const curr = a, total = b, info = c || {};
                         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">[${i + 1}/${modelsToTest.length}] ${mInfo.name}: Base ${curr}/${total} (${info.stage || ''})...</span>`;
                         if (watchdog) {
                             watchdog.tick(i + 1, `${mInfo.name}: Base ${curr}/${total} (${info.stage || ''})`);
                         }
-                    });
-                } else {
-                    await fitWithYields(model, prep.X, prep.y, watchdog);
-                }
+                        }
+                    }
+                });
 
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
 
@@ -4808,6 +4917,7 @@ function downloadBatchCSV() {
 
 
 
+
 // =========================================================================
 // 7-STEP CLINICAL ML PIPELINE CONTROLLER
 // Conceived, designed and developed by Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)
@@ -5643,8 +5753,8 @@ async function runPipelineStep6() {
     );
 
     // Train Random Forest Scout
-    const rf = new RandomForest(prep.isClassification, 40, 6, 2, 'sqrt', AppState.pipeline.seed);
-    await rf.fitAsync(prep.X, prep.y); // yields between trees: the page stays responsive on large cohorts
+    // Scout trained in the background worker when available
+    const rf = await fitModel('rf', prep.isClassification, prep.targetClasses.length || 2, { numTrees: 40, maxDepth: 6, minSamplesSplit: 2, featureRatio: 'sqrt', seed: AppState.pipeline.seed }, prep.X, prep.y);
 
     // Map feature importances back to original clinical features
     const featureImpMap = {};
@@ -5917,8 +6027,9 @@ async function executePipelineStep7() {
         // A. k-NN Model (Strict constraint: Bottom 30% features dropped)
         if (watchdog) watchdog.tick(stepOf('knn'), `Training Model ${stepOf('knn')}/${totalModels}: k-NN (Top 70% features only)...`);
         await new Promise(r => setTimeout(r, 60));
-        const knn = new KNNModel(isClassification, pHp.knn.k, pHp.knn.metric, pHp.knn.weighting, evalSeed);
-        knn.fit(top70Prep.X, top70Prep.y);
+        const isAborted = () => Boolean(watchdog && watchdog.aborted);
+        // Training runs in the background worker when available (same models and settings as before)
+        const knn = await fitModel('knn', isClassification, numClasses, { ...pHp.knn, seed: evalSeed }, top70Prep.X, top70Prep.y, { isAborted });
         const knnEval = await ModelEngine.evaluateAsync(knn, top70TestTrans.X, top70TestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
         const nReinstated = Array.from(AppState.pipeline.reinstatedFeatures || []).filter(f => top70Cols.includes(f)).length;
         const reducedLabel = nReinstated ? `Top 70% + ${nReinstated} reinstated (${top70Cols.length} features)` : `Top 70% (${top70Cols.length} features)`;
@@ -5930,8 +6041,7 @@ async function executePipelineStep7() {
         if (isClassification) {
             if (watchdog) watchdog.tick(stepOf('nb'), `Training Model ${stepOf('nb')}/${totalModels}: Naive Bayes (Top 70% features only)...`);
             await new Promise(r => setTimeout(r, 60));
-            const nb = new GaussianNaiveBayes(pHp.nb.varSmoothing, pHp.nb.priorMode, evalSeed);
-            nb.fit(top70Prep.X, top70Prep.y);
+            const nb = await fitModel('nb', isClassification, numClasses, { ...pHp.nb, seed: evalSeed }, top70Prep.X, top70Prep.y, { isAborted });
             const nbEval = await ModelEngine.evaluateAsync(nb, top70TestTrans.X, top70TestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
             nbEval.featuresUsed = reducedLabel;
             nbEval.constraintNote = "Bottom 30% RF-importance features removed (fewer noisy inputs; does not make features conditionally independent)." + (nReinstated ? ` ${nReinstated} of them reinstated by the user.` : '') + (tunedTag('nb') ? ` Variance smoothing ${pHp.nb.varSmoothing}.` + tunedTag('nb') : '');
@@ -5942,8 +6052,9 @@ async function executePipelineStep7() {
         // selects features per split, so no RF-importance pruning is applied.
         if (watchdog) watchdog.tick(stepOf('rf'), `Training Model ${stepOf('rf')}/${totalModels}: Random Forest (all surviving features)...`);
         await new Promise(r => setTimeout(r, 60));
-        const rfFinal = new RandomForest(isClassification, pHp.rf.numTrees, pHp.rf.maxDepth, pHp.rf.minSamplesSplit, pHp.rf.featureRatio, evalSeed);
-        await fitWithYields(rfFinal, fullPrep.X, fullPrep.y, watchdog);
+        const rfFinal = await fitModel('rf', isClassification, numClasses, { ...pHp.rf, seed: evalSeed }, fullPrep.X, fullPrep.y, {
+            isAborted, onProgress: () => { if (watchdog) watchdog.tick(stepOf('rf'), `Training Model ${stepOf('rf')}/${totalModels}: Random Forest (all surviving features)...`); }
+        });
         const rfEval = await ModelEngine.evaluateAsync(rfFinal, fullTestTrans.X, fullTestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
         rfEval.featuresUsed = `All Surviving (${activeCols.length} features)`;
         rfEval.constraintNote = `${pHp.rf.numTrees} trees, max depth ${pHp.rf.maxDepth}, min ${pHp.rf.minSamplesSplit} samples to split, √p features per split; probabilities are tree vote shares.` + tunedTag('rf');
@@ -5953,12 +6064,12 @@ async function executePipelineStep7() {
         if (watchdog) watchdog.tick(stepOf('nn'), `Training Model ${stepOf('nn')}/${totalModels}: Neural Network (MLP; L2 + dropout + early stopping)...`);
         await new Promise(r => setTimeout(r, 60));
         const dnnParams = { ...pHp.nn };
-        const dnn = new DeepNeuralNetwork(isClassification, numClasses, dnnParams);
         // The test split is never shown to the model: the NN carves its own validation split from the training rows
-        await dnn.fit(fullPrep.X, fullPrep.y, null, null, (ep, tot) => {
-            if (watchdog && watchdog.aborted) throw new Error("Training aborted by user."); // stop at this epoch
-            if (watchdog && (ep % 4 === 0 || ep === tot)) {
-                watchdog.tick(stepOf('nn'), `Training Model ${stepOf('nn')}/${totalModels}: Neural Network (Epoch ${ep}/${tot})...`);
+        const dnn = await fitModel('nn', isClassification, numClasses, dnnParams, fullPrep.X, fullPrep.y, {
+            isAborted,
+            onProgress: (ep, tot) => {
+                if (ep === 'tick') return;
+                if (watchdog && (ep % 4 === 0 || ep === tot)) watchdog.tick(stepOf('nn'), `Training Model ${stepOf('nn')}/${totalModels}: Neural Network (Epoch ${ep}/${tot})...`);
             }
         });
         const dnnEval = await ModelEngine.evaluateAsync(dnn, fullTestTrans.X, fullTestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
@@ -5971,16 +6082,7 @@ async function executePipelineStep7() {
         // D. Logistic / Ridge Regression (Strict constraint: L2 penalization against collinearity)
         if (watchdog) watchdog.tick(stepOf('glm'), `Training Model ${stepOf('glm')}/${totalModels}: Logistic / Ridge Regression (L2 lambda = ${pHp.glm.lambdaL2})...`);
         await new Promise(r => setTimeout(r, 60));
-        const glm = new GeneralizedLinearModel(
-            isClassification,
-            numClasses,
-            pHp.glm.lr,
-            pHp.glm.epochs,
-            pHp.glm.lambdaL2,
-            pHp.glm.solver,
-            evalSeed
-        );
-        await fitWithYields(glm, fullPrep.X, fullPrep.y, watchdog);
+        const glm = await fitModel('glm', isClassification, numClasses, { ...pHp.glm, seed: evalSeed }, fullPrep.X, fullPrep.y, { isAborted });
         const glmEval = await ModelEngine.evaluateAsync(glm, fullTestTrans.X, fullTestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
         glmEval.featuresUsed = `All Surviving (${activeCols.length} features)`;
         glmEval.constraintNote = `Applied Ridge L2 penalization (λ = ${pHp.glm.lambdaL2}) to stabilize against minor collinearity.` + tunedTag('glm');
@@ -5991,10 +6093,11 @@ async function executePipelineStep7() {
         await new Promise(r => setTimeout(r, 60));
         // Same base models for classification and regression (consistent with the Step 4 default)
         const ensembleConfig = { ...pHp.ensemble };
-        const ensemble = new EnsembleModel(isClassification, numClasses, ensembleConfig);
-        await ensemble.fit(fullPrep.X, fullPrep.y, null, null, (curr, tot, info) => {
-            if (watchdog) {
-                watchdog.tick(stepOf('ensemble'), `Training Model ${stepOf('ensemble')}/${totalModels}: Ensemble (${info.stage || `Base ${curr}/${tot}`})...`);
+        const ensemble = await fitModel('ensemble', isClassification, numClasses, ensembleConfig, fullPrep.X, fullPrep.y, {
+            isAborted,
+            onProgress: (curr, tot, info) => {
+                if (curr === 'tick' || !watchdog) return;
+                watchdog.tick(stepOf('ensemble'), `Training Model ${stepOf('ensemble')}/${totalModels}: Ensemble (${(info && info.stage) || `Base ${curr}/${tot}`})...`);
             }
         });
         const ensEval = await ModelEngine.evaluateAsync(ensemble, fullTestTrans.X, fullTestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
@@ -7572,6 +7675,7 @@ function handleUnexpectedError(err) {
 // ---- src/main.js ----
 // main.js: entry point of the Universal Medical ML/NeuralNet Predictor application controller.
 // Loads every module, initialises the shared state and starts the interface once the page is ready.
+
 
 
 
