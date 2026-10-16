@@ -220,6 +220,7 @@ function getHyperparamsForModel(modelId, prep) {
         hp.minSamplesSplit = minSplitEl ? (parseInt(minSplitEl.value, 10) || 2) : 2;
         const maxFeatEl = document.getElementById('rf-maxfeatures-select');
         hp.featureRatio = maxFeatEl ? maxFeatEl.value : 'sqrt';
+        hp.splitMode = document.getElementById('rf-split-select')?.value || 'auto';
     } else if (modelId === 'glm') {
         hp.lr = parseFloat(document.getElementById('glm-lr-input')?.value) || 0.05;
         hp.epochs = parseInt(document.getElementById('glm-epochs-input')?.value, 10) || 150;

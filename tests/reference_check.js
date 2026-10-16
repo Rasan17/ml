@@ -54,5 +54,7 @@ const dlY=[],dlA=[],dlB=[];for(let i=0;i<300;i++){const y=rnd()<0.35?1:0; dlY.pu
 out.dlY=dlY; out.dlA=dlA; out.dlB=dlB; out.delong=ME.delongTest(dlY,dlA,dlB); out.pr=ME.prCurve(dlY,dlA).averagePrecision;
 out.dca=ME.decisionCurve(dlY,dlA,[0.1,0.2,0.3]);
 const irX=rows.map(r=>[r.x1,r.x2,r.g==='B'?1:0,r.g==='C'?1:0]); out.irX=irX; out.irls=ME.logisticIRLS(irX,yc);
+// Recalibration: Platt scaling and isotonic regression fitted on the miscalibrated probabilities above
+out.platt=ME.fitPlatt(calY,calP); const iso=ME.fitIsotonic(calY,calP); out.isoFitted=calP.map(p=>ME.applyCalibrator(iso,p));
 fs.writeFileSync(path.join(__dirname,'reference_values.json'),JSON.stringify(out));
 console.log('App values written to tests/reference_values.json; now run: python3 tests/reference_check.py');

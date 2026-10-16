@@ -287,6 +287,16 @@ async function trainEval(id, w, isClassification) {
             if (m.dispose) m.dispose();
             if (back.dispose) back.dispose();
         }
+        // A recalibrated (Platt) model keeps its calibrator through export and reload
+        const base = ME.createModel('rf', true, 2, { numTrees: 10, seed: 2 });
+        base.fit(w.prep.X, w.prep.y);
+        const probs = w.prep.X.map(x => Number(base.predictSingle(x).probabilities[1] || 0));
+        const cal = ME.fitPlatt(w.prep.y.map(v => (v === 1 ? 1 : 0)), probs);
+        const wrapped = ME.wrapCalibrated(base, cal);
+        const back = await ME.deserializeModel(JSON.parse(JSON.stringify(await ME.serializeModel(wrapped))));
+        const same = w.test.X.every(x => Math.abs(wrapped.predictSingle(x).probabilities[1] - back.predictSingle(x).probabilities[1]) < 1e-12);
+        assert(same && back.predictSingle(w.test.X[0]).probabilityType === 'recalibrated', 'recalibrated model changed after reload');
+        done.push('recalibrated RF');
         return done.join(', ');
     });
 

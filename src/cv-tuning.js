@@ -133,6 +133,7 @@ async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, w
     for (let c = 0; c < candidates.length; c++) {
         const hp = { ...baseHp, ...candidates[c].params };
         const scores = [];
+        const oof = { p: [], y: [] }; // out-of-fold predictions (binary outcomes), used to fit recalibration
         const all = {}; // every ranking metric, so the selection can follow a later change of ranking metric
         Object.keys(metricDefs).forEach(key => { all[key] = []; });
         for (let f = 0; f < k; f++) {
@@ -151,6 +152,7 @@ async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, w
             const v = ev ? ev[metricKey] : null;
             if (typeof v === 'number' && isFinite(v)) scores.push(v);
             if (ev) Object.keys(all).forEach(key => { if (typeof ev[key] === 'number' && isFinite(ev[key])) all[key].push(ev[key]); });
+            if (ev && Array.isArray(ev.probPositive) && Array.isArray(ev.actuals)) { oof.p.push(...ev.probPositive); oof.y.push(...ev.actuals.map(v => (v === 1 ? 1 : 0))); }
             fitsDone++;
             await ModelEngine.yieldToBrowser(); // background-tab safe (plain timers are throttled in hidden tabs)
         }
@@ -158,7 +160,7 @@ async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, w
         const sd = scores.length > 1 ? Math.sqrt(scores.reduce((a, b) => a + (b - mean) ** 2, 0) / (scores.length - 1)) : null;
         const allMeans = {};
         Object.keys(all).forEach(key => { allMeans[key] = all[key].length ? all[key].reduce((a, b) => a + b, 0) / all[key].length : null; });
-        results.push({ params: candidates[c].params, isOwn: candidates[c].isOwn, mean, sd, nFolds: scores.length, allMeans });
+        results.push({ params: candidates[c].params, isOwn: candidates[c].isOwn, mean, sd, nFolds: scores.length, allMeans, oof: oof.p.length ? oof : null });
     }
 
     // Best mean CV score; ties keep the user's own (or the protocol's) settings, listed first
@@ -312,6 +314,34 @@ function formatCvScore(ev, isClassification) {
     return `<strong style="color: var(--accent-cyan);">${pctKey ? (v * 100).toFixed(1) + '%' : v.toFixed(3)}</strong>${sdTxt}`;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Recalibration (binary outcomes): a calibrator is fitted on the out-of-fold cross-validation predictions
+// of the chosen settings (Training set only) and wrapped around the final model
+// ---------------------------------------------------------------------------------------------
+function readRecalibration(id) {
+    const v = document.getElementById(id)?.value;
+    return v === 'platt' || v === 'isotonic' ? v : 'none';
+}
+
+function fitRecalibrator(method, oof) {
+    if (method === 'none' || !oof || !oof.p || oof.p.length < 20) return null;
+    const events = oof.y.reduce((a, b) => a + b, 0);
+    if (events < 5 || oof.y.length - events < 5) return null;
+    return method === 'platt' ? ModelEngine.fitPlatt(oof.y, oof.p) : ModelEngine.fitIsotonic(oof.y, oof.p);
+}
+
+// Wraps a trained model with the calibrator and records the before/after evaluation summary
+async function recalibrateAndEvaluate(model, calibrator, X, y, isClassification, targetClasses, evalOptions, abortOpts) {
+    const before = await ModelEngine.evaluateAsync(model, X, y, isClassification, targetClasses, evalOptions, abortOpts);
+    const wrapped = ModelEngine.wrapCalibrated(model, calibrator);
+    const after = await ModelEngine.evaluateAsync(wrapped, X, y, isClassification, targetClasses, evalOptions, abortOpts);
+    after.recalibration = {
+        method: calibrator.type, fittedOn: `${calibrator.n} out-of-fold Training-set predictions`,
+        before: { brierScore: before.brierScore, rocAuc: before.rocAuc, slope: before.calibration ? before.calibration.slope : null, intercept: before.calibration ? before.calibration.intercept : null }
+    };
+    return { model: wrapped, evalRes: after };
+}
+
 // Cross-validated performance of a model's final settings, attached to its results for model selection
 function cvSummaryFrom(tuneResult) {
     const b = tuneResult.best;
@@ -443,4 +473,4 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
         </div>`;
 }
 
-export { TUNE_MAX_ROWS, TUNABLE_MODELS, TUNE_LABELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildStandardRowFolds, runTuningOnFolds, optionBTrainRawRows, splitSeedForCV, splitSpec, splitGroupFunction, pipelineGroupFunction, splitRowsForWorkflow, describeSplit, populateSplitColumnSelects, updateSplitMethodVisibility, bootstrapFor, ciSpan, readDecisionThreshold, thresholdedOutput, formatCvScore, cvSummaryFrom, selectTop70InFold, buildPipelineFolds, applyHyperparamsToForm, fmtTuneValue, renderTuningReport };
+export { readRecalibration, fitRecalibrator, recalibrateAndEvaluate, TUNE_MAX_ROWS, TUNABLE_MODELS, TUNE_LABELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildStandardRowFolds, runTuningOnFolds, optionBTrainRawRows, splitSeedForCV, splitSpec, splitGroupFunction, pipelineGroupFunction, splitRowsForWorkflow, describeSplit, populateSplitColumnSelects, updateSplitMethodVisibility, bootstrapFor, ciSpan, readDecisionThreshold, thresholdedOutput, formatCvScore, cvSummaryFrom, selectTop70InFold, buildPipelineFolds, applyHyperparamsToForm, fmtTuneValue, renderTuningReport };

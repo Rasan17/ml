@@ -1,4 +1,5 @@
 // navigation.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+import { renderSampleSizePanel } from './panels.js';
 import { AppState, escapeHtml } from './core.js';
 import { renderImputationTable } from './imputation.js';
 import { SAMPLE_COHORTS, loadSampleDataset, processCSVContent } from './ingest.js';
@@ -246,7 +247,7 @@ function goToStep(stepNum) {
 
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
     if (stepNum === 3 || stepNum === '3') renderImputationTable();
-    if (stepNum === 4 || stepNum === '4') refreshOptionBSummaries();
+    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); }
     if (stepNum === 5 || stepNum === '5') renderSinglePredictionForm();
     if (stepNum === 'pipeline') {
         initPipelineUI();

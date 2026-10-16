@@ -1,7 +1,7 @@
 // standard-training.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { fitModel } from './compute.js';
 import { AppState, MODEL_INFO, compareEvalResults, describeNNTraining, displayModelName, escapeHtml, fmtR2, parseSeed, rankingMetricKey, rankingMetricLabel, renderExploratoryCutoffTable, summariseHeldOutSet, trainingMedian } from './core.js';
-import { TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, ciSpan, cvSummaryFrom, describeSplit, formatCvScore, optionBTrainRawRows, readDecisionThreshold, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV } from './cv-tuning.js';
+import { fitRecalibrator, readRecalibration, recalibrateAndEvaluate, TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, ciSpan, cvSummaryFrom, describeSplit, formatCvScore, optionBTrainRawRows, readDecisionThreshold, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV } from './cv-tuning.js';
 import { renderCalibrationPanel, renderExplainPanel, renderOddsRatioPanel } from './panels.js';
 import { renderPipelineLeaderboardOnly } from './pipeline.js';
 import { updatePipelineActiveDeploymentStatus, updatePredictionProvenanceBar } from './pipeline-results.js';
@@ -64,6 +64,8 @@ async function startModelTraining() {
         // Model selection by cross-validation inside the Training set (recommended), or by Testing-set results
         const selectByCV = modelsToTest.length > 1 && (document.querySelector('input[name="selection-mode"]:checked')?.value || 'cv') === 'cv';
         tuningReport.selectByCV = selectByCV;
+        // Optional recalibration of two-outcome probabilities (fitted on out-of-fold Training-set predictions)
+        const recalMethod = prep.isClassification && (prep.targetClasses || []).length === 2 ? readRecalibration('recalibration-select') : 'none';
         const foldCache = {};
         const foldsFor = async (rawTrainRows, k, label, i) => {
             if (!foldCache[k]) {
@@ -78,7 +80,7 @@ async function startModelTraining() {
         // Returns the settings to train with and, when selecting by CV, the cross-validated scores
         const tuneIfRequested = async (mId, hyperparams, rawTrainRows, numClasses, i) => {
             const doTune = autoTune && TUNABLE_MODELS.has(mId);
-            if (!doTune && !selectByCV) return { hp: hyperparams, cv: null };
+            if (!doTune && !selectByCV && recalMethod === 'none') return { hp: hyperparams, cv: null, oof: null };
             const mInfo = MODEL_INFO[mId] || { name: mId.toUpperCase() };
             const k = (mId === 'nn' || mId === 'ensemble') ? Math.min(tuneFolds, 3) : tuneFolds; // slow models: at most 3 folds
             const fd = await foldsFor(rawTrainRows, k, mInfo.name, i);
@@ -93,7 +95,7 @@ async function startModelTraining() {
                 tuningReport.models.push(t);
                 applyHyperparamsToForm(mId, t.bestHp);
             }
-            return { hp: t.bestHp, cv: selectByCV ? cvSummaryFrom(t) : null };
+            return { hp: t.bestHp, cv: selectByCV ? cvSummaryFrom(t) : null, oof: t.best.oof || null };
         };
 
         if (isOptionA) {
@@ -168,7 +170,7 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                const valModel = await fitModel(mId, prep.isClassification, splitPrep.targetClasses.length || 2, hyperparams, split.trainX, split.trainY, {
+                let valModel = await fitModel(mId, prep.isClassification, splitPrep.targetClasses.length || 2, hyperparams, split.trainX, split.trainY, {
                     isAborted: () => Boolean(watchdog && watchdog.aborted),
                     onProgress: (a, b, c) => {
                         if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -193,11 +195,21 @@ async function startModelTraining() {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
 
                 // Benchmark out-of-sample accuracy on held-out test split
-                const evalRes = await ModelEngine.evaluateAsync(valModel, split.testX, split.testY, prep.isClassification, splitPrep.targetClasses, {
+                const evalOptsA = {
                     regressionThreshold: splitThreshold,
                     decisionThreshold: readDecisionThreshold('decision-threshold'),
                     thresholdSource: 'median of the training-split outcomes'
-                }, evalAbortOpts(watchdog));
+                };
+                const calibrator = fitRecalibrator(recalMethod, tuned.oof);
+                let evalRes;
+                if (calibrator) {
+                    const rc = await recalibrateAndEvaluate(valModel, calibrator, split.testX, split.testY, prep.isClassification, splitPrep.targetClasses, evalOptsA, evalAbortOpts(watchdog));
+                    valModel = rc.model;
+                    evalRes = rc.evalRes;
+                } else {
+                    evalRes = await ModelEngine.evaluateAsync(valModel, split.testX, split.testY, prep.isClassification, splitPrep.targetClasses, evalOptsA, evalAbortOpts(watchdog));
+                    if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration was not applied: too few out-of-fold predictions or events to fit it reliably.';
+                }
                 evalRes.protocol = 'option-a';
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
                 evalRes.splitInfo = rowSplit.info;
@@ -251,7 +263,7 @@ async function startModelTraining() {
                             }
                         }
                     });
-                    activeModelInstance = fullModel;
+                    activeModelInstance = calibrator ? ModelEngine.wrapCalibrated(fullModel, calibrator) : fullModel;
                     // The split-phase model has been evaluated and is replaced: free its GPU memory
                     disposeModels([valModel]);
                 }
@@ -324,7 +336,7 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                const model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
+                let model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
                     isAborted: () => Boolean(watchdog && watchdog.aborted),
                     onProgress: (a, b, c) => {
                         if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -349,11 +361,21 @@ async function startModelTraining() {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
 
                 // Evaluate on independent Dataset (ii)
-                const evalRes = await ModelEngine.evaluateAsync(model, testPrep.X, testPrep.y, prep.isClassification, prep.targetClasses, {
+                const evalOptsB = {
                     regressionThreshold: prep.isClassification ? null : trainingMedian(prep.y),
                     decisionThreshold: readDecisionThreshold('decision-threshold'),
                     thresholdSource: 'median of the Dataset (i) training outcomes'
-                }, evalAbortOpts(watchdog));
+                };
+                const calibratorB = fitRecalibrator(recalMethod, tuned.oof);
+                let evalRes;
+                if (calibratorB) {
+                    const rc = await recalibrateAndEvaluate(model, calibratorB, testPrep.X, testPrep.y, prep.isClassification, prep.targetClasses, evalOptsB, evalAbortOpts(watchdog));
+                    model = rc.model;
+                    evalRes = rc.evalRes;
+                } else {
+                    evalRes = await ModelEngine.evaluateAsync(model, testPrep.X, testPrep.y, prep.isClassification, prep.targetClasses, evalOptsB, evalAbortOpts(watchdog));
+                    if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration was not applied: too few out-of-fold predictions or events to fit it reliably.';
+                }
                 evalRes.protocol = 'option-b';
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
                 if (tuned.cv) evalRes.cv = tuned.cv;

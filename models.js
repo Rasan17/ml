@@ -128,8 +128,9 @@
     }
 
     class DecisionTree {
-        constructor(isClassification = true, maxDepth = 6, minSamplesSplit = 2, maxFeatures = null, rng = Math.random) {
+        constructor(isClassification = true, maxDepth = 6, minSamplesSplit = 2, maxFeatures = null, rng = Math.random, exactSplits = false) {
             this.isClassification = isClassification;
+            this.exactSplits = exactSplits; // true: every threshold between distinct values; false: ~10 per feature
             this.maxDepth = maxDepth;
             this.minSamplesSplit = minSamplesSplit;
             this.maxFeatures = maxFeatures;
@@ -193,7 +194,21 @@
 
             const currentScore = this.isClassification ? this._gini(y) : this._variance(y);
 
-            featureIndices.forEach(featIdx => {
+            if (this.exactSplits) {
+                // Exact search: sort once per feature and sweep left-to-right, scoring every threshold between
+                // distinct values (O(n log n) per feature); the same gain criterion as the approximate search
+                featureIndices.forEach(featIdx => {
+                    const r = this._bestSplitExact(X, y, featIdx, currentScore);
+                    if (r && r.gain > bestGain) { bestGain = r.gain; bestFeature = featIdx; bestThreshold = r.threshold; }
+                });
+                if (bestFeature !== null) {
+                    const leftX = [], leftY = [], rightX = [], rightY = [];
+                    for (let s = 0; s < numSamples; s++) {
+                        if (X[s][bestFeature] <= bestThreshold) { leftX.push(X[s]); leftY.push(y[s]); } else { rightX.push(X[s]); rightY.push(y[s]); }
+                    }
+                    if (leftY.length && rightY.length) bestSplits = { leftX, leftY, rightX, rightY };
+                }
+            } else featureIndices.forEach(featIdx => {
                 const values = X.map(r => r[featIdx]);
                 // Sample potential split thresholds
                 const uniqueVals = [...new Set(values)].sort((a, b) => a - b);
@@ -274,6 +289,47 @@
             return 1 - sumSq;
         }
 
+        _bestSplitExact(X, y, featIdx, currentScore) {
+            const n = X.length;
+            const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => X[a][featIdx] - X[b][featIdx]);
+            if (X[order[0]][featIdx] === X[order[n - 1]][featIdx]) return null;
+            let best = null;
+            if (this.isClassification) {
+                let k = 0;
+                for (let i = 0; i < n; i++) if (y[i] + 1 > k) k = y[i] + 1;
+                const right = new Float64Array(k), left = new Float64Array(k);
+                for (let i = 0; i < n; i++) right[y[i]]++;
+                let sqL = 0, sqR = 0;
+                for (let c = 0; c < k; c++) sqR += right[c] * right[c];
+                for (let t = 0; t < n - 1; t++) {
+                    const c = y[order[t]];
+                    // move one case from right to left, updating the sums of squared counts
+                    sqR += -2 * right[c] + 1; right[c]--;
+                    sqL += 2 * left[c] + 1; left[c]++;
+                    const v = X[order[t]][featIdx], vNext = X[order[t + 1]][featIdx];
+                    if (v === vNext) continue;
+                    const nL = t + 1, nR = n - nL;
+                    const giniL = 1 - sqL / (nL * nL), giniR = 1 - sqR / (nR * nR);
+                    const gain = currentScore - ((nL / n) * giniL + (nR / n) * giniR);
+                    if (!best || gain > best.gain) best = { gain, threshold: (v + vNext) / 2 };
+                }
+            } else {
+                let sR = 0, qR = 0, sL = 0, qL = 0;
+                for (let i = 0; i < n; i++) { sR += y[i]; qR += y[i] * y[i]; }
+                for (let t = 0; t < n - 1; t++) {
+                    const yv = y[order[t]];
+                    sR -= yv; qR -= yv * yv; sL += yv; qL += yv * yv;
+                    const v = X[order[t]][featIdx], vNext = X[order[t + 1]][featIdx];
+                    if (v === vNext) continue;
+                    const nL = t + 1, nR = n - nL;
+                    const varL = Math.max(0, qL / nL - (sL / nL) ** 2), varR = Math.max(0, qR / nR - (sR / nR) ** 2);
+                    const gain = currentScore - ((nL / n) * varL + (nR / n) * varR);
+                    if (!best || gain > best.gain) best = { gain, threshold: (v + vNext) / 2 };
+                }
+            }
+            return best;
+        }
+
         _variance(y) {
             const n = y.length;
             if (n === 0) return 0;
@@ -295,8 +351,9 @@
     }
 
     class RandomForest {
-        constructor(isClassification = true, numTrees = 25, maxDepth = 5, minSamplesSplit = 2, featureRatio = 'sqrt', seed = null) {
+        constructor(isClassification = true, numTrees = 25, maxDepth = 5, minSamplesSplit = 2, featureRatio = 'sqrt', seed = null, splitMode = 'auto') {
             this.isClassification = isClassification;
+            this.splitMode = splitMode; // 'auto' (exact below 5,000 cases), 'exact' or 'approx'
             this.numTrees = numTrees;
             this.maxDepth = maxDepth;
             this.minSamplesSplit = minSamplesSplit;
@@ -344,7 +401,8 @@
                     sampleY.push(y[randIdx]);
                 }
 
-                const tree = new DecisionTree(this.isClassification, this.maxDepth, this.minSamplesSplit, maxFeatures, this.rng);
+                const exact = this.splitMode === 'exact' || (this.splitMode !== 'approx' && numSamples < 5000);
+                const tree = new DecisionTree(this.isClassification, this.maxDepth, this.minSamplesSplit, maxFeatures, this.rng, exact);
                 tree.fit(sampleX, sampleY);
                 this.trees.push(tree);
 
@@ -1538,6 +1596,54 @@
     // ==========================================
     // 7. MODEL MANAGER & EVALUATION METRICS
     // ==========================================
+    // ==========================================
+    // RECALIBRATION WRAPPER (binary outcomes)
+    // ==========================================
+    // Applies a calibrator, fitted on out-of-fold training predictions, to the positive-class probability of a
+    // trained model: Platt scaling (logistic regression on logit p) or isotonic regression (monotone step function).
+    function logitClip(p) { const q = Math.min(1 - 1e-6, Math.max(1e-6, Number(p) || 0)); return Math.log(q / (1 - q)); }
+
+    function applyCalibrator(cal, p) {
+        if (!cal) return p;
+        if (cal.type === 'platt') return 1 / (1 + Math.exp(-(cal.a + cal.b * logitClip(p))));
+        if (cal.type === 'isotonic') {
+            const xs = cal.x, ys = cal.y;
+            if (!xs.length) return p;
+            if (p <= xs[0]) return ys[0];
+            if (p >= xs[xs.length - 1]) return ys[ys.length - 1];
+            let lo = 0, hi = xs.length - 1;
+            while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (xs[mid] <= p) lo = mid; else hi = mid; }
+            const t = xs[hi] === xs[lo] ? 0 : (p - xs[lo]) / (xs[hi] - xs[lo]);
+            return ys[lo] + t * (ys[hi] - ys[lo]);
+        }
+        return p;
+    }
+
+    class CalibratedModel {
+        constructor(base, calibrator) {
+            this.base = base;
+            this.calibrator = calibrator;
+            this.isClassification = true;
+            this.seed = base ? base.seed : null;
+            ['trainingInfo', 'usedFallback', 'fallbackReason', 'weightingNote', 'fallbackNote', 'featureImportances'].forEach(k => { if (base && base[k] !== undefined) this[k] = base[k]; });
+        }
+        _adjust(o) {
+            if (!o || !o.probabilities) return o;
+            const p1 = applyCalibrator(this.calibrator, Number(o.probabilities[1] || 0));
+            const probabilities = { 0: 1 - p1, 1: p1 };
+            const pred = p1 >= 0.5 ? 1 : 0;
+            return { ...o, pred, probabilities, confidence: probabilities[pred], probabilityType: 'recalibrated' };
+        }
+        predictSingle(x) { return this._adjust(this.base.predictSingle(x)); }
+        predict(X) { return X.map(x => this.predictSingle(x).pred); }
+        predictOutputs(X) { return (typeof this.base.predictOutputs === 'function' ? this.base.predictOutputs(X) : X.map(x => this.base.predictSingle(x))).map(o => this._adjust(o)); }
+        async predictOutputsAsync(X, opts) {
+            const outs = typeof this.base.predictOutputsAsync === 'function' ? await this.base.predictOutputsAsync(X, opts) : this.predictOutputs(X);
+            return typeof this.base.predictOutputsAsync === 'function' ? outs.map(o => this._adjust(o)) : outs;
+        }
+        dispose() { if (this.base && this.base.dispose) this.base.dispose(); }
+    }
+
     const ModelEngine = {
         SUPPORTED_MODELS: [
             { id: 'ensemble', name: 'Voting / Performance-Weighted Ensemble', type: 'both', desc: 'Combines the selected base models (neural network, random forest, logistic/ridge, k-NN, naive Bayes) by soft probability averaging, hard majority voting, or weights learned on an internal validation split of the training data. Not a cross-validated stacked Super Learner.' },
@@ -1563,7 +1669,7 @@
                 const depth = userHyperparams.maxDepth || 6;
                 const minSplit = userHyperparams.minSamplesSplit || 2;
                 const featRatio = userHyperparams.featureRatio || 'sqrt';
-                model = new RandomForest(isClassification, trees, depth, minSplit, featRatio, seed);
+                model = new RandomForest(isClassification, trees, depth, minSplit, featRatio, seed, userHyperparams.splitMode || 'auto');
             } else if (modelId === 'glm') {
                 model = new GeneralizedLinearModel(
                     isClassification,
@@ -2053,6 +2159,9 @@
                 }
                 return out;
             }
+            if (model instanceof CalibratedModel) {
+                return { type: 'calibrated', calibrator: model.calibrator, base: await this.serializeModel(model.base) };
+            }
             if (model instanceof EnsembleModel) {
                 const items = [];
                 for (const it of model.models) items.push({ ...it, model: await this.serializeModel(it.model) });
@@ -2094,6 +2203,9 @@
                 }
                 return m;
             }
+            if (obj.type === 'calibrated') {
+                return new CalibratedModel(await this.deserializeModel(obj.base), obj.calibrator);
+            }
             if (obj.type === 'ensemble') {
                 const m = restore(EnsembleModel.prototype, obj.state);
                 m.models = [];
@@ -2102,6 +2214,59 @@
             }
             throw new Error(`Unknown model type in file: ${obj.type}`);
         },
+
+        /**
+         * Minimum sample size for developing a prediction model (Riley et al., BMJ 2020; Stat Med 2019), as in the
+         * pmsampsize package. Binary: p = candidate parameters, prevalence, anticipated Cox-Snell R² (default 15% of
+         * its maximum). Continuous: p and anticipated R². Returns each criterion and the overall minimum.
+         */
+        rileySampleSize({ type, p, prevalence = null, r2 = null, shrinkage = 0.9, optimism = 0.05, riskMargin = 0.05 }) {
+            const crit = [];
+            const nShrink = (R2) => Math.ceil(p / ((shrinkage - 1) * Math.log(1 - R2 / shrinkage)));
+            if (type === 'binary') {
+                if (!(prevalence > 0 && prevalence < 1)) return null;
+                const maxR2 = 1 - Math.pow(Math.pow(prevalence, prevalence) * Math.pow(1 - prevalence, 1 - prevalence), 2);
+                const R2 = r2 !== null && r2 > 0 ? Math.min(r2, maxR2 * 0.999) : 0.15 * maxR2;
+                const S2 = R2 / (R2 + optimism * maxR2);
+                crit.push({ id: 'shrinkage', label: `Shrinkage ≥ ${shrinkage} (limited overfitting)`, n: nShrink(R2) });
+                crit.push({ id: 'optimism', label: `Optimism in Nagelkerke R² ≤ ${optimism}`, n: Math.ceil(p / ((S2 - 1) * Math.log(1 - R2 / S2))) });
+                crit.push({ id: 'risk', label: `Overall risk estimated within ±${riskMargin}`, n: Math.ceil(Math.pow(1.959964 / riskMargin, 2) * prevalence * (1 - prevalence)) });
+                const n = Math.max(...crit.map(c => c.n));
+                return { type, p, prevalence, r2: R2, maxR2, criteria: crit, n, events: Math.ceil(n * prevalence), epp: (n * prevalence) / p, r2Assumed: !(r2 !== null && r2 > 0) };
+            }
+            const R2 = r2 !== null && r2 > 0 && r2 < 1 ? r2 : 0.2;
+            crit.push({ id: 'shrinkage', label: `Shrinkage ≥ ${shrinkage} (limited overfitting)`, n: nShrink(R2) });
+            crit.push({ id: 'optimism', label: `Optimism in adjusted R² ≤ ${optimism}`, n: Math.ceil(1 + (p * (1 - R2)) / optimism) });
+            crit.push({ id: 'residual', label: 'Residual SD estimated within a 10% margin', n: 234 + p });
+            return { type, p, r2: R2, criteria: crit, n: Math.max(...crit.map(c => c.n)), r2Assumed: !(r2 !== null && r2 > 0 && r2 < 1) };
+        },
+
+        /** Platt scaling: logistic regression of the outcome on logit(p) (Newton-Raphson); null if not estimable */
+        fitPlatt(y, p) {
+            const lp = p.map(logitClip);
+            const fit = this.logisticIRLS(lp.map(v => [v]), y.map(v => (v === 1 ? 1 : 0)));
+            if (!fit || !fit.converged) return null;
+            return { type: 'platt', a: fit.rows[0].coef, b: fit.rows[1].coef, n: y.length };
+        },
+
+        /** Isotonic regression (pool-adjacent-violators) of the outcome on p: a non-decreasing step function */
+        fitIsotonic(y, p) {
+            const idx = p.map((v, i) => i).sort((a, b) => p[a] - p[b]);
+            const blocks = []; // {sumY, w, xMin, xMax}
+            idx.forEach(i => {
+                blocks.push({ sumY: y[i] === 1 ? 1 : 0, w: 1, xMin: p[i], xMax: p[i] });
+                while (blocks.length > 1 && blocks[blocks.length - 2].sumY / blocks[blocks.length - 2].w >= blocks[blocks.length - 1].sumY / blocks[blocks.length - 1].w) {
+                    const b2 = blocks.pop(), b1 = blocks.pop();
+                    blocks.push({ sumY: b1.sumY + b2.sumY, w: b1.w + b2.w, xMin: b1.xMin, xMax: b2.xMax });
+                }
+            });
+            const x = [], yv = [];
+            blocks.forEach(b => { const v = b.sumY / b.w; x.push(b.xMin); yv.push(v); if (b.xMax > b.xMin) { x.push(b.xMax); yv.push(v); } });
+            return { type: 'isotonic', x, y: yv, n: y.length };
+        },
+
+        wrapCalibrated(model, calibrator) { return new CalibratedModel(model, calibrator); },
+        applyCalibrator(cal, p) { return applyCalibrator(cal, p); },
 
         /** Re-labels one binary output with a decision threshold on the positive-class probability */
         applyDecisionThreshold(o, threshold) {
@@ -2222,4 +2387,5 @@
     window.DeepNeuralNetwork = DeepNeuralNetwork;
     window.GaussianNaiveBayes = GaussianNaiveBayes;
     window.EnsembleModel = EnsembleModel;
+    window.CalibratedModel = CalibratedModel;
 })(window);

@@ -117,7 +117,8 @@ const PROBABILITY_LABELS = {
     model: { title: 'Model Probability', note: 'Model-estimated class probability' },
     blend: { title: 'Averaged Probability', note: 'Average of the base models\' class probabilities/vote shares' },
     vote: { title: 'Vote Share', note: 'Proportion of trees/models voting for this class' },
-    neighbours: { title: 'Neighbour Vote Share', note: 'Share of the k nearest training cases (distance-weighted if selected) in this class' }
+    neighbours: { title: 'Neighbour Vote Share', note: 'Share of the k nearest training cases (distance-weighted if selected) in this class' },
+    recalibrated: { title: 'Recalibrated Probability', note: 'Model probability recalibrated on out-of-fold Training-set predictions' }
 };
 
 function probabilityLabel(type) {

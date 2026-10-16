@@ -94,6 +94,11 @@ irX=np.array(o['irX']); lg=sm.Logit(yc,sm.add_constant(irX)).fit(disp=0); ir=o['
 chk('Logistic IRLS coefficients (vs statsmodels Logit)',[r['coef'] for r in ir],lg.params,1e-6)
 chk('Logistic IRLS standard errors',[r['se'] for r in ir],lg.bse,1e-6)
 chk('Logistic IRLS p-values',[r['p'] for r in ir],lg.pvalues,1e-6)
+from sklearn.isotonic import IsotonicRegression
+pl=LogisticRegression(penalty=None,tol=1e-12,max_iter=10000).fit(lp.reshape(-1,1),cy)
+chk('Platt scaling a, b (vs scikit-learn unpenalised logistic)',[o['platt']['a'],o['platt']['b']],[pl.intercept_[0],pl.coef_[0][0]],1e-5)
+ir=IsotonicRegression(out_of_bounds='clip').fit(np.array(o['calP']),cy)
+chk('Isotonic regression fitted values (vs scikit-learn)',o['isoFitted'],ir.predict(np.array(o['calP'])),1e-9)
 w=max(len(x[1]) for x in res)
 for st,nm,d,t in res: print(f'{st}  {nm:<{w}}  max|diff|={d:.2e}  (tol {t:.0e})')
 print(f"\n{sum(1 for x in res if x[0]=='PASS')}/{len(res)} checks passed")

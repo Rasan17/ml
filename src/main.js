@@ -9,7 +9,7 @@ import { createEmptyPipelineState } from './ingest.js';
 import './variables.js';
 import './imputation.js';
 import './training-setup.js';
-import './panels.js';
+import { renderSampleSizePanel } from './panels.js';
 import './cv-tuning.js';
 import './standard-training.js';
 import './single-prediction.js';
@@ -28,6 +28,11 @@ window.addEventListener('unhandledrejection', (e) => handleUnexpectedError(e.rea
 function start() {
     initDOM();
     setupEventListeners();
+    // Keep the sample-size check in step with the chosen split and validation protocol
+    ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.addEventListener('change', renderSampleSizePanel); el.addEventListener('input', renderSampleSizePanel); }
+    });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
 else start();

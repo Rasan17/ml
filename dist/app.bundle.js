@@ -120,7 +120,8 @@ const PROBABILITY_LABELS = {
     model: { title: 'Model Probability', note: 'Model-estimated class probability' },
     blend: { title: 'Averaged Probability', note: 'Average of the base models\' class probabilities/vote shares' },
     vote: { title: 'Vote Share', note: 'Proportion of trees/models voting for this class' },
-    neighbours: { title: 'Neighbour Vote Share', note: 'Share of the k nearest training cases (distance-weighted if selected) in this class' }
+    neighbours: { title: 'Neighbour Vote Share', note: 'Share of the k nearest training cases (distance-weighted if selected) in this class' },
+    recalibrated: { title: 'Recalibrated Probability', note: 'Model probability recalibrated on out-of-fold Training-set predictions' }
 };
 
 function probabilityLabel(type) {
@@ -1288,6 +1289,7 @@ function setupEventListeners() {
 
 
 
+
 function syncTrainTestSplit(trainVal) {
     let train = Math.min(95, Math.max(50, Math.round(trainVal)));
     let test = 100 - train;
@@ -1526,7 +1528,7 @@ function goToStep(stepNum) {
 
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
     if (stepNum === 3 || stepNum === '3') renderImputationTable();
-    if (stepNum === 4 || stepNum === '4') refreshOptionBSummaries();
+    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); }
     if (stepNum === 5 || stepNum === '5') renderSinglePredictionForm();
     if (stepNum === 'pipeline') {
         initPipelineUI();
@@ -2451,6 +2453,7 @@ function getHyperparamsForModel(modelId, prep) {
         hp.minSamplesSplit = minSplitEl ? (parseInt(minSplitEl.value, 10) || 2) : 2;
         const maxFeatEl = document.getElementById('rf-maxfeatures-select');
         hp.featureRatio = maxFeatEl ? maxFeatEl.value : 'sqrt';
+        hp.splitMode = document.getElementById('rf-split-select')?.value || 'auto';
     } else if (modelId === 'glm') {
         hp.lr = parseFloat(document.getElementById('glm-lr-input')?.value) || 0.05;
         hp.epochs = parseInt(document.getElementById('glm-epochs-input')?.value, 10) || 150;
@@ -2561,7 +2564,12 @@ function calibrationBody(item, positiveLabel) {
     const intTxt = cal.intercept === null || cal.intercept === undefined ? 'not estimable'
         : `${cal.intercept.toFixed(2)} &mdash; ${cal.intercept > 0.1 ? 'on average the model <strong>under-predicts</strong> the risk' : cal.intercept < -0.1 ? 'on average the model <strong>over-predicts</strong> the risk' : 'on average the predicted risk is about right'}`;
     const small = cal.events < 100 || cal.n - cal.events < 100;
-    const probNote = ev.probabilityType && ev.probabilityType !== 'model' ? ' This model\'s "probabilities" are vote or neighbour shares, which are often poorly calibrated.' : '';
+    const rc = ev.recalibration;
+    const f2 = v => (typeof v === 'number' ? v.toFixed(2) : 'n/a');
+    const recalNote = rc
+        ? `<div class="explain-box" style="margin-top: 8px;"><strong>📐 Recalibrated</strong> with ${rc.method === 'platt' ? 'Platt scaling' : 'isotonic regression'} fitted on ${escapeHtml(rc.fittedOn)}. Before recalibration on these test patients: slope ${f2(rc.before.slope)}, intercept ${f2(rc.before.intercept)}, Brier ${typeof rc.before.brierScore === 'number' ? rc.before.brierScore.toFixed(3) : 'n/a'}${typeof rc.before.rocAuc === 'number' ? `, AUC ${rc.before.rocAuc.toFixed(3)}` : ''}. The values above are after recalibration.</div>`
+        : (ev.recalibrationSkipped ? `<div class="tune-muted" style="margin-top: 6px;">${escapeHtml(ev.recalibrationSkipped)}</div>` : '');
+    const probNote = ev.probabilityType && ev.probabilityType !== 'model' && ev.probabilityType !== 'recalibrated' ? ' This model\'s "probabilities" are vote or neighbour shares, which are often poorly calibrated.' : '';
     return `
         <div class="cal-grid">
             <div>${cal.bins && cal.bins.length ? calibrationSvg(cal) : '<p class="tune-muted">Too few test patients to draw a calibration plot (at least 10 are needed).</p>'}</div>
@@ -2573,6 +2581,7 @@ function calibrationBody(item, positiveLabel) {
                 <p class="tune-muted" style="margin-top: 6px;"><strong>How to read the plot:</strong> patients are grouped by their predicted probability. Each dot compares the average predicted probability in a group with the proportion who actually had "${escapeHtml(positiveLabel)}". Dots on the dashed diagonal mean that a predicted 30% really corresponds to about 30% of patients. Dots below the line mean the model over-estimates the risk; dots above it mean it under-estimates.</p>
             </div>
         </div>
+        ${recalNote}
         ${small ? `<div class="tune-warn">⚠️ Calibration needs many patients: with fewer than about 100 patients with and 100 without the outcome in the Testing set, these values are very imprecise.${probNote}</div>` : (probNote ? `<div class="tune-warn">⚠️${probNote}</div>` : '')}
         <div class="cal-thr">
             <div class="cmp-guide-title" style="font-size: 13px;">Sensitivity and specificity at different thresholds (Testing set)</div>
@@ -2929,6 +2938,51 @@ function renderExplainPanel(containerId, items, rows, isClassification) {
         </div>`;
 }
 
+
+// =========================================================================
+// MINIMUM SAMPLE SIZE (Riley et al. criteria, as in pmsampsize) for the current outcome and predictors
+// =========================================================================
+function renderSampleSizePanel() {
+    const box = document.getElementById('sample-size-container');
+    if (!box) return;
+    if (!AppState.imputedData || !AppState.imputedData.imputedRows || !AppState.imputedData.imputedRows.length) { box.innerHTML = ''; return; }
+    let prep;
+    try { prep = DataEngine.prepareFeaturesAndTarget(AppState.imputedData.imputedRows, AppState.columnConfigs); } catch (e) { box.innerHTML = ''; return; }
+    if (!prep || !prep.X || !prep.X.length) { box.innerHTML = ''; return; }
+    const binary = prep.isClassification && (prep.targetClasses || []).length === 2;
+    if (prep.isClassification && !binary) {
+        box.innerHTML = `<div class="cal-panel"><div class="tune-title">📏 Is the sample large enough?</div><p class="tune-muted">Formal minimum sample-size criteria (Riley et al.) are available for two-outcome and numerical outcomes; for ${prep.targetClasses.length} outcome groups, aim for at least 10–20 patients in the smallest group per predictor parameter.</p></div>`;
+        return;
+    }
+    const p = prep.X[0].length;
+    const prev = binary ? prep.y.filter(v => v === 1).length / prep.y.length : null;
+    const r2Input = parseFloat(document.getElementById('sample-size-r2')?.value);
+    const res = ModelEngine.rileySampleSize({ type: binary ? 'binary' : 'continuous', p, prevalence: prev, r2: isFinite(r2Input) ? r2Input : null });
+    if (!res) { box.innerHTML = ''; return; }
+    const isOptionA = document.getElementById('val-mode-a') ? document.getElementById('val-mode-a').checked : true;
+    const pct = parseFloat(document.getElementById('train-pct-input')?.value) || 80;
+    const nTrain = isOptionA ? Math.round(prep.X.length * Math.min(0.95, Math.max(0.5, pct / 100))) : prep.X.length;
+    const enough = nTrain >= res.n;
+    const posLabel = binary ? escapeHtml(String(prep.targetClasses[1])) : '';
+    box.innerHTML = `
+        <div class="cal-panel">
+            <div class="cal-head">
+                <div class="tune-title">📏 Is the sample large enough? (minimum sample size, Riley et al.)</div>
+                <label class="autotune-folds-label" title="The R² you expect a model to achieve; leave blank for the conservative default">Anticipated ${binary ? 'Cox-Snell ' : ''}R²:
+                    <input type="number" id="sample-size-r2" class="control-input" style="width: 90px; display: inline-block;" min="0.01" max="0.99" step="0.01" placeholder="${res.r2.toFixed(3)}" value="${isFinite(r2Input) ? r2Input : ''}">
+                </label>
+            </div>
+            <div class="${enough ? 'explain-box' : 'tune-warn'}" style="margin-top: 6px;">
+                ${enough ? '✓' : '⚠️'} The Training set has <strong>${nTrain}</strong> patients${binary ? ` (about ${Math.round(nTrain * prev)} with "${posLabel}")` : ''}; the criteria below require at least <strong>${res.n}</strong>${binary ? ` (${res.events} with "${posLabel}")` : ''} for ${p} predictor parameter(s).
+                ${enough ? 'The sample meets these criteria.' : 'The sample is <strong>smaller than recommended</strong>: expect overfitting and unstable estimates; consider fewer predictors (or grouping categories), or more patients, and treat results as exploratory.'}
+            </div>
+            <table class="data-table thr-table"><thead><tr><th>Criterion</th><th>Patients needed</th></tr></thead>
+                <tbody>${res.criteria.map(c => `<tr><td>${escapeHtml(c.label)}</td><td>${c.n}</td></tr>`).join('')}</tbody></table>
+            <p class="tune-muted">Criteria of Riley et al. (BMJ 2020; Stat Med 2019), as in the pmsampsize package, with ${p} candidate parameter(s) (each category of a categorical predictor counts)${binary ? `, outcome prevalence ${(prev * 100).toFixed(1)}%` : ''} and an anticipated ${binary ? 'Cox-Snell ' : ''}R² of ${res.r2.toFixed(3)}${res.r2Assumed ? (binary ? ' (conservative default: 15% of the maximum possible; enter a value from previous studies if available)' : ' (default; enter a value from previous studies if available)') : ''}. These replace the older "10 events per variable" rule of thumb. Flexible models (random forests, neural networks) typically need considerably more.</p>
+        </div>`;
+    document.getElementById('sample-size-r2')?.addEventListener('change', renderSampleSizePanel);
+}
+
 // ---- src/cv-tuning.js ----
 // cv-tuning.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 
@@ -3063,6 +3117,7 @@ async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, w
     for (let c = 0; c < candidates.length; c++) {
         const hp = { ...baseHp, ...candidates[c].params };
         const scores = [];
+        const oof = { p: [], y: [] }; // out-of-fold predictions (binary outcomes), used to fit recalibration
         const all = {}; // every ranking metric, so the selection can follow a later change of ranking metric
         Object.keys(metricDefs).forEach(key => { all[key] = []; });
         for (let f = 0; f < k; f++) {
@@ -3081,6 +3136,7 @@ async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, w
             const v = ev ? ev[metricKey] : null;
             if (typeof v === 'number' && isFinite(v)) scores.push(v);
             if (ev) Object.keys(all).forEach(key => { if (typeof ev[key] === 'number' && isFinite(ev[key])) all[key].push(ev[key]); });
+            if (ev && Array.isArray(ev.probPositive) && Array.isArray(ev.actuals)) { oof.p.push(...ev.probPositive); oof.y.push(...ev.actuals.map(v => (v === 1 ? 1 : 0))); }
             fitsDone++;
             await ModelEngine.yieldToBrowser(); // background-tab safe (plain timers are throttled in hidden tabs)
         }
@@ -3088,7 +3144,7 @@ async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, w
         const sd = scores.length > 1 ? Math.sqrt(scores.reduce((a, b) => a + (b - mean) ** 2, 0) / (scores.length - 1)) : null;
         const allMeans = {};
         Object.keys(all).forEach(key => { allMeans[key] = all[key].length ? all[key].reduce((a, b) => a + b, 0) / all[key].length : null; });
-        results.push({ params: candidates[c].params, isOwn: candidates[c].isOwn, mean, sd, nFolds: scores.length, allMeans });
+        results.push({ params: candidates[c].params, isOwn: candidates[c].isOwn, mean, sd, nFolds: scores.length, allMeans, oof: oof.p.length ? oof : null });
     }
 
     // Best mean CV score; ties keep the user's own (or the protocol's) settings, listed first
@@ -3240,6 +3296,34 @@ function formatCvScore(ev, isClassification) {
     const pctKey = ['macroF1', 'balancedAccuracy', 'accuracy'].includes(key);
     const sdTxt = key === ev.cv.metricKey && typeof ev.cv.sd === 'number' ? ` <span style="font-size: 10.5px; color: var(--text-muted);">± ${pctKey ? (ev.cv.sd * 100).toFixed(1) : ev.cv.sd.toFixed(3)}</span>` : '';
     return `<strong style="color: var(--accent-cyan);">${pctKey ? (v * 100).toFixed(1) + '%' : v.toFixed(3)}</strong>${sdTxt}`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Recalibration (binary outcomes): a calibrator is fitted on the out-of-fold cross-validation predictions
+// of the chosen settings (Training set only) and wrapped around the final model
+// ---------------------------------------------------------------------------------------------
+function readRecalibration(id) {
+    const v = document.getElementById(id)?.value;
+    return v === 'platt' || v === 'isotonic' ? v : 'none';
+}
+
+function fitRecalibrator(method, oof) {
+    if (method === 'none' || !oof || !oof.p || oof.p.length < 20) return null;
+    const events = oof.y.reduce((a, b) => a + b, 0);
+    if (events < 5 || oof.y.length - events < 5) return null;
+    return method === 'platt' ? ModelEngine.fitPlatt(oof.y, oof.p) : ModelEngine.fitIsotonic(oof.y, oof.p);
+}
+
+// Wraps a trained model with the calibrator and records the before/after evaluation summary
+async function recalibrateAndEvaluate(model, calibrator, X, y, isClassification, targetClasses, evalOptions, abortOpts) {
+    const before = await ModelEngine.evaluateAsync(model, X, y, isClassification, targetClasses, evalOptions, abortOpts);
+    const wrapped = ModelEngine.wrapCalibrated(model, calibrator);
+    const after = await ModelEngine.evaluateAsync(wrapped, X, y, isClassification, targetClasses, evalOptions, abortOpts);
+    after.recalibration = {
+        method: calibrator.type, fittedOn: `${calibrator.n} out-of-fold Training-set predictions`,
+        before: { brierScore: before.brierScore, rocAuc: before.rocAuc, slope: before.calibration ? before.calibration.slope : null, intercept: before.calibration ? before.calibration.intercept : null }
+    };
+    return { model: wrapped, evalRes: after };
 }
 
 // Cross-validated performance of a model's final settings, attached to its results for model selection
@@ -3438,6 +3522,8 @@ async function startModelTraining() {
         // Model selection by cross-validation inside the Training set (recommended), or by Testing-set results
         const selectByCV = modelsToTest.length > 1 && (document.querySelector('input[name="selection-mode"]:checked')?.value || 'cv') === 'cv';
         tuningReport.selectByCV = selectByCV;
+        // Optional recalibration of two-outcome probabilities (fitted on out-of-fold Training-set predictions)
+        const recalMethod = prep.isClassification && (prep.targetClasses || []).length === 2 ? readRecalibration('recalibration-select') : 'none';
         const foldCache = {};
         const foldsFor = async (rawTrainRows, k, label, i) => {
             if (!foldCache[k]) {
@@ -3452,7 +3538,7 @@ async function startModelTraining() {
         // Returns the settings to train with and, when selecting by CV, the cross-validated scores
         const tuneIfRequested = async (mId, hyperparams, rawTrainRows, numClasses, i) => {
             const doTune = autoTune && TUNABLE_MODELS.has(mId);
-            if (!doTune && !selectByCV) return { hp: hyperparams, cv: null };
+            if (!doTune && !selectByCV && recalMethod === 'none') return { hp: hyperparams, cv: null, oof: null };
             const mInfo = MODEL_INFO[mId] || { name: mId.toUpperCase() };
             const k = (mId === 'nn' || mId === 'ensemble') ? Math.min(tuneFolds, 3) : tuneFolds; // slow models: at most 3 folds
             const fd = await foldsFor(rawTrainRows, k, mInfo.name, i);
@@ -3467,7 +3553,7 @@ async function startModelTraining() {
                 tuningReport.models.push(t);
                 applyHyperparamsToForm(mId, t.bestHp);
             }
-            return { hp: t.bestHp, cv: selectByCV ? cvSummaryFrom(t) : null };
+            return { hp: t.bestHp, cv: selectByCV ? cvSummaryFrom(t) : null, oof: t.best.oof || null };
         };
 
         if (isOptionA) {
@@ -3542,7 +3628,7 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                const valModel = await fitModel(mId, prep.isClassification, splitPrep.targetClasses.length || 2, hyperparams, split.trainX, split.trainY, {
+                let valModel = await fitModel(mId, prep.isClassification, splitPrep.targetClasses.length || 2, hyperparams, split.trainX, split.trainY, {
                     isAborted: () => Boolean(watchdog && watchdog.aborted),
                     onProgress: (a, b, c) => {
                         if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -3567,11 +3653,21 @@ async function startModelTraining() {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
 
                 // Benchmark out-of-sample accuracy on held-out test split
-                const evalRes = await ModelEngine.evaluateAsync(valModel, split.testX, split.testY, prep.isClassification, splitPrep.targetClasses, {
+                const evalOptsA = {
                     regressionThreshold: splitThreshold,
                     decisionThreshold: readDecisionThreshold('decision-threshold'),
                     thresholdSource: 'median of the training-split outcomes'
-                }, evalAbortOpts(watchdog));
+                };
+                const calibrator = fitRecalibrator(recalMethod, tuned.oof);
+                let evalRes;
+                if (calibrator) {
+                    const rc = await recalibrateAndEvaluate(valModel, calibrator, split.testX, split.testY, prep.isClassification, splitPrep.targetClasses, evalOptsA, evalAbortOpts(watchdog));
+                    valModel = rc.model;
+                    evalRes = rc.evalRes;
+                } else {
+                    evalRes = await ModelEngine.evaluateAsync(valModel, split.testX, split.testY, prep.isClassification, splitPrep.targetClasses, evalOptsA, evalAbortOpts(watchdog));
+                    if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration was not applied: too few out-of-fold predictions or events to fit it reliably.';
+                }
                 evalRes.protocol = 'option-a';
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
                 evalRes.splitInfo = rowSplit.info;
@@ -3625,7 +3721,7 @@ async function startModelTraining() {
                             }
                         }
                     });
-                    activeModelInstance = fullModel;
+                    activeModelInstance = calibrator ? ModelEngine.wrapCalibrated(fullModel, calibrator) : fullModel;
                     // The split-phase model has been evaluated and is replaced: free its GPU memory
                     disposeModels([valModel]);
                 }
@@ -3698,7 +3794,7 @@ async function startModelTraining() {
                     setupTrainingLossChart();
                 }
 
-                const model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
+                let model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, prep.X, prep.y, {
                     isAborted: () => Boolean(watchdog && watchdog.aborted),
                     onProgress: (a, b, c) => {
                         if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -3723,11 +3819,21 @@ async function startModelTraining() {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
 
                 // Evaluate on independent Dataset (ii)
-                const evalRes = await ModelEngine.evaluateAsync(model, testPrep.X, testPrep.y, prep.isClassification, prep.targetClasses, {
+                const evalOptsB = {
                     regressionThreshold: prep.isClassification ? null : trainingMedian(prep.y),
                     decisionThreshold: readDecisionThreshold('decision-threshold'),
                     thresholdSource: 'median of the Dataset (i) training outcomes'
-                }, evalAbortOpts(watchdog));
+                };
+                const calibratorB = fitRecalibrator(recalMethod, tuned.oof);
+                let evalRes;
+                if (calibratorB) {
+                    const rc = await recalibrateAndEvaluate(model, calibratorB, testPrep.X, testPrep.y, prep.isClassification, prep.targetClasses, evalOptsB, evalAbortOpts(watchdog));
+                    model = rc.model;
+                    evalRes = rc.evalRes;
+                } else {
+                    evalRes = await ModelEngine.evaluateAsync(model, testPrep.X, testPrep.y, prep.isClassification, prep.targetClasses, evalOptsB, evalAbortOpts(watchdog));
+                    if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration was not applied: too few out-of-fold predictions or events to fit it reliably.';
+                }
                 evalRes.protocol = 'option-b';
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
                 if (tuned.cv) evalRes.cv = tuned.cv;
@@ -4918,6 +5024,7 @@ function downloadBatchCSV() {
 
 
 
+
 // =========================================================================
 // 7-STEP CLINICAL ML PIPELINE CONTROLLER
 // Conceived, designed and developed by Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)
@@ -5986,7 +6093,9 @@ async function executePipelineStep7() {
         const pipeTuningReport = { folds: pipeFolds, models: [], pipeline: true, ensembleSkipped: pipeTune, selectByCV: pipeSelectCV };
         pHp.ensemble = { voting: 'soft', baseModels: ['nn', 'rf', 'glm'], capacity: 'balanced', seed: evalSeed };
         const cvByModel = {};
-        if (pipeTune || pipeSelectCV) {
+        const oofByModel = {};
+        const recalPipe = isClassification && numClasses === 2 ? readRecalibration('pipeline-recalibration-select') : 'none';
+        if (pipeTune || pipeSelectCV || recalPipe !== 'none') {
             const nTrainReal = AppState.pipeline.trainRows.length;
             if (pipeTune && nTrainReal < 100) {
                 pipeTuningReport.smallSampleWarning = `Only ${nTrainReal} training patients: each fold scores very few patients, so differences between settings are mostly chance. Tuning is unlikely to help much with a cohort this small; the protocol defaults are a sound choice.`;
@@ -6001,7 +6110,7 @@ async function executePipelineStep7() {
                 }
                 return foldCache[key];
             };
-            const plan = pipeSelectCV ? plannedModels.slice() : plannedModels.filter(id => id !== 'ensemble');
+            const plan = (pipeSelectCV || recalPipe !== 'none') ? plannedModels.slice() : plannedModels.filter(id => id !== 'ensemble');
             if (watchdog) watchdog.tick(1, `🎯 ${pipeTune ? 'Automatic tuning' : 'Cross-validation'} of ${plan.length} models on ${Math.min(nTrainReal, TUNE_MAX_ROWS).toLocaleString('en-GB')} training patients: this takes several times longer than training alone (the neural network is slowest). A time estimate appears once each model's first trial has run.`);
             await ModelEngine.yieldToBrowser();
             for (let t = 0; t < plan.length; t++) {
@@ -6020,6 +6129,7 @@ async function executePipelineStep7() {
                 pHp[id] = res.bestHp;
                 if (doTune) pipeTuningReport.models.push(res);
                 if (pipeSelectCV) cvByModel[id] = cvSummaryFrom(res);
+                if (res.best && res.best.oof) oofByModel[id] = res.best.oof;
             }
         }
         const tunedTag = id => (pipeTuningReport.models.some(m => m.modelId === id) ? ' Settings tuned by cross-validation within the Training set.' : '');
@@ -6106,6 +6216,19 @@ async function executePipelineStep7() {
         ensEval.constraintNote = `Equal-weight soft vote of ${ensembleConfig.baseModels.map(b => b.toUpperCase()).join(', ')}; scaling fitted on Train only.`;
         benchmarkList.push({ id: 'ensemble', name: 'Voting / Weighted Ensemble', model: ensemble, prep: fullPrep, eval: ensEval });
 
+        // Optional recalibration: calibrator fitted on each model's out-of-fold Training-set predictions
+        if (recalPipe !== 'none') {
+            for (const b of benchmarkList) {
+                const cal = fitRecalibrator(recalPipe, oofByModel[b.id]);
+                if (!cal) { b.eval.recalibrationSkipped = 'Recalibration was not applied: too few out-of-fold predictions or events to fit it reliably.'; continue; }
+                const td = DataEngine.prepareTestingDataset(AppState.pipeline.testRows, b.prep);
+                const rc = await recalibrateAndEvaluate(b.model, cal, td.X, td.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
+                ['featuresUsed', 'constraintNote', 'fallbackNote'].forEach(k => { if (b.eval[k] !== undefined) rc.evalRes[k] = b.eval[k]; });
+                rc.evalRes.constraintNote = (rc.evalRes.constraintNote || '') + ` Probabilities recalibrated (${cal.type === 'platt' ? 'Platt scaling' : 'isotonic regression'}) on out-of-fold Training-set predictions.`;
+                b.model = rc.model;
+                b.eval = rc.evalRes;
+            }
+        }
         // Cross-validated scores (model selection inside the Training set) when that mode is chosen
         benchmarkList.forEach(b => { if (cvByModel[b.id]) b.eval.cv = cvByModel[b.id]; });
         // Bootstrap 95% confidence intervals for every test metric
@@ -7702,6 +7825,11 @@ window.addEventListener('unhandledrejection', (e) => handleUnexpectedError(e.rea
 function start() {
     initDOM();
     setupEventListeners();
+    // Keep the sample-size check in step with the chosen split and validation protocol
+    ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.addEventListener('change', renderSampleSizePanel); el.addEventListener('input', renderSampleSizePanel); }
+    });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
 else start();

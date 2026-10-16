@@ -1,4 +1,5 @@
 // pipeline.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+import { fitRecalibrator, readRecalibration, recalibrateAndEvaluate } from './cv-tuning.js';
 import { fitModel } from './compute.js';
 import { AppState, compareEvalResults, describeNNTraining, displayModelName, escapeHtml, fmtR2, fmtValue, jsArg, parseSeed, rankingMetricLabel, summariseHeldOutSet, trainingMedian } from './core.js';
 import { TUNABLE_MODELS, TUNE_MAX_ROWS, bootstrapFor, buildPipelineFolds, ciSpan, cvSummaryFrom, describeSplit, formatCvScore, readDecisionThreshold, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow } from './cv-tuning.js';
@@ -1077,7 +1078,9 @@ async function executePipelineStep7() {
         const pipeTuningReport = { folds: pipeFolds, models: [], pipeline: true, ensembleSkipped: pipeTune, selectByCV: pipeSelectCV };
         pHp.ensemble = { voting: 'soft', baseModels: ['nn', 'rf', 'glm'], capacity: 'balanced', seed: evalSeed };
         const cvByModel = {};
-        if (pipeTune || pipeSelectCV) {
+        const oofByModel = {};
+        const recalPipe = isClassification && numClasses === 2 ? readRecalibration('pipeline-recalibration-select') : 'none';
+        if (pipeTune || pipeSelectCV || recalPipe !== 'none') {
             const nTrainReal = AppState.pipeline.trainRows.length;
             if (pipeTune && nTrainReal < 100) {
                 pipeTuningReport.smallSampleWarning = `Only ${nTrainReal} training patients: each fold scores very few patients, so differences between settings are mostly chance. Tuning is unlikely to help much with a cohort this small; the protocol defaults are a sound choice.`;
@@ -1092,7 +1095,7 @@ async function executePipelineStep7() {
                 }
                 return foldCache[key];
             };
-            const plan = pipeSelectCV ? plannedModels.slice() : plannedModels.filter(id => id !== 'ensemble');
+            const plan = (pipeSelectCV || recalPipe !== 'none') ? plannedModels.slice() : plannedModels.filter(id => id !== 'ensemble');
             if (watchdog) watchdog.tick(1, `🎯 ${pipeTune ? 'Automatic tuning' : 'Cross-validation'} of ${plan.length} models on ${Math.min(nTrainReal, TUNE_MAX_ROWS).toLocaleString('en-GB')} training patients: this takes several times longer than training alone (the neural network is slowest). A time estimate appears once each model's first trial has run.`);
             await ModelEngine.yieldToBrowser();
             for (let t = 0; t < plan.length; t++) {
@@ -1111,6 +1114,7 @@ async function executePipelineStep7() {
                 pHp[id] = res.bestHp;
                 if (doTune) pipeTuningReport.models.push(res);
                 if (pipeSelectCV) cvByModel[id] = cvSummaryFrom(res);
+                if (res.best && res.best.oof) oofByModel[id] = res.best.oof;
             }
         }
         const tunedTag = id => (pipeTuningReport.models.some(m => m.modelId === id) ? ' Settings tuned by cross-validation within the Training set.' : '');
@@ -1197,6 +1201,19 @@ async function executePipelineStep7() {
         ensEval.constraintNote = `Equal-weight soft vote of ${ensembleConfig.baseModels.map(b => b.toUpperCase()).join(', ')}; scaling fitted on Train only.`;
         benchmarkList.push({ id: 'ensemble', name: 'Voting / Weighted Ensemble', model: ensemble, prep: fullPrep, eval: ensEval });
 
+        // Optional recalibration: calibrator fitted on each model's out-of-fold Training-set predictions
+        if (recalPipe !== 'none') {
+            for (const b of benchmarkList) {
+                const cal = fitRecalibrator(recalPipe, oofByModel[b.id]);
+                if (!cal) { b.eval.recalibrationSkipped = 'Recalibration was not applied: too few out-of-fold predictions or events to fit it reliably.'; continue; }
+                const td = DataEngine.prepareTestingDataset(AppState.pipeline.testRows, b.prep);
+                const rc = await recalibrateAndEvaluate(b.model, cal, td.X, td.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
+                ['featuresUsed', 'constraintNote', 'fallbackNote'].forEach(k => { if (b.eval[k] !== undefined) rc.evalRes[k] = b.eval[k]; });
+                rc.evalRes.constraintNote = (rc.evalRes.constraintNote || '') + ` Probabilities recalibrated (${cal.type === 'platt' ? 'Platt scaling' : 'isotonic regression'}) on out-of-fold Training-set predictions.`;
+                b.model = rc.model;
+                b.eval = rc.evalRes;
+            }
+        }
         // Cross-validated scores (model selection inside the Training set) when that mode is chosen
         benchmarkList.forEach(b => { if (cvByModel[b.id]) b.eval.cv = cvByModel[b.id]; });
         // Bootstrap 95% confidence intervals for every test metric

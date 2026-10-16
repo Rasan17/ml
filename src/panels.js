@@ -52,7 +52,12 @@ function calibrationBody(item, positiveLabel) {
     const intTxt = cal.intercept === null || cal.intercept === undefined ? 'not estimable'
         : `${cal.intercept.toFixed(2)} &mdash; ${cal.intercept > 0.1 ? 'on average the model <strong>under-predicts</strong> the risk' : cal.intercept < -0.1 ? 'on average the model <strong>over-predicts</strong> the risk' : 'on average the predicted risk is about right'}`;
     const small = cal.events < 100 || cal.n - cal.events < 100;
-    const probNote = ev.probabilityType && ev.probabilityType !== 'model' ? ' This model\'s "probabilities" are vote or neighbour shares, which are often poorly calibrated.' : '';
+    const rc = ev.recalibration;
+    const f2 = v => (typeof v === 'number' ? v.toFixed(2) : 'n/a');
+    const recalNote = rc
+        ? `<div class="explain-box" style="margin-top: 8px;"><strong>📐 Recalibrated</strong> with ${rc.method === 'platt' ? 'Platt scaling' : 'isotonic regression'} fitted on ${escapeHtml(rc.fittedOn)}. Before recalibration on these test patients: slope ${f2(rc.before.slope)}, intercept ${f2(rc.before.intercept)}, Brier ${typeof rc.before.brierScore === 'number' ? rc.before.brierScore.toFixed(3) : 'n/a'}${typeof rc.before.rocAuc === 'number' ? `, AUC ${rc.before.rocAuc.toFixed(3)}` : ''}. The values above are after recalibration.</div>`
+        : (ev.recalibrationSkipped ? `<div class="tune-muted" style="margin-top: 6px;">${escapeHtml(ev.recalibrationSkipped)}</div>` : '');
+    const probNote = ev.probabilityType && ev.probabilityType !== 'model' && ev.probabilityType !== 'recalibrated' ? ' This model\'s "probabilities" are vote or neighbour shares, which are often poorly calibrated.' : '';
     return `
         <div class="cal-grid">
             <div>${cal.bins && cal.bins.length ? calibrationSvg(cal) : '<p class="tune-muted">Too few test patients to draw a calibration plot (at least 10 are needed).</p>'}</div>
@@ -64,6 +69,7 @@ function calibrationBody(item, positiveLabel) {
                 <p class="tune-muted" style="margin-top: 6px;"><strong>How to read the plot:</strong> patients are grouped by their predicted probability. Each dot compares the average predicted probability in a group with the proportion who actually had "${escapeHtml(positiveLabel)}". Dots on the dashed diagonal mean that a predicted 30% really corresponds to about 30% of patients. Dots below the line mean the model over-estimates the risk; dots above it mean it under-estimates.</p>
             </div>
         </div>
+        ${recalNote}
         ${small ? `<div class="tune-warn">⚠️ Calibration needs many patients: with fewer than about 100 patients with and 100 without the outcome in the Testing set, these values are very imprecise.${probNote}</div>` : (probNote ? `<div class="tune-warn">⚠️${probNote}</div>` : '')}
         <div class="cal-thr">
             <div class="cmp-guide-title" style="font-size: 13px;">Sensitivity and specificity at different thresholds (Testing set)</div>
@@ -421,3 +427,50 @@ function renderExplainPanel(containerId, items, rows, isClassification) {
 }
 
 export { calibrationItems, calibrationSvg, thresholdTable, calibrationBody, CURVE_COLOURS, lineChartSvg, chartLegend, discriminationSection, decisionCurveSection, residualSection, renderCalibrationPanel, explainItems, referenceEncoding, typicalValueText, explainOutput, explainPatient, renderPatientExplanation, renderOddsRatioPanel, permutationImportance, renderExplainPanel };
+
+// =========================================================================
+// MINIMUM SAMPLE SIZE (Riley et al. criteria, as in pmsampsize) for the current outcome and predictors
+// =========================================================================
+function renderSampleSizePanel() {
+    const box = document.getElementById('sample-size-container');
+    if (!box) return;
+    if (!AppState.imputedData || !AppState.imputedData.imputedRows || !AppState.imputedData.imputedRows.length) { box.innerHTML = ''; return; }
+    let prep;
+    try { prep = DataEngine.prepareFeaturesAndTarget(AppState.imputedData.imputedRows, AppState.columnConfigs); } catch (e) { box.innerHTML = ''; return; }
+    if (!prep || !prep.X || !prep.X.length) { box.innerHTML = ''; return; }
+    const binary = prep.isClassification && (prep.targetClasses || []).length === 2;
+    if (prep.isClassification && !binary) {
+        box.innerHTML = `<div class="cal-panel"><div class="tune-title">📏 Is the sample large enough?</div><p class="tune-muted">Formal minimum sample-size criteria (Riley et al.) are available for two-outcome and numerical outcomes; for ${prep.targetClasses.length} outcome groups, aim for at least 10–20 patients in the smallest group per predictor parameter.</p></div>`;
+        return;
+    }
+    const p = prep.X[0].length;
+    const prev = binary ? prep.y.filter(v => v === 1).length / prep.y.length : null;
+    const r2Input = parseFloat(document.getElementById('sample-size-r2')?.value);
+    const res = ModelEngine.rileySampleSize({ type: binary ? 'binary' : 'continuous', p, prevalence: prev, r2: isFinite(r2Input) ? r2Input : null });
+    if (!res) { box.innerHTML = ''; return; }
+    const isOptionA = document.getElementById('val-mode-a') ? document.getElementById('val-mode-a').checked : true;
+    const pct = parseFloat(document.getElementById('train-pct-input')?.value) || 80;
+    const nTrain = isOptionA ? Math.round(prep.X.length * Math.min(0.95, Math.max(0.5, pct / 100))) : prep.X.length;
+    const enough = nTrain >= res.n;
+    const posLabel = binary ? escapeHtml(String(prep.targetClasses[1])) : '';
+    box.innerHTML = `
+        <div class="cal-panel">
+            <div class="cal-head">
+                <div class="tune-title">📏 Is the sample large enough? (minimum sample size, Riley et al.)</div>
+                <label class="autotune-folds-label" title="The R² you expect a model to achieve; leave blank for the conservative default">Anticipated ${binary ? 'Cox-Snell ' : ''}R²:
+                    <input type="number" id="sample-size-r2" class="control-input" style="width: 90px; display: inline-block;" min="0.01" max="0.99" step="0.01" placeholder="${res.r2.toFixed(3)}" value="${isFinite(r2Input) ? r2Input : ''}">
+                </label>
+            </div>
+            <div class="${enough ? 'explain-box' : 'tune-warn'}" style="margin-top: 6px;">
+                ${enough ? '✓' : '⚠️'} The Training set has <strong>${nTrain}</strong> patients${binary ? ` (about ${Math.round(nTrain * prev)} with "${posLabel}")` : ''}; the criteria below require at least <strong>${res.n}</strong>${binary ? ` (${res.events} with "${posLabel}")` : ''} for ${p} predictor parameter(s).
+                ${enough ? 'The sample meets these criteria.' : 'The sample is <strong>smaller than recommended</strong>: expect overfitting and unstable estimates; consider fewer predictors (or grouping categories), or more patients, and treat results as exploratory.'}
+            </div>
+            <table class="data-table thr-table"><thead><tr><th>Criterion</th><th>Patients needed</th></tr></thead>
+                <tbody>${res.criteria.map(c => `<tr><td>${escapeHtml(c.label)}</td><td>${c.n}</td></tr>`).join('')}</tbody></table>
+            <p class="tune-muted">Criteria of Riley et al. (BMJ 2020; Stat Med 2019), as in the pmsampsize package, with ${p} candidate parameter(s) (each category of a categorical predictor counts)${binary ? `, outcome prevalence ${(prev * 100).toFixed(1)}%` : ''} and an anticipated ${binary ? 'Cox-Snell ' : ''}R² of ${res.r2.toFixed(3)}${res.r2Assumed ? (binary ? ' (conservative default: 15% of the maximum possible; enter a value from previous studies if available)' : ' (default; enter a value from previous studies if available)') : ''}. These replace the older "10 events per variable" rule of thumb. Flexible models (random forests, neural networks) typically need considerably more.</p>
+        </div>`;
+    document.getElementById('sample-size-r2')?.addEventListener('change', renderSampleSizePanel);
+}
+
+export { renderSampleSizePanel };
+

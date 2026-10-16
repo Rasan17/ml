@@ -263,6 +263,9 @@
                         </div>
                     </div>
 
+                    <!-- Minimum sample size (Riley et al. criteria) -->
+                    <div id="sample-size-container"></div>
+
                     <!-- Model Testing Scope Selector (One Model, Multiple Models, All Models) -->
                     <div style="background: var(--bg-surface-elevated); padding: 14px 18px; border-radius: var(--radius-md); border: 1px solid var(--border-color); margin-bottom: 16px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
@@ -386,7 +389,7 @@
                                 <span class="pill pill-feature">Ensemble</span>
                             </div>
                             <div class="model-card-desc">
-                                Bootstrap decision trees with random feature subsets; Gini (classification) or variance-reduction (regression) splits over an approximate grid of ~10 candidate thresholds per feature. Impurity-based (MDI) importance ranks features but is not evidence of causal or clinical effect.
+                                Bootstrap decision trees with random feature subsets; Gini (classification) or variance-reduction (regression) splits searched exactly over every threshold (or, for 5,000+ patients, an approximate grid of ~10 thresholds per feature). Impurity-based (MDI) importance ranks features but is not evidence of causal or clinical effect.
                             </div>
                             <!-- Model Seed Control -->
                             <div class="model-seed-box" data-model="rf" onclick="event.stopPropagation()">
@@ -868,6 +871,14 @@
                                 </select>
                             </div>
                             <div class="param-group">
+                                <label for="rf-split-select">Split Search</label>
+                                <select id="rf-split-select" class="control-select">
+                                    <option value="auto" selected>Automatic (exact below 5,000 patients)</option>
+                                    <option value="exact">Exact (every threshold)</option>
+                                    <option value="approx">Approximate (~10 thresholds, faster)</option>
+                                </select>
+                            </div>
+                            <div class="param-group">
                                 <span class="group-label" id="group-label-hp-seed-mode-rf">Random Seed (Reproducibility)</span>
                                 <div role="radiogroup" aria-labelledby="group-label-hp-seed-mode-rf" style="display: flex; gap: 6px; align-items: center; margin-bottom: 4px;">
                                     <label class="seed-mode-pill" style="font-size: 10.5px; padding: 2px 7px;">
@@ -1094,6 +1105,16 @@
                                     <input type="number" id="decision-threshold" class="control-input" value="0.5" min="0.05" max="0.95" step="0.05" style="width: 80px; display: inline-block;">
                                 </label>
                                 <span class="autotune-hint" style="margin: 0;">A patient is classed as the positive outcome when its predicted probability is at or above this value. 0.5 is the usual default; use a lower value if missing a case is worse than a false alarm. Decide it on clinical grounds <strong>before</strong> looking at the results; do not adjust it to improve the Testing-set score.</span>
+                            </div>
+                            <div class="threshold-row">
+                                <label for="recalibration-select" class="autotune-folds-label">📐 Recalibrate two-outcome probabilities:
+                                    <select id="recalibration-select" class="control-select" style="width: auto; display: inline-block;">
+                                        <option value="none" selected>No (use the model's own probabilities)</option>
+                                        <option value="platt">Platt scaling (logistic; good for small samples)</option>
+                                        <option value="isotonic">Isotonic regression (flexible; needs more patients)</option>
+                                    </select>
+                                </label>
+                                <span class="autotune-hint" style="margin: 0;">Adjusts the predicted percentages so they better match observed risks, using cross-validation predictions from the Training set only (the Testing set is never used). The calibration panel then shows the results before and after. It does not change how well the model ranks patients (AUC) for Platt scaling.</span>
                             </div>
                             <div class="autotune-row" style="margin-top: 10px;">
                                 <label class="autotune-label">
@@ -1706,6 +1727,16 @@
                                 </label>
                                 <span class="autotune-hint" style="margin: 0;">Probability of the positive outcome at or above which a patient is classed as positive (default 0.5). Choose it on clinical grounds before seeing the results; never tune it on the Testing set.</span>
                             </div>
+                            <div class="threshold-row">
+                                <label for="pipeline-recalibration-select" class="autotune-folds-label">📐 Recalibrate two-outcome probabilities:
+                                    <select id="pipeline-recalibration-select" class="form-select" style="width: auto; display: inline-block;">
+                                        <option value="none" selected>No (use the model's own probabilities)</option>
+                                        <option value="platt">Platt scaling (logistic; good for small samples)</option>
+                                        <option value="isotonic">Isotonic regression (flexible; needs more patients)</option>
+                                    </select>
+                                </label>
+                                <span class="autotune-hint" style="margin: 0;">Adjusts the predicted percentages so they better match observed risks, using cross-validation predictions from the Training set only (the Testing set is never used). The calibration panel then shows the results before and after. It does not change how well the model ranks patients (AUC) for Platt scaling.</span>
+                            </div>
                             <div class="autotune-row" style="margin-top: 10px;">
                                 <label class="autotune-label">
                                     <input type="checkbox" id="pipeline-autotune-check">
@@ -1843,7 +1874,7 @@
     <script src="models.js?v=34"></script>
     <!-- Application controller: ES modules (src/); when opened directly from disk (file://), where browsers
          block modules, the generated single-file bundle is used instead (node tools/build.js). -->
-    <script type="module" src="src/main.js?v=59"></script>
+    <script type="module" src="src/main.js?v=60"></script>
     <script>if (location.protocol === 'file:') document.write('<script src="dist/app.bundle.js"><\/script>');</script>
 </body>
 </html>
