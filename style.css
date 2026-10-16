@@ -1911,3 +1911,7 @@ body.comparison-running { overflow: hidden; }
 /* Subgroup (fairness) panel */
 .subgroup-flag td { background: rgba(245, 158, 11, 0.12); }
 .subgroup-small td { color: var(--text-muted); }
+
+/* Hover read-out points on the SVG charts */
+.chart-hover { cursor: crosshair; }
+.chart-hover:hover { fill: currentColor; fill-opacity: 0.35; }

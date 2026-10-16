@@ -11,20 +11,20 @@ import { plus632 } from './validation-core.js';
 const calibrationItems = {};
 
 function calibrationSvg(cal) {
-    const W = 240, P = 30, S = W - 2 * P;
-    const x = v => P + v * S, y = v => W - P - v * S;
-    const pts = (cal.bins || []).map(b => ({ cx: x(b.meanPred), cy: y(b.observed), r: Math.max(3, Math.min(9, 2 + Math.sqrt(b.n))) }));
+    const W = 240, P = 30, PL = 40, S = W - P - PL; // wider left margin: the axis title clears the tick labels
+    const x = v => PL + v * S, y = v => W - P - v * S;
+    const pts = (cal.bins || []).map(b => ({ cx: x(b.meanPred), cy: y(b.observed), r: Math.max(3, Math.min(9, 2 + Math.sqrt(b.n))), tip: `${b.n} patients: mean predicted ${(b.meanPred * 100).toFixed(1)}%, observed ${(b.observed * 100).toFixed(1)}%` }));
     const path = pts.map((q, i) => `${i ? 'L' : 'M'}${q.cx.toFixed(1)},${q.cy.toFixed(1)}`).join(' ');
     const ticks = [0, 0.25, 0.5, 0.75, 1];
     return `<svg viewBox="0 0 ${W} ${W}" width="100%" style="max-width: 260px;" role="img" aria-label="Calibration plot: observed against predicted probability">
-        <rect x="${P}" y="${P}" width="${S}" height="${S}" fill="none" stroke="var(--border-color)"/>
+        <rect x="${PL}" y="${W - P - S}" width="${S}" height="${S}" fill="none" stroke="var(--border-color)"/>
         ${ticks.map(t => `<line x1="${x(t)}" y1="${y(0)}" x2="${x(t)}" y2="${y(0) + 4}" stroke="var(--text-muted)"/><text x="${x(t)}" y="${y(0) + 14}" font-size="9" text-anchor="middle" fill="var(--text-muted)">${t}</text>
             <line x1="${x(0) - 4}" y1="${y(t)}" x2="${x(0)}" y2="${y(t)}" stroke="var(--text-muted)"/><text x="${x(0) - 6}" y="${y(t) + 3}" font-size="9" text-anchor="end" fill="var(--text-muted)">${t}</text>`).join('')}
         <line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}" stroke="var(--text-muted)" stroke-dasharray="4 4"/>
         ${path ? `<path d="${path}" fill="none" stroke="var(--accent-cyan)" stroke-width="2"/>` : ''}
-        ${pts.map(q => `<circle cx="${q.cx.toFixed(1)}" cy="${q.cy.toFixed(1)}" r="${q.r.toFixed(1)}" fill="var(--accent-cyan)" fill-opacity="0.75"/>`).join('')}
-        <text x="${W / 2}" y="${W - 4}" font-size="10" text-anchor="middle" fill="var(--text-secondary)">Predicted probability</text>
-        <text x="10" y="${W / 2}" font-size="10" text-anchor="middle" fill="var(--text-secondary)" transform="rotate(-90 10 ${W / 2})">Observed proportion</text>
+        ${pts.map(q => `<circle cx="${q.cx.toFixed(1)}" cy="${q.cy.toFixed(1)}" r="${q.r.toFixed(1)}" fill="var(--accent-cyan)" fill-opacity="0.75"><title>${escapeHtml(q.tip)}</title></circle>`).join('')}
+        <text x="${PL + S / 2}" y="${W - 4}" font-size="10" text-anchor="middle" fill="var(--text-secondary)">Predicted probability</text>
+        <text x="10" y="${W - P - S / 2}" font-size="10" text-anchor="middle" fill="var(--text-secondary)" transform="rotate(-90 10 ${W - P - S / 2})">Observed proportion</text>
     </svg>`;
 }
 
@@ -99,9 +99,13 @@ function lineChartSvg({ series, xLabel, yLabel, xMin = 0, xMax = 1, yMin = 0, yM
         ${diagonal ? `<line x1="${sx(xMin)}" y1="${sy(yMin)}" x2="${sx(xMax)}" y2="${sy(yMax)}" stroke="var(--text-muted)" stroke-dasharray="4 4"/>` : ''}
         ${series.map(se => {
             const pts = se.points.filter(p => isFinite(p.x) && isFinite(p.y));
-            if (se.scatter) return pts.map(p => `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(Math.max(yMin, Math.min(yMax, p.y))).toFixed(1)}" r="2.2" fill="${se.colour}" fill-opacity="0.6"/>`).join('');
+            // Hover read-out: each point's values (named after the axes), on up to 150 points per line
+            const tip = p => `${se.name ? `${se.name}: ` : ''}${xLabel} ${fmt(p.x)}, ${yLabel} ${fmt(p.y)}`;
+            if (se.scatter) return pts.map(p => `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(Math.max(yMin, Math.min(yMax, p.y))).toFixed(1)}" r="2.2" fill="${se.colour}" fill-opacity="0.6"><title>${escapeHtml(tip(p))}</title></circle>`).join('');
             const d = pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(Math.max(yMin, Math.min(yMax, p.y))).toFixed(1)}`).join(' ');
-            return `<path d="${d}" fill="none" stroke="${se.colour}" stroke-width="${se.width || 1.8}" ${se.dashed ? 'stroke-dasharray="5 4"' : ''}/>`;
+            const step = Math.max(1, Math.ceil(pts.length / 150));
+            const hover = se.noHover ? '' : pts.filter((_, i) => i % step === 0 || i === pts.length - 1).map(p => `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(Math.max(yMin, Math.min(yMax, p.y))).toFixed(1)}" r="4" fill="transparent" class="chart-hover"><title>${escapeHtml(tip(p))}</title></circle>`).join('');
+            return `<path d="${d}" fill="none" stroke="${se.colour}" stroke-width="${se.width || 1.8}" ${se.dashed ? 'stroke-dasharray="5 4"' : ''}/>${hover}`;
         }).join('')}
         <text x="${(L + W - R) / 2}" y="${H - 4}" font-size="10" text-anchor="middle" fill="var(--text-secondary)">${escapeHtml(xLabel)}</text>
         <text x="11" y="${(T + H - B) / 2}" font-size="10" text-anchor="middle" fill="var(--text-secondary)" transform="rotate(-90 11 ${(T + H - B) / 2})">${escapeHtml(yLabel)}</text>
@@ -132,7 +136,7 @@ function discriminationSection(items, positiveLabel) {
         <div class="cmp-guide-title" style="font-size: 13px;">Discrimination: how well each model separates patients with and without "${escapeHtml(positiveLabel)}" (Testing set)</div>
         <div class="cal-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
             <div>${lineChartSvg({ series: roc, xLabel: '1 − specificity (false-positive rate)', yLabel: 'Sensitivity', diagonal: true, aria: 'ROC curves' })}</div>
-            <div>${lineChartSvg({ series: [...prs, { name: 'prevalence', colour: 'var(--text-muted)', dashed: true, width: 1, points: [{ x: 0, y: prev }, { x: 1, y: prev }] }], xLabel: 'Recall (sensitivity)', yLabel: 'Precision (PPV)', aria: 'Precision-recall curves' })}</div>
+            <div>${lineChartSvg({ series: [...prs, { name: 'Prevalence (no skill)', colour: 'var(--text-muted)', dashed: true, width: 1, points: [{ x: 0, y: prev }, { x: 1, y: prev }] }], xLabel: 'Recall (sensitivity)', yLabel: 'Precision (PPV)', aria: 'Precision-recall curves' })}</div>
         </div>
         <table class="data-table thr-table"><thead><tr><th>Model</th><th>ROC-AUC (95% CI)</th><th>Average precision</th><th>AUC difference vs top model: DeLong p</th></tr></thead><tbody>${rows}</tbody></table>
         <p class="tune-muted"><strong>ROC curve</strong>: the closer to the top-left corner, the better (the diagonal is chance). <strong>Precision-recall curve</strong>: more informative when the outcome is uncommon; the dashed line is the prevalence (${(prev * 100).toFixed(0)}%), which is what a useless model would achieve. The <strong>DeLong test</strong> asks whether a model's AUC differs from the top-ranked model's on these same patients; p ≥ 0.05 means the difference could easily be chance (✱ marks p &lt; 0.05). With small test sets most differences are not significant.</p>`;
@@ -153,9 +157,9 @@ function decisionCurveSection(ev, positiveLabel) {
             <div class="cmp-guide-title" style="font-size: 13px;">Decision curve: is using the model better than treating everyone or no one? (Testing set)</div>
             <div class="cal-grid">
                 <div>${lineChartSvg({ series: [
-                    { name: 'model', colour: 'var(--accent-cyan)', points: dc.map(d => ({ x: d.threshold, y: d.model })) },
-                    { name: 'all', colour: 'var(--accent-amber)', dashed: true, points: dc.map(d => ({ x: d.threshold, y: d.treatAll })) },
-                    { name: 'none', colour: 'var(--text-muted)', width: 1, points: dc.map(d => ({ x: d.threshold, y: 0 })) }
+                    { name: 'Model', colour: 'var(--accent-cyan)', points: dc.map(d => ({ x: d.threshold, y: d.model })) },
+                    { name: 'Treat all', colour: 'var(--accent-amber)', dashed: true, points: dc.map(d => ({ x: d.threshold, y: d.treatAll })) },
+                    { name: 'Treat none', colour: 'var(--text-muted)', width: 1, noHover: true, points: dc.map(d => ({ x: d.threshold, y: 0 })) }
                 ], xLabel: 'Threshold probability', yLabel: 'Net benefit', xMin: 0, xMax: 1, yMin, yMax, aria: 'Decision curve' })}
                 ${chartLegend([{ colour: 'var(--accent-cyan)', label: 'Using the model' }, { colour: 'var(--accent-amber)', label: 'Treat / investigate all', dashed: true }, { colour: 'var(--text-muted)', label: 'Treat none' }])}</div>
                 <p class="tune-muted"><strong>How to read it:</strong> the threshold probability is the risk at which you would act (e.g. operate or investigate), reflecting how you weigh a missed case against an unnecessary intervention. <strong>Net benefit</strong> counts true positives minus false positives weighted by that trade-off. Where the model's line is above both "treat all" and "treat none", using the model would lead to better decisions on these patients${range ? ` (here, for thresholds of about <strong>${range}</strong>)` : ' (here: at no threshold)'}. With few test patients the curve is noisy.</p>
@@ -173,7 +177,7 @@ function residualSection(ev, targetName) {
     const ci = k => (ev.ci && ev.ci[k] ? ` (95% CI ${ev.ci[k][0].toFixed(3)}–${ev.ci[k][1].toFixed(3)})` : '');
     return `
         <div class="cal-grid">
-            <div>${lineChartSvg({ series: [{ name: 'res', colour: 'var(--accent-cyan)', scatter: true, points: pts }], xLabel: `Predicted ${targetName}`, yLabel: 'Residual (actual − predicted)', xMin, xMax: xMax === xMin ? xMin + 1 : xMax, yMin: -lim * 1.05, yMax: lim * 1.05, aria: 'Residuals against fitted values' })}</div>
+            <div>${lineChartSvg({ series: [{ name: '', colour: 'var(--accent-cyan)', scatter: true, points: pts }], xLabel: `Predicted ${targetName}`, yLabel: 'Residual (actual − predicted)', xMin, xMax: xMax === xMin ? xMin + 1 : xMax, yMin: -lim * 1.05, yMax: lim * 1.05, aria: 'Residuals against fitted values' })}</div>
             <div class="cal-stats">
                 <div><strong>R²</strong>: ${typeof ev.r2 === 'number' ? ev.r2.toFixed(3) : 'N/A'}${ci('r2')}</div>
                 <div><strong>RMSE</strong>: ${typeof ev.rmse === 'number' ? ev.rmse.toFixed(3) : 'N/A'}${ci('rmse')}</div>

@@ -80,6 +80,12 @@ test('settings and trained model can be saved and loaded again', async ({ page }
     const [settingsDl] = await Promise.all([page.waitForEvent('download'), page.click('#settings-save-btn')]);
     const settings = JSON.parse(fs.readFileSync(await settingsDl.path(), 'utf8'));
     expect(settings.schema).toBe(1);
+    // printable HTML report with methods, results and plots
+    const [reportDl] = await Promise.all([page.waitForEvent('download'), page.click('#standard-html-report-btn')]);
+    const report = fs.readFileSync(await reportDl.path(), 'utf8');
+    expect(report).toContain('Prediction model report');
+    expect(report).toContain('Not a certified medical device');
+    expect(report).toContain('<svg');
     // trained model file, re-imported into a fresh page
     const [modelDl] = await Promise.all([page.waitForEvent('download'), page.click('#model-export-btn')]);
     const modelPath = await modelDl.path();

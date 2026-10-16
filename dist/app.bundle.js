@@ -3091,20 +3091,20 @@ function getHyperparamsForModel(modelId, prep) {
 const calibrationItems = {};
 
 function calibrationSvg(cal) {
-    const W = 240, P = 30, S = W - 2 * P;
-    const x = v => P + v * S, y = v => W - P - v * S;
-    const pts = (cal.bins || []).map(b => ({ cx: x(b.meanPred), cy: y(b.observed), r: Math.max(3, Math.min(9, 2 + Math.sqrt(b.n))) }));
+    const W = 240, P = 30, PL = 40, S = W - P - PL; // wider left margin: the axis title clears the tick labels
+    const x = v => PL + v * S, y = v => W - P - v * S;
+    const pts = (cal.bins || []).map(b => ({ cx: x(b.meanPred), cy: y(b.observed), r: Math.max(3, Math.min(9, 2 + Math.sqrt(b.n))), tip: `${b.n} patients: mean predicted ${(b.meanPred * 100).toFixed(1)}%, observed ${(b.observed * 100).toFixed(1)}%` }));
     const path = pts.map((q, i) => `${i ? 'L' : 'M'}${q.cx.toFixed(1)},${q.cy.toFixed(1)}`).join(' ');
     const ticks = [0, 0.25, 0.5, 0.75, 1];
     return `<svg viewBox="0 0 ${W} ${W}" width="100%" style="max-width: 260px;" role="img" aria-label="Calibration plot: observed against predicted probability">
-        <rect x="${P}" y="${P}" width="${S}" height="${S}" fill="none" stroke="var(--border-color)"/>
+        <rect x="${PL}" y="${W - P - S}" width="${S}" height="${S}" fill="none" stroke="var(--border-color)"/>
         ${ticks.map(t => `<line x1="${x(t)}" y1="${y(0)}" x2="${x(t)}" y2="${y(0) + 4}" stroke="var(--text-muted)"/><text x="${x(t)}" y="${y(0) + 14}" font-size="9" text-anchor="middle" fill="var(--text-muted)">${t}</text>
             <line x1="${x(0) - 4}" y1="${y(t)}" x2="${x(0)}" y2="${y(t)}" stroke="var(--text-muted)"/><text x="${x(0) - 6}" y="${y(t) + 3}" font-size="9" text-anchor="end" fill="var(--text-muted)">${t}</text>`).join('')}
         <line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}" stroke="var(--text-muted)" stroke-dasharray="4 4"/>
         ${path ? `<path d="${path}" fill="none" stroke="var(--accent-cyan)" stroke-width="2"/>` : ''}
-        ${pts.map(q => `<circle cx="${q.cx.toFixed(1)}" cy="${q.cy.toFixed(1)}" r="${q.r.toFixed(1)}" fill="var(--accent-cyan)" fill-opacity="0.75"/>`).join('')}
-        <text x="${W / 2}" y="${W - 4}" font-size="10" text-anchor="middle" fill="var(--text-secondary)">Predicted probability</text>
-        <text x="10" y="${W / 2}" font-size="10" text-anchor="middle" fill="var(--text-secondary)" transform="rotate(-90 10 ${W / 2})">Observed proportion</text>
+        ${pts.map(q => `<circle cx="${q.cx.toFixed(1)}" cy="${q.cy.toFixed(1)}" r="${q.r.toFixed(1)}" fill="var(--accent-cyan)" fill-opacity="0.75"><title>${escapeHtml(q.tip)}</title></circle>`).join('')}
+        <text x="${PL + S / 2}" y="${W - 4}" font-size="10" text-anchor="middle" fill="var(--text-secondary)">Predicted probability</text>
+        <text x="10" y="${W - P - S / 2}" font-size="10" text-anchor="middle" fill="var(--text-secondary)" transform="rotate(-90 10 ${W - P - S / 2})">Observed proportion</text>
     </svg>`;
 }
 
@@ -3179,9 +3179,13 @@ function lineChartSvg({ series, xLabel, yLabel, xMin = 0, xMax = 1, yMin = 0, yM
         ${diagonal ? `<line x1="${sx(xMin)}" y1="${sy(yMin)}" x2="${sx(xMax)}" y2="${sy(yMax)}" stroke="var(--text-muted)" stroke-dasharray="4 4"/>` : ''}
         ${series.map(se => {
             const pts = se.points.filter(p => isFinite(p.x) && isFinite(p.y));
-            if (se.scatter) return pts.map(p => `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(Math.max(yMin, Math.min(yMax, p.y))).toFixed(1)}" r="2.2" fill="${se.colour}" fill-opacity="0.6"/>`).join('');
+            // Hover read-out: each point's values (named after the axes), on up to 150 points per line
+            const tip = p => `${se.name ? `${se.name}: ` : ''}${xLabel} ${fmt(p.x)}, ${yLabel} ${fmt(p.y)}`;
+            if (se.scatter) return pts.map(p => `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(Math.max(yMin, Math.min(yMax, p.y))).toFixed(1)}" r="2.2" fill="${se.colour}" fill-opacity="0.6"><title>${escapeHtml(tip(p))}</title></circle>`).join('');
             const d = pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(Math.max(yMin, Math.min(yMax, p.y))).toFixed(1)}`).join(' ');
-            return `<path d="${d}" fill="none" stroke="${se.colour}" stroke-width="${se.width || 1.8}" ${se.dashed ? 'stroke-dasharray="5 4"' : ''}/>`;
+            const step = Math.max(1, Math.ceil(pts.length / 150));
+            const hover = se.noHover ? '' : pts.filter((_, i) => i % step === 0 || i === pts.length - 1).map(p => `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(Math.max(yMin, Math.min(yMax, p.y))).toFixed(1)}" r="4" fill="transparent" class="chart-hover"><title>${escapeHtml(tip(p))}</title></circle>`).join('');
+            return `<path d="${d}" fill="none" stroke="${se.colour}" stroke-width="${se.width || 1.8}" ${se.dashed ? 'stroke-dasharray="5 4"' : ''}/>${hover}`;
         }).join('')}
         <text x="${(L + W - R) / 2}" y="${H - 4}" font-size="10" text-anchor="middle" fill="var(--text-secondary)">${escapeHtml(xLabel)}</text>
         <text x="11" y="${(T + H - B) / 2}" font-size="10" text-anchor="middle" fill="var(--text-secondary)" transform="rotate(-90 11 ${(T + H - B) / 2})">${escapeHtml(yLabel)}</text>
@@ -3212,7 +3216,7 @@ function discriminationSection(items, positiveLabel) {
         <div class="cmp-guide-title" style="font-size: 13px;">Discrimination: how well each model separates patients with and without "${escapeHtml(positiveLabel)}" (Testing set)</div>
         <div class="cal-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
             <div>${lineChartSvg({ series: roc, xLabel: '1 − specificity (false-positive rate)', yLabel: 'Sensitivity', diagonal: true, aria: 'ROC curves' })}</div>
-            <div>${lineChartSvg({ series: [...prs, { name: 'prevalence', colour: 'var(--text-muted)', dashed: true, width: 1, points: [{ x: 0, y: prev }, { x: 1, y: prev }] }], xLabel: 'Recall (sensitivity)', yLabel: 'Precision (PPV)', aria: 'Precision-recall curves' })}</div>
+            <div>${lineChartSvg({ series: [...prs, { name: 'Prevalence (no skill)', colour: 'var(--text-muted)', dashed: true, width: 1, points: [{ x: 0, y: prev }, { x: 1, y: prev }] }], xLabel: 'Recall (sensitivity)', yLabel: 'Precision (PPV)', aria: 'Precision-recall curves' })}</div>
         </div>
         <table class="data-table thr-table"><thead><tr><th>Model</th><th>ROC-AUC (95% CI)</th><th>Average precision</th><th>AUC difference vs top model: DeLong p</th></tr></thead><tbody>${rows}</tbody></table>
         <p class="tune-muted"><strong>ROC curve</strong>: the closer to the top-left corner, the better (the diagonal is chance). <strong>Precision-recall curve</strong>: more informative when the outcome is uncommon; the dashed line is the prevalence (${(prev * 100).toFixed(0)}%), which is what a useless model would achieve. The <strong>DeLong test</strong> asks whether a model's AUC differs from the top-ranked model's on these same patients; p ≥ 0.05 means the difference could easily be chance (✱ marks p &lt; 0.05). With small test sets most differences are not significant.</p>`;
@@ -3233,9 +3237,9 @@ function decisionCurveSection(ev, positiveLabel) {
             <div class="cmp-guide-title" style="font-size: 13px;">Decision curve: is using the model better than treating everyone or no one? (Testing set)</div>
             <div class="cal-grid">
                 <div>${lineChartSvg({ series: [
-                    { name: 'model', colour: 'var(--accent-cyan)', points: dc.map(d => ({ x: d.threshold, y: d.model })) },
-                    { name: 'all', colour: 'var(--accent-amber)', dashed: true, points: dc.map(d => ({ x: d.threshold, y: d.treatAll })) },
-                    { name: 'none', colour: 'var(--text-muted)', width: 1, points: dc.map(d => ({ x: d.threshold, y: 0 })) }
+                    { name: 'Model', colour: 'var(--accent-cyan)', points: dc.map(d => ({ x: d.threshold, y: d.model })) },
+                    { name: 'Treat all', colour: 'var(--accent-amber)', dashed: true, points: dc.map(d => ({ x: d.threshold, y: d.treatAll })) },
+                    { name: 'Treat none', colour: 'var(--text-muted)', width: 1, noHover: true, points: dc.map(d => ({ x: d.threshold, y: 0 })) }
                 ], xLabel: 'Threshold probability', yLabel: 'Net benefit', xMin: 0, xMax: 1, yMin, yMax, aria: 'Decision curve' })}
                 ${chartLegend([{ colour: 'var(--accent-cyan)', label: 'Using the model' }, { colour: 'var(--accent-amber)', label: 'Treat / investigate all', dashed: true }, { colour: 'var(--text-muted)', label: 'Treat none' }])}</div>
                 <p class="tune-muted"><strong>How to read it:</strong> the threshold probability is the risk at which you would act (e.g. operate or investigate), reflecting how you weigh a missed case against an unnecessary intervention. <strong>Net benefit</strong> counts true positives minus false positives weighted by that trade-off. Where the model's line is above both "treat all" and "treat none", using the model would lead to better decisions on these patients${range ? ` (here, for thresholds of about <strong>${range}</strong>)` : ' (here: at no threshold)'}. With few test patients the curve is noisy.</p>
@@ -3253,7 +3257,7 @@ function residualSection(ev, targetName) {
     const ci = k => (ev.ci && ev.ci[k] ? ` (95% CI ${ev.ci[k][0].toFixed(3)}–${ev.ci[k][1].toFixed(3)})` : '');
     return `
         <div class="cal-grid">
-            <div>${lineChartSvg({ series: [{ name: 'res', colour: 'var(--accent-cyan)', scatter: true, points: pts }], xLabel: `Predicted ${targetName}`, yLabel: 'Residual (actual − predicted)', xMin, xMax: xMax === xMin ? xMin + 1 : xMax, yMin: -lim * 1.05, yMax: lim * 1.05, aria: 'Residuals against fitted values' })}</div>
+            <div>${lineChartSvg({ series: [{ name: '', colour: 'var(--accent-cyan)', scatter: true, points: pts }], xLabel: `Predicted ${targetName}`, yLabel: 'Residual (actual − predicted)', xMin, xMax: xMax === xMin ? xMin + 1 : xMax, yMin: -lim * 1.05, yMax: lim * 1.05, aria: 'Residuals against fitted values' })}</div>
             <div class="cal-stats">
                 <div><strong>R²</strong>: ${typeof ev.r2 === 'number' ? ev.r2.toFixed(3) : 'N/A'}${ci('r2')}</div>
                 <div><strong>RMSE</strong>: ${typeof ev.rmse === 'number' ? ev.rmse.toFixed(3) : 'N/A'}${ci('rmse')}</div>
@@ -8812,7 +8816,7 @@ function renderSurvivalResults() {
             <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pctTxt(r.meanPred)} vs observed ${pctTxt(r.obsAll)}${r.obsAllCI ? ` <span class="tune-sd">(95% CI ${pctTxt(r.obsAllCI[0])}–${pctTxt(r.obsAllCI[1])})</span>` : ''} (Kaplan-Meier).</div>
             <div class="tune-muted">The time-dependent AUC and Brier score weight each patient for censoring (inverse probability of censoring weights, with the censoring pattern estimated from the training patients), so patients lost to follow-up before ${escapeHtml(String(r.horizon))} do not bias them.</div></div>
             <div class="cal-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
-                <div>${lineChartSvg({ series: [{ name: 'cal', colour: 'var(--accent-cyan)', points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }, { name: 'calpts', colour: 'var(--accent-cyan)', scatter: true, points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }],
+                <div>${lineChartSvg({ series: [{ name: 'Risk group', colour: 'var(--accent-cyan)', noHover: true, points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }, { name: 'Risk group', colour: 'var(--accent-cyan)', scatter: true, points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }],
                     xLabel: `Predicted risk by ${r.horizon}`, yLabel: 'Observed risk (Kaplan-Meier)', xMax: calMax, yMax: calMax, diagonal: true, aria: 'Survival calibration at the horizon' })}
                     <p class="tune-muted">Calibration at ${escapeHtml(String(r.horizon))}: test patients are grouped by predicted risk; each point compares the group's average predicted risk with its Kaplan-Meier observed risk. Points near the diagonal mean the predicted risks can be taken at face value.</p>
                     <table class="data-table thr-table"><thead><tr><th>Risk group</th><th>Patients</th><th>Mean predicted</th><th>Observed (95% CI)</th></tr></thead><tbody>${r.calib.map((c, i) => `<tr><td>${i + 1} of ${r.calib.length}</td><td>${c.n}</td><td>${pctTxt(c.predicted)}</td><td>${pctTxt(c.observed)}${c.observedCI ? ` <span class="tune-sd">(${pctTxt(c.observedCI[0])}–${pctTxt(c.observedCI[1])})</span>` : ''}</td></tr>`).join('')}</tbody></table>
@@ -9007,6 +9011,133 @@ ${items.map(([t, w, v, st]) => `<tr><td><strong>${esc(t)}</strong></td><td>${esc
     a.download = `TRIPOD-AI_checklist_${source}_${new Date().toISOString().slice(0, 10)}.html`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
+}
+
+// ---- src/html-report.js ----
+// html-report.js: a readable, printable analysis report (HTML; "Print → Save as PDF" in the browser gives a
+// PDF) with the methods, the results of every model with confidence intervals, and the key plots
+// (ROC and precision-recall curves, calibration, decision curve, confusion matrix), generated from the
+// analysis actually run. Complements the JSON reports, which hold the full machine-readable detail.
+
+
+
+const REPORT_CSS = `
+:root { --bg: #fff; --text-primary: #0f172a; --text-secondary: #334155; --text-muted: #64748b; --border-color: #cbd5e1;
+  --accent-cyan: #0e7490; --accent-emerald: #047857; --accent-amber: #b45309; --accent-rose: #be123c; --accent-purple: #7e22ce;
+  --bg-surface-subtle: #f8fafc; }
+body { font: 13.5px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text-primary); background: #fff; max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+h1 { font-size: 21px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 26px 0 8px; border-bottom: 2px solid var(--border-color); padding-bottom: 4px; }
+.notice { border: 2px solid var(--accent-amber); padding: 8px 12px; font-weight: 600; margin: 12px 0; }
+.meta { color: var(--text-secondary); font-size: 12.5px; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; margin: 6px 0 10px; }
+th, td { border: 1px solid var(--border-color); padding: 5px 7px; text-align: left; vertical-align: top; }
+th { background: #f1f5f9; }
+.ci { color: var(--text-muted); font-size: 11px; display: block; }
+.tune-muted, .tune-sd { color: var(--text-muted); font-size: 12px; }
+.cmp-guide-title, .tune-title { font-weight: 700; margin: 12px 0 6px; }
+.cal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; align-items: start; }
+.cal-stats > div { margin: 3px 0; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11.5px; }
+.chart-legend i, .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.explain-box, .cal-panel, .tune-model { border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px; margin: 8px 0; background: var(--bg-surface-subtle); }
+.tune-model-head { display: flex; justify-content: space-between; }
+.tune-warn { color: var(--accent-amber); font-weight: 600; }
+svg text { font-family: inherit; }
+@media print { body { margin: 0; max-width: none; } h2 { break-after: avoid; } table, svg, .cal-panel, .tune-model { break-inside: avoid; } }
+`;
+
+const pct = v => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—');
+const n3 = v => (typeof v === 'number' ? v.toFixed(3) : '—');
+const ciTxt = (ev, k, f) => (ev && ev.ci && ev.ci[k] ? `<span class="ci">95% CI ${f(ev.ci[k][0])}–${f(ev.ci[k][1])}</span>` : '');
+
+function reportItems(source) {
+    if (source === 'pipeline') {
+        return (AppState.pipeline.benchmarkResults || []).map(b => ({ name: b.name, ev: b.eval, hp: null, note: b.eval && b.eval.constraintNote }));
+    }
+    return (AppState.allTestedResults || []).map(r => ({ name: (MODEL_INFO[r.modelId] || { name: r.modelId }).name, ev: r.evalRes, hp: r.hyperparams, result: r }));
+}
+
+function resultsTable(items, isClassification, optionC) {
+    if (isClassification) {
+        return `<table><thead><tr><th>Model</th>${items.some(it => it.ev.cv) ? '<th>Cross-validated score (selection)</th>' : ''}<th>${optionC ? 'Corrected accuracy' : 'Accuracy'}</th><th>ROC-AUC</th><th>Brier ↓</th><th>Balanced accuracy</th><th>Macro F1</th><th>Calibration slope</th></tr></thead><tbody>
+            ${items.map(it => { const ev = it.ev; const cv = ev.cv; return `<tr><td><strong>${escapeHtml(it.name)}</strong></td>${items.some(x => x.ev.cv) ? `<td>${cv && typeof cv[cv.metricKey] === 'number' ? (['brierScore', 'rocAuc'].includes(cv.metricKey) ? n3(cv[cv.metricKey]) : pct(cv[cv.metricKey])) : '—'}</td>` : ''}
+                <td>${pct(ev.accuracy)}${ciTxt(ev, 'accuracy', pct)}</td><td>${n3(ev.rocAuc)}${ciTxt(ev, 'rocAuc', n3)}</td><td>${n3(ev.brierScore)}${ciTxt(ev, 'brierScore', n3)}</td>
+                <td>${pct(ev.balancedAccuracy)}${ciTxt(ev, 'balancedAccuracy', pct)}</td><td>${pct(ev.macroF1)}${ciTxt(ev, 'macroF1', pct)}</td>
+                <td>${ev.calibration && typeof ev.calibration.slope === 'number' ? n3(ev.calibration.slope) : (ev.optimismCorrection && typeof ev.optimismCorrection.calibrationSlope === 'number' ? `${n3(ev.optimismCorrection.calibrationSlope)} (corrected)` : '—')}</td></tr>`; }).join('')}
+        </tbody></table>`;
+    }
+    return `<table><thead><tr><th>Model</th><th>R²</th><th>RMSE ↓</th><th>MAE ↓</th></tr></thead><tbody>
+        ${items.map(it => `<tr><td><strong>${escapeHtml(it.name)}</strong></td><td>${n3(it.ev.r2)}${ciTxt(it.ev, 'r2', n3)}</td><td>${n3(it.ev.rmse)}${ciTxt(it.ev, 'rmse', n3)}</td><td>${n3(it.ev.mae)}${ciTxt(it.ev, 'mae', n3)}</td></tr>`).join('')}
+    </tbody></table>`;
+}
+
+function confusionTable(ev, classNames) {
+    if (!ev || !Array.isArray(ev.confMatrix)) return '';
+    const names = classNames.length === ev.confMatrix.length ? classNames : ev.confMatrix.map((_, i) => String(i));
+    return `<table style="width: auto;"><thead><tr><th>Actual ↓ / Predicted →</th>${names.map(n => `<th>${escapeHtml(n)}</th>`).join('')}</tr></thead><tbody>
+        ${ev.confMatrix.map((row, i) => `<tr><th>${escapeHtml(names[i])}</th>${row.map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+// The Option C panel, rendered off-screen with the app's own code
+function optimismHtml(results) {
+    const tmp = document.createElement('div');
+    tmp.id = `report-optimism-${Date.now()}`;
+    tmp.style.display = 'none';
+    document.body.appendChild(tmp);
+    try { renderOptimismPanel(tmp.id, results); return tmp.innerHTML; } finally { tmp.remove(); }
+}
+
+function downloadHtmlReport(source) {
+    const items = reportItems(source).filter(it => it.ev);
+    if (!items.length) { alert(source === 'pipeline' ? 'Run Step 7 of the pipeline first.' : 'Train at least one model in Step 4 first.'); return; }
+    const { d } = buildChecklist(source);
+    const top = items[0];
+    const isClassification = Boolean(top.ev.isClassification);
+    const optionC = top.ev.protocol === 'option-c';
+    const prep = source === 'pipeline' ? (AppState.pipeline.benchmarkResults[0] || {}).prep : AppState.prepMeta;
+    const classNames = prep && prep.targetIdxToClass ? Object.keys(prep.targetIdxToClass).sort((a, b) => a - b).map(k => String(prep.targetIdxToClass[k])) : [];
+    const positiveLabel = top.ev.positiveClass !== null && top.ev.positiveClass !== undefined ? String(top.ev.positiveClass) : 'positive outcome';
+    const binary = isClassification && top.ev.probPositive && top.ev.calibration;
+    const sections = [];
+    sections.push(`<h2>1. Methods</h2><p>${escapeHtml(methodsParagraph(d))}</p>
+        <p class="meta">Predictors (${d.predictors.length}): ${d.predictors.map(escapeHtml).join(', ')}.${d.excludedPredictors && d.excludedPredictors.length ? ` Not used: ${d.excludedPredictors.map(escapeHtml).join(', ')}.` : ''}</p>`);
+    sections.push(`<h2>2. Results${optionC ? ' (bootstrap internal validation, all patients)' : ' (Testing set)'}</h2>
+        <p class="meta">Models are listed in ranked order${top.ev.cv ? ' (chosen by cross-validation inside the Training set)' : ''}. ${optionC ? 'The figures are corrected for optimism by bootstrap internal validation (section 3).' : '95% confidence intervals are percentile bootstrap intervals over the Testing patients, with each model held fixed.'}</p>
+        ${resultsTable(items, isClassification, optionC)}`);
+    if (optionC && source !== 'pipeline') sections.push(`<h2>3. Bootstrap internal validation</h2>${optimismHtml(items.map(it => it.result))}`);
+    if (binary && !optionC) {
+        sections.push(`<h2>3. Discrimination</h2>${discriminationSection(items, positiveLabel)}`);
+        sections.push(`<h2>4. Calibration, thresholds and clinical usefulness: ${escapeHtml(top.name)}</h2>${calibrationBody(top, positiveLabel)}`);
+    }
+    if (!isClassification && top.ev.actuals) sections.push(`<h2>3. Prediction errors: ${escapeHtml(top.name)}</h2>${residualSection(top.ev, d.target || 'outcome')}`);
+    if (isClassification && !optionC) sections.push(`<h2>${binary ? '5' : '3'}. Confusion matrix: ${escapeHtml(top.name)}</h2>${confusionTable(top.ev, classNames)}`);
+    const settings = items.map(it => {
+        const hp = it.hp ? Object.entries(it.hp).filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object').map(([k, v]) => `${escapeHtml(k)} = ${escapeHtml(String(v))}`).join('; ') : '';
+        return `<tr><td>${escapeHtml(it.name)}</td><td>${it.ev.seed !== undefined && it.ev.seed !== null ? escapeHtml(String(it.ev.seed)) : '—'}</td><td>${hp || escapeHtml(it.note || '—')}</td></tr>`;
+    }).join('');
+    sections.push(`<h2>Model settings and seeds</h2><table><thead><tr><th>Model</th><th>Seed</th><th>Settings</th></tr></thead><tbody>${settings}</tbody></table>
+        <p class="meta">Data split seed: ${escapeHtml(String(d.seed ?? '—'))}. Missing values: ${escapeHtml(d.missing || '—')}.</p>`);
+    sections.push(`<h2>Limitations</h2><ul>
+        <li>${optionC ? 'Internal validation only (bootstrap); performance in other hospitals or populations may differ.' : 'A single train/test split gives an imprecise estimate, especially with few patients; confirm the model in an independent cohort.'}</li>
+        <li>Predicted probabilities can be miscalibrated; check the calibration results before reading them as risks.</li>
+        <li>Associations learned by the models are not causal effects.</li></ul>`);
+    const title = `Prediction model report: ${d.target || 'outcome'}`;
+    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title><style>${REPORT_CSS}</style></head><body>
+<h1>${escapeHtml(title)}</h1>
+<div class="meta">Dataset: ${escapeHtml(AppState.fileName || '—')} · ${source === 'pipeline' ? '7-step pipeline' : 'Standard workflow'} · Universal Medical ML/NeuralNet Predictor ${escapeHtml(APP_VERSION)} · generated ${escapeHtml(new Date().toLocaleString('en-GB'))}</div>
+<div class="notice">${escapeHtml(RESEARCH_USE_NOTICE)}</div>
+${sections.join('\n')}
+<p class="meta">Use your browser's Print command (Save as PDF) for a PDF copy. The JSON report holds the full numerical detail.</p>
+</body></html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${source === 'pipeline' ? 'pipeline' : 'analysis'}-report-${new Date().toISOString().slice(0, 10)}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
 // ---- src/settings.js ----
@@ -9368,6 +9499,7 @@ function handleUnexpectedError(err) {
 
 
 
+
 AppState.pipeline = createEmptyPipelineState(42);
 
 window.addEventListener('error', (e) => handleUnexpectedError(e.error || e.message));
@@ -9395,6 +9527,8 @@ function start() {
     setupEventListeners();
     document.getElementById('standard-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('standard'));
     document.getElementById('pipeline-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('pipeline'));
+    document.getElementById('standard-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('standard'));
+    document.getElementById('pipeline-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('pipeline'));
     document.getElementById('mi-select')?.addEventListener('change', updateImputationEstimate);
     // Keep the sample-size check in step with the chosen split and validation protocol
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
