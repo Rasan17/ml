@@ -599,7 +599,7 @@
                                             Option A: Internal Train / Test Split
                                         </div>
                                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.45;">
-                                            Records are split first (stratified, seeded); imputation, encoding and scaling are fitted on the training part only, and the held-out remainder tests performance. Optionally retrain on 100% afterward. <strong>Row-level random split:</strong> if patients contribute several rows, or data are temporal or multicentre, use a patient-level, temporal or external split (Option B) instead.
+                                            Records are split first (stratified, seeded); imputation, encoding and scaling are fitted on the training part only, and the held-out remainder tests performance. Optionally retrain on 100% afterward. Choose below how records are divided (randomly, by patient, or by date); for multicentre data use an external cohort (Option B).
                                         </div>
                                     </div>
                                 </label>
@@ -616,6 +616,33 @@
                                         </div>
                                     </div>
                                 </label>
+
+                                <!-- Option C Card -->
+                                <label id="protocol-mode-c-label" class="protocol-card" style="cursor: pointer; border: 1px solid var(--border-color); background: var(--bg-surface-subtle); padding: 14px 16px; border-radius: var(--radius-md); display: flex; gap: 12px; align-items: flex-start; transition: var(--transition);">
+                                    <input type="radio" name="validation-mode" id="val-mode-c" value="bootstrap" style="margin-top: 3px; accent-color: var(--accent-emerald); cursor: pointer;">
+                                    <div>
+                                        <div style="font-size: 13.5px; font-weight: 700; color: var(--text-primary);">
+                                            Option C: Internal Validation by Bootstrap (all patients)
+                                        </div>
+                                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.45;">
+                                            Uses every patient to train, and estimates performance by bootstrap optimism correction (Harrell): the whole modelling process is repeated on resampled cohorts to measure and subtract overfitting. Recommended (TRIPOD) for small cohorts, where a single split wastes patients and is unstable.
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <!-- Option C Container -->
+                            <div id="option-c-container" style="display: none;">
+                                <div class="autotune-box" style="margin-top: 0;">
+                                    <label for="bootstrap-reps" class="autotune-folds-label">Bootstrap resamples:
+                                        <select id="bootstrap-reps" class="control-select" style="width: auto; display: inline-block;">
+                                            <option value="50">50 (faster)</option>
+                                            <option value="100" selected>100</option>
+                                            <option value="200">200 (Harrell's usual choice; slower)</option>
+                                        </select>
+                                    </label>
+                                    <p class="autotune-hint">Each resample repeats the whole process (missing-value filling, encoding, scaling and training) on patients drawn with replacement. The model is scored on its resample and on the original patients; the average difference (the <strong>optimism</strong>) is subtracted from the performance of the final model trained on all patients. Neural networks and the Ensemble use at most 50 resamples. There is no separate test set, so the results table shows <strong>optimism-corrected</strong> estimates; for external validity, test on an independent cohort (Option B).</p>
+                                </div>
                             </div>
 
                             <!-- Option A Container -->
@@ -1185,6 +1212,7 @@
 
                         <!-- Multi-Model Benchmark Leaderboard Comparison -->
                         <div id="multi-model-leaderboard-container" style="display: none;"></div>
+                        <div id="optimism-container"></div>
                         <div id="calibration-panel-container"></div>
                         <div id="explain-panel-container"></div>
                         <div id="odds-ratio-container"></div>
@@ -1870,11 +1898,14 @@
     <!-- Scripts: Vendor & Core Engines -->
     <script src="chart.umd.min.js"></script>
     <script src="tf.min.js"></script>
-    <script src="data-engine.js?v=30"></script>
-    <script src="models.js?v=34"></script>
+    <script src="data-engine.js?h=64067e0261"></script>
+    <script src="models.js?h=5fb7d3a7e9"></script>
     <!-- Application controller: ES modules (src/); when opened directly from disk (file://), where browsers
          block modules, the generated single-file bundle is used instead (node tools/build.js). -->
-    <script type="module" src="src/main.js?v=60"></script>
+    <!-- IMPORTMAP:START (generated by tools/build.js) -->
+    <script type="importmap">{"imports":{"./src/batch-prediction.js":"./src/batch-prediction.js?h=23849bd4e2","./src/compute.js":"./src/compute.js?h=f39dd1fc2e","./src/core.js":"./src/core.js?h=8bf68990f8","./src/cv-tuning.js":"./src/cv-tuning.js?h=b6d7865dca","./src/imputation.js":"./src/imputation.js?h=4dc58d1908","./src/ingest.js":"./src/ingest.js?h=58aef900d4","./src/main.js":"./src/main.js?h=8c179e9833","./src/model-io.js":"./src/model-io.js?h=4811b9f2cc","./src/navigation.js":"./src/navigation.js?h=8832ca5a59","./src/panels.js":"./src/panels.js?h=7d91e84972","./src/pipeline-results.js":"./src/pipeline-results.js?h=dcfce4d612","./src/pipeline.js":"./src/pipeline.js?h=ece98d6ff2","./src/reports.js":"./src/reports.js?h=13ab6d86fb","./src/settings.js":"./src/settings.js?h=23c72c74fb","./src/shell.js":"./src/shell.js?h=a3abcdfe86","./src/single-prediction.js":"./src/single-prediction.js?h=b7f317e19b","./src/standard-training.js":"./src/standard-training.js?h=f830fc1297","./src/training-setup.js":"./src/training-setup.js?h=060e3c4bb9","./src/variables.js":"./src/variables.js?h=33860aeb11","./src/watchdog.js":"./src/watchdog.js?h=582f5a6b6e","./data-engine.js":"./data-engine.js?h=64067e0261","./models.js":"./models.js?h=5fb7d3a7e9","./compute-worker.js":"./compute-worker.js?h=efe57bab28"}}</script>
+    <!-- IMPORTMAP:END -->
+    <script type="module" src="src/main.js?h=8c179e9833"></script>
     <script>if (location.protocol === 'file:') document.write('<script src="dist/app.bundle.js"><\/script>');</script>
 </body>
 </html>

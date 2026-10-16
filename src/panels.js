@@ -472,5 +472,30 @@ function renderSampleSizePanel() {
     document.getElementById('sample-size-r2')?.addEventListener('change', renderSampleSizePanel);
 }
 
-export { renderSampleSizePanel };
+// Option C: apparent, optimism and optimism-corrected performance for each model
+function renderOptimismPanel(containerId, results) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    const items = (results || []).filter(r => r.evalRes && r.evalRes.optimismCorrection);
+    if (!items.length) { box.innerHTML = ''; return; }
+    const labels = { accuracy: 'Accuracy', balancedAccuracy: 'Balanced accuracy', macroF1: 'Macro F1', rocAuc: 'ROC-AUC', brierScore: 'Brier ↓', r2: 'R²', rmse: 'RMSE ↓', mae: 'MAE ↓' };
+    const pctKeys = new Set(['accuracy', 'balancedAccuracy', 'macroF1']);
+    const fmt = (k, v) => (typeof v !== 'number' ? '—' : pctKeys.has(k) ? `${(v * 100).toFixed(1)}%` : v.toFixed(3));
+    const blocks = items.map(r => {
+        const oc = r.evalRes.optimismCorrection;
+        const keys = Object.keys(oc.apparent);
+        const name = (r.info && r.info.name) || r.modelId;
+        return `<div class="tune-model"><div class="tune-model-head"><strong>${escapeHtml(name)}</strong><span class="tune-sd">${oc.B} resamples</span></div>
+            <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (trained and scored on all patients)</th><th>Average optimism</th><th>Optimism-corrected</th></tr></thead>
+            <tbody>${keys.map(k => `<tr><td>${labels[k] || k}</td><td>${fmt(k, oc.apparent[k])}</td><td>${typeof oc.optimism[k] === 'number' ? (pctKeys.has(k) ? `${(oc.optimism[k] * 100).toFixed(1)} pts` : oc.optimism[k].toFixed(3)) : '—'}</td><td><strong>${fmt(k, oc.corrected[k])}</strong></td></tr>`).join('')}
+            ${oc.calibrationSlope !== null && oc.calibrationSlope !== undefined ? `<tr><td>Calibration slope (ideal 1)</td><td>1.000 (by construction)</td><td>—</td><td><strong>${oc.calibrationSlope.toFixed(3)}</strong></td></tr>` : ''}</tbody></table></div>`;
+    }).join('');
+    box.innerHTML = `<div class="cal-panel">
+        <div class="tune-title">🔁 Bootstrap internal validation (Option C)</div>
+        <p class="tune-muted"><strong>Apparent</strong> performance is measured on the same patients the model learned from, so it is too optimistic. Each bootstrap resample repeats the whole modelling process on patients drawn with replacement; the model is scored on its resample and on the original patients, and the average difference is the <strong>optimism</strong>. Subtracting it gives the <strong>optimism-corrected</strong> estimate of how the model would perform on new patients from the same population. The corrected calibration slope estimates how much the predictions should be shrunk (values below 1 mean overfitting).</p>
+        ${blocks}
+    </div>`;
+}
+
+export { renderSampleSizePanel, renderOptimismPanel };
 

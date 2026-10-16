@@ -484,10 +484,22 @@ let nextId = 1;
 const pending = new Map();
 let workerInfo = null;
 
+// Worker URL carrying the content-hash versions of its scripts (from the page's import map), so the worker
+// never runs stale cached engine code after an update
+function versionedWorkerUrl() {
+    try {
+        const map = JSON.parse(document.querySelector('script[type="importmap"]').textContent).imports || {};
+        const v = k => { const m = String(map[k] || '').match(/\?h=([0-9a-f]+)/); return m ? m[1] : ''; };
+        return `compute-worker.js?h=${v('./compute-worker.js')}&de=${v('./data-engine.js')}&m=${v('./models.js')}`;
+    } catch (e) {
+        return 'compute-worker.js';
+    }
+}
+
 function createWorker() {
     if (workerBroken || typeof Worker === 'undefined' || location.protocol === 'file:') return null;
     try {
-        const w = new Worker('compute-worker.js');
+        const w = new Worker(versionedWorkerUrl());
         w.onmessage = (ev) => {
             const { id, progress, result, error } = ev.data || {};
             const job = pending.get(id);
@@ -603,6 +615,31 @@ async function fitAndScore(modelId, isClassification, numClasses, hp, fold, eval
     const m = await fitLocal(modelId, isClassification, numClasses, hp, fold.Xtr, fold.ytr, onProgress, isAborted);
     try {
         return await ModelEngine.evaluateAsync(m, fold.Xva, fold.yva, isClassification, fold.targetClasses, evalOptions);
+    } finally {
+        if (m.dispose) m.dispose();
+    }
+}
+
+/** Trains once and returns metrics on each of several evaluation sets [{X, y, targetClasses}] */
+async function fitAndScoreMulti(modelId, isClassification, numClasses, hp, X, y, evalSets, evalOptions, { onProgress = null, isAborted = null } = {}) {
+    if (workerAvailable()) {
+        try {
+            return await call('fitEvalMulti', { modelId, isClassification, numClasses, hp, X, y, evalSets, evalOptions },
+                { onProgress: p => onProgress && onProgress(p.a, p.b, p.c), isAborted });
+        } catch (e) {
+            if (!e.workerUnavailable) throw e;
+        }
+    }
+    const m = await fitLocal(modelId, isClassification, numClasses, hp, X, y, onProgress, isAborted);
+    try {
+        const out = [];
+        for (const set of evalSets) {
+            const e = await ModelEngine.evaluateAsync(m, set.X, set.y, isClassification, set.targetClasses, evalOptions);
+            const r = {};
+            if (e) { ['accuracy', 'balancedAccuracy', 'macroF1', 'rocAuc', 'brierScore', 'r2', 'rmse', 'mae'].forEach(k => { if (e[k] !== undefined) r[k] = e[k]; }); if (e.calibration) r.calibrationSlope = e.calibration.slope; }
+            out.push(r);
+        }
+        return out;
     } finally {
         if (m.dispose) m.dispose();
     }
@@ -1108,45 +1145,30 @@ function setupEventListeners() {
         });
     }
 
-    // Protocol Mode Toggle (Option A vs Option B)
+    // Protocol Mode Toggle (Option A: split, Option B: separate test file, Option C: bootstrap internal validation)
     function setValidationMode(mode) {
         AppState.validationMode = mode;
-        if (mode === 'split') {
-            if (DOM.valModeA) DOM.valModeA.checked = true;
-            if (DOM.cardModeA) {
-                DOM.cardModeA.classList.add('selected-a');
-                DOM.cardModeA.style.borderColor = 'var(--accent-cyan)';
-                DOM.cardModeA.style.background = 'rgba(6, 182, 212, 0.08)';
-            }
-            if (DOM.cardModeB) {
-                DOM.cardModeB.classList.remove('selected-b');
-                DOM.cardModeB.style.borderColor = 'var(--border-color)';
-                DOM.cardModeB.style.background = 'var(--bg-surface-subtle)';
-            }
-            if (DOM.optionAContainer) DOM.optionAContainer.style.display = 'block';
-            if (DOM.optionBContainer) DOM.optionBContainer.style.display = 'none';
-        } else {
-            if (DOM.valModeB) DOM.valModeB.checked = true;
-            if (DOM.cardModeB) {
-                DOM.cardModeB.classList.add('selected-b');
-                DOM.cardModeB.style.borderColor = 'var(--accent-purple)';
-                DOM.cardModeB.style.background = 'rgba(168, 85, 247, 0.08)';
-            }
-            if (DOM.cardModeA) {
-                DOM.cardModeA.classList.remove('selected-a');
-                DOM.cardModeA.style.borderColor = 'var(--border-color)';
-                DOM.cardModeA.style.background = 'var(--bg-surface-subtle)';
-            }
-            if (DOM.optionAContainer) DOM.optionAContainer.style.display = 'none';
-            if (DOM.optionBContainer) DOM.optionBContainer.style.display = 'block';
-            refreshOptionBSummaries();
-        }
+        const cards = [
+            { mode: 'split', radio: 'val-mode-a', card: 'protocol-mode-a-label', box: 'option-a-container', colour: 'var(--accent-cyan)', bg: 'rgba(6, 182, 212, 0.08)' },
+            { mode: 'separate', radio: 'val-mode-b', card: 'protocol-mode-b-label', box: 'option-b-container', colour: 'var(--accent-purple)', bg: 'rgba(168, 85, 247, 0.08)' },
+            { mode: 'bootstrap', radio: 'val-mode-c', card: 'protocol-mode-c-label', box: 'option-c-container', colour: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.08)' }
+        ];
+        cards.forEach(c => {
+            const on = c.mode === mode;
+            const radio = document.getElementById(c.radio), card = document.getElementById(c.card), box = document.getElementById(c.box);
+            if (radio && on) radio.checked = true;
+            if (card) { card.style.borderColor = on ? c.colour : 'var(--border-color)'; card.style.background = on ? c.bg : 'var(--bg-surface-subtle)'; card.classList.toggle('selected', on); }
+            if (box) box.style.display = on ? 'block' : 'none';
+        });
+        if (mode === 'separate') refreshOptionBSummaries();
     }
 
-    if (DOM.valModeA) DOM.valModeA.addEventListener('change', () => setValidationMode('split'));
-    if (DOM.valModeB) DOM.valModeB.addEventListener('change', () => setValidationMode('separate'));
-    if (DOM.cardModeA) DOM.cardModeA.addEventListener('click', () => setValidationMode('split'));
-    if (DOM.cardModeB) DOM.cardModeB.addEventListener('click', () => setValidationMode('separate'));
+    [['val-mode-a', 'split'], ['val-mode-b', 'separate'], ['val-mode-c', 'bootstrap']].forEach(([id, mode]) => {
+        document.getElementById(id)?.addEventListener('change', () => setValidationMode(mode));
+    });
+    [['protocol-mode-a-label', 'split'], ['protocol-mode-b-label', 'separate'], ['protocol-mode-c-label', 'bootstrap']].forEach(([id, mode]) => {
+        document.getElementById(id)?.addEventListener('click', () => setValidationMode(mode));
+    });
 
     // Option B Testing Cohort Upload
     if (DOM.testDropzone && DOM.testFileInput) {
@@ -2983,6 +3005,31 @@ function renderSampleSizePanel() {
     document.getElementById('sample-size-r2')?.addEventListener('change', renderSampleSizePanel);
 }
 
+// Option C: apparent, optimism and optimism-corrected performance for each model
+function renderOptimismPanel(containerId, results) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    const items = (results || []).filter(r => r.evalRes && r.evalRes.optimismCorrection);
+    if (!items.length) { box.innerHTML = ''; return; }
+    const labels = { accuracy: 'Accuracy', balancedAccuracy: 'Balanced accuracy', macroF1: 'Macro F1', rocAuc: 'ROC-AUC', brierScore: 'Brier ↓', r2: 'R²', rmse: 'RMSE ↓', mae: 'MAE ↓' };
+    const pctKeys = new Set(['accuracy', 'balancedAccuracy', 'macroF1']);
+    const fmt = (k, v) => (typeof v !== 'number' ? '—' : pctKeys.has(k) ? `${(v * 100).toFixed(1)}%` : v.toFixed(3));
+    const blocks = items.map(r => {
+        const oc = r.evalRes.optimismCorrection;
+        const keys = Object.keys(oc.apparent);
+        const name = (r.info && r.info.name) || r.modelId;
+        return `<div class="tune-model"><div class="tune-model-head"><strong>${escapeHtml(name)}</strong><span class="tune-sd">${oc.B} resamples</span></div>
+            <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (trained and scored on all patients)</th><th>Average optimism</th><th>Optimism-corrected</th></tr></thead>
+            <tbody>${keys.map(k => `<tr><td>${labels[k] || k}</td><td>${fmt(k, oc.apparent[k])}</td><td>${typeof oc.optimism[k] === 'number' ? (pctKeys.has(k) ? `${(oc.optimism[k] * 100).toFixed(1)} pts` : oc.optimism[k].toFixed(3)) : '—'}</td><td><strong>${fmt(k, oc.corrected[k])}</strong></td></tr>`).join('')}
+            ${oc.calibrationSlope !== null && oc.calibrationSlope !== undefined ? `<tr><td>Calibration slope (ideal 1)</td><td>1.000 (by construction)</td><td>—</td><td><strong>${oc.calibrationSlope.toFixed(3)}</strong></td></tr>` : ''}</tbody></table></div>`;
+    }).join('');
+    box.innerHTML = `<div class="cal-panel">
+        <div class="tune-title">🔁 Bootstrap internal validation (Option C)</div>
+        <p class="tune-muted"><strong>Apparent</strong> performance is measured on the same patients the model learned from, so it is too optimistic. Each bootstrap resample repeats the whole modelling process on patients drawn with replacement; the model is scored on its resample and on the original patients, and the average difference is the <strong>optimism</strong>. Subtracting it gives the <strong>optimism-corrected</strong> estimate of how the model would perform on new patients from the same population. The corrected calibration slope estimates how much the predictions should be shrunk (values below 1 mean overfitting).</p>
+        ${blocks}
+    </div>`;
+}
+
 // ---- src/cv-tuning.js ----
 // cv-tuning.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 
@@ -3487,8 +3534,10 @@ async function startModelTraining() {
         prep.imputation = { configs: JSON.parse(JSON.stringify(AppState.columnConfigs)), plan: AppState.imputedData.plan };
         AppState.prepMeta = prep;
 
-        // Determine active validation protocol (Option A vs Option B)
-        const isOptionA = DOM.valModeA ? DOM.valModeA.checked : (AppState.validationMode !== 'separate');
+        // Determine active validation protocol (A: split, B: separate test file, C: bootstrap internal validation)
+        const valMode = document.querySelector('input[name="validation-mode"]:checked')?.value || AppState.validationMode || 'split';
+        const isOptionC = valMode === 'bootstrap';
+        const isOptionA = !isOptionC && valMode !== 'separate';
 
         // Determine models to test
         let modelsToTest = (AppState.selectedModelIds && AppState.selectedModelIds.length > 0)
@@ -3556,7 +3605,84 @@ async function startModelTraining() {
             return { hp: t.bestHp, cv: selectByCV ? cvSummaryFrom(t) : null, oof: t.best.oof || null };
         };
 
-        if (isOptionA) {
+        if (isOptionC) {
+            // =============================================================
+            // OPTION C: BOOTSTRAP OPTIMISM-CORRECTED INTERNAL VALIDATION (Harrell)
+            // =============================================================
+            const targetCol = prep.targetCol;
+            const allRaw = AppState.parsedData.rows.filter(r => !DataEngine.isMissing(r[targetCol]) &&
+                (prep.isClassification || !isNaN(Number(r[targetCol]))));
+            const B = parseInt(document.getElementById('bootstrap-reps')?.value, 10) || 100;
+            const seedC = splitSeedForCV();
+            // The same resamples for every model (fair comparison), reproducible from the seed
+            const rngC = DataEngine.createPRNG(seedC);
+            const boots = Array.from({ length: B }, () => allRaw.map(() => Math.floor(rngC() * allRaw.length)));
+            const evalOptsC = {
+                regressionThreshold: prep.isClassification ? null : trainingMedian(prep.y),
+                decisionThreshold: readDecisionThreshold('decision-threshold'),
+                thresholdSource: 'median of all outcomes'
+            };
+            const keys = prep.isClassification ? ['accuracy', 'balancedAccuracy', 'macroF1', 'rocAuc', 'brierScore'] : ['r2', 'rmse', 'mae'];
+            for (let i = 0; i < modelsToTest.length; i++) {
+                if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
+                const mId = modelsToTest[i];
+                const mInfo = MODEL_INFO[mId] || { name: mId.toUpperCase(), icon: '⚙️' };
+                const tuned = await tuneIfRequested(mId, getHyperparamsForModel(mId, prep), allRaw, prep.targetClasses.length || 2, i);
+                const hp = tuned.hp;
+                const isAborted = () => Boolean(watchdog && watchdog.aborted);
+                const heartbeat = (a, b) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training on all ${prep.X.length} patients...`); };
+                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">🚀 [${i + 1}/${modelsToTest.length}] Training ${mInfo.name} on all ${prep.X.length} patients...</span>`;
+                const model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, prep.X, prep.y, { isAborted, onProgress: heartbeat });
+                const evalRes = await ModelEngine.evaluateAsync(model, prep.X, prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
+                const Bm = (mId === 'nn' || mId === 'ensemble') ? Math.min(B, 50) : B;
+                const opt = {}; keys.forEach(k => { opt[k] = []; });
+                const slopes = [];
+                const t0 = Date.now();
+                for (let b = 0; b < Bm; b++) {
+                    if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
+                    const rowsB = boots[b].map(ix => allRaw[ix]);
+                    const impB = DataEngine.imputeDataset(rowsB, AppState.columnConfigs, AppState.columnAnalysis);
+                    const prepB = DataEngine.prepareFeaturesAndTarget(impB.imputedRows, AppState.columnConfigs);
+                    if (!prepB.X.length || (prep.isClassification && prepB.targetClasses.length !== prep.targetClasses.length)) continue; // a class missing from this resample
+                    prepB.imputation = { configs: AppState.columnConfigs, plan: impB.plan };
+                    const origB = DataEngine.prepareTestingDataset(allRaw, prepB);
+                    const [onBoot, onOrig] = await fitAndScoreMulti(mId, prep.isClassification, prepB.targetClasses.length || 2, hp, prepB.X, prepB.y,
+                        [{ X: prepB.X, y: prepB.y, targetClasses: prepB.targetClasses }, { X: origB.X, y: origB.y, targetClasses: prepB.targetClasses }], evalOptsC, { isAborted });
+                    keys.forEach(k => { if (typeof onBoot[k] === 'number' && typeof onOrig[k] === 'number') opt[k].push(onBoot[k] - onOrig[k]); });
+                    if (typeof onOrig.calibrationSlope === 'number') slopes.push(onOrig.calibrationSlope);
+                    const left = ((Date.now() - t0) / (b + 1)) * (Bm - b - 1) / 1000;
+                    const msg = `🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample ${b + 1}/${Bm} (about ${left < 60 ? Math.max(5, Math.round(left / 5) * 5) + ' s' : Math.round(left / 60) + ' min'} left)...`;
+                    DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">${msg}</span>`;
+                    if (watchdog) watchdog.tick(i + 1, msg);
+                    await ModelEngine.yieldToBrowser();
+                }
+                const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+                const apparent = {}, optimism = {}, corrected = {};
+                keys.forEach(k => {
+                    apparent[k] = typeof evalRes[k] === 'number' ? evalRes[k] : null;
+                    optimism[k] = mean(opt[k]);
+                    corrected[k] = apparent[k] !== null && optimism[k] !== null ? Number((apparent[k] - optimism[k]).toFixed(4)) : null;
+                    if (corrected[k] !== null) evalRes[k] = corrected[k]; // headline metrics are optimism-corrected
+                });
+                const slopeMean = mean(slopes);
+                evalRes.optimismCorrection = { B: opt[keys[0]].length, apparent, optimism, corrected, calibrationSlope: slopeMean !== null ? Number(slopeMean.toFixed(3)) : null };
+                evalRes.protocol = 'option-c';
+                evalRes.accuracyCI = null; // a CI of the apparent accuracy would be misleading
+                evalRes.ci = null;
+                evalRes.trainCount = prep.X.length;
+                evalRes.testCount = prep.X.length;
+                evalRes.totalCount = prep.X.length;
+                evalRes.splitSeed = seedC;
+                evalRes.seed = hp.seed;
+                if (tuned.cv) evalRes.cv = tuned.cv;
+                if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration is not combined with bootstrap internal validation (it would need to be repeated inside every resample); use Option A or B to recalibrate.';
+                if (model.trainingInfo) evalRes.nnNote = describeNNTraining(model.trainingInfo);
+                if (model.usedFallback) evalRes.fallbackNote = `TensorFlow.js training failed (${model.fallbackReason}); a linear (logistic/ridge) fallback model was evaluated instead of a neural network.`;
+                testedResults.push({ modelId: mId, info: mInfo, evalRes, model, retrained: true, prep, hyperparams: hp, seed: hp.seed });
+            }
+            AppState.prepMeta = prep;
+            AppState.lastTestRows = null; // no separate test set
+        } else if (isOptionA) {
             // =============================================================
             // OPTION A: INTERNAL TRAIN / TEST SPLIT WITH RETRAINING CHOICE
             // =============================================================
@@ -4153,6 +4279,7 @@ function renderEvaluationDashboard() {
     DOM.resultsDashboard.style.display = 'flex';
 
     const isOptionB = evalRes.protocol === 'option-b';
+    const isOptionC = evalRes.protocol === 'option-c';
     syncRankingSelectors(evalRes.isClassification);
     const trainPct = evalRes.trainPct || 80;
     const testPct = evalRes.testPct || 20;
@@ -4162,7 +4289,16 @@ function renderEvaluationDashboard() {
 
     // Protocol Status Banner
     if (DOM.retrainStatusBanner) {
-        if (isOptionB) {
+        if (isOptionC) {
+            const oc = evalRes.optimismCorrection || {};
+            DOM.retrainStatusBanner.innerHTML = `
+                <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 16px;">
+                    <div style="font-weight: 700; font-size: 13.5px; color: var(--accent-emerald);">🔁 Option C: Internal Validation by Bootstrap Optimism Correction</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 3px;">
+                        Every model was trained on all <strong>${totalCount}</strong> patients. Performance figures are <strong>optimism-corrected</strong> using ${oc.B || '?'} bootstrap resamples (fewer for neural networks / ensembles), each repeating missing-value filling, encoding, scaling and training. There is no separate test set; confirm on an independent cohort (Option B) before clinical use.
+                    </div>
+                </div>`;
+        } else if (isOptionB) {
             DOM.retrainStatusBanner.innerHTML = `
                 <div style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                     <div>
@@ -4215,13 +4351,15 @@ function renderEvaluationDashboard() {
 
     renderOddsRatioPanel('odds-ratio-container', AppState.prepMeta);
 
+    renderOptimismPanel('optimism-container', isOptionC ? allResults : []);
+
     // Explainability panel (permutation importance on the Testing set)
     renderExplainPanel('explain-panel-container',
         (allResults.length ? allResults : []).map(r => ({ name: (MODEL_INFO[r.modelId] || { name: r.modelId }).name, model: r.model, prep: r.prep, inSample: Boolean(r.retrained) })),
         AppState.lastTestRows, Boolean(evalRes && evalRes.isClassification));
 
     // Calibration and decision-threshold panel (binary outcomes)
-    renderCalibrationPanel('calibration-panel-container',
+    renderCalibrationPanel('calibration-panel-container', isOptionC ? [] :
         (allResults.length ? allResults : [{ modelId: AppState.selectedModelId, evalRes }]).map(r => ({
             name: (MODEL_INFO[r.modelId] || { name: r.modelId || 'Model' }).name, ev: r.evalRes
         })), Boolean(evalRes && evalRes.isClassification));
@@ -4260,7 +4398,9 @@ function renderEvaluationDashboard() {
         if (isOptionB && (evalRes.missingTargetCount > 0 || evalRes.unknownClassCount > 0)) {
             notes.push(`Dataset (ii) rows excluded: ${evalRes.missingTargetCount || 0} with a missing outcome, ${evalRes.unknownClassCount || 0} with an outcome class not seen in training.`);
         }
-        if (!isOptionB) {
+        if (isOptionC) {
+            notes.push('Option C: headline metrics are optimism-corrected (apparent performance on all patients minus the average bootstrap optimism). Testing-set panels (curves, calibration, permutation importance) are not shown because there is no separate test set; the bootstrap table below gives apparent, optimism and corrected values.');
+        } else if (!isOptionB) {
             notes.push(`Option A: records were split first; imputation, category encoding and scaling were fitted on the training split only and applied unchanged to the test split.${(!evalRes.splitInfo || evalRes.splitInfo.method === 'random')
                 ? ' The split is random at row level: if patients contribute several rows, choose "keep each patient\'s records together"; for temporal data choose "by date"; for multicentre data use an external cohort (Option B).'
                 : ''}`);
@@ -4289,7 +4429,7 @@ function renderEvaluationDashboard() {
         }
     }
 
-    const cohortDesc = isOptionB ? `External Testing Cohort (Dataset ii: ${testCount} Patients)` : `Held-out ${testPct}% Test Cohort (${testCount} Patients)`;
+    const cohortDesc = isOptionC ? `bootstrap internal validation of all ${totalCount} patients (optimism-corrected)` : isOptionB ? `External Testing Cohort (Dataset ii: ${testCount} Patients)` : `Held-out ${testPct}% Test Cohort (${testCount} Patients)`;
 
     // RENDER BASED ON NUMBER OF TESTED MODELS
     if (allResults.length > 1) {
@@ -4351,7 +4491,7 @@ function renderEvaluationDashboard() {
                                 <span style="font-size: 16px;">${mInfo.icon}</span>
                                 <div>
                                     <div style="font-weight: 700; color: var(--text-primary);">${escapeHtml(displayModelName(resItem.modelId, resItem.model))}</div>
-                                    <div style="font-size: 11px; color: var(--text-muted);">${resItem.retrained ? '100% Cohort Retrained' : (isOptionB ? 'External Validated' : 'Split-Trained')}</div>
+                                    <div style="font-size: 11px; color: var(--text-muted);">${isOptionC ? 'Bootstrap-validated (all patients)' : resItem.retrained ? '100% Cohort Retrained' : (isOptionB ? 'External Validated' : 'Split-Trained')}</div>
                                 </div>
                             </div>
                         </td>
@@ -4547,8 +4687,8 @@ function renderEvaluationDashboard() {
             `;
         }
 
-        const testAccLabel = isOptionB ? 'External Test Accuracy (Dataset ii)' : `Test Accuracy (${testPct}% Split)`;
-        const testR2Label = isOptionB ? 'External Test R² (Dataset ii)' : `Test R² Score (${testPct}% Split)`;
+        const testAccLabel = isOptionC ? 'Optimism-corrected Accuracy (bootstrap)' : isOptionB ? 'External Test Accuracy (Dataset ii)' : `Test Accuracy (${testPct}% Split)`;
+        const testR2Label = isOptionC ? 'Optimism-corrected R² (bootstrap)' : isOptionB ? 'External Test R² (Dataset ii)' : `Test R² Score (${testPct}% Split)`;
 
         if (evalRes.isClassification) {
             DOM.metricsSummaryRow.innerHTML = `
@@ -7073,7 +7213,9 @@ function renderPipelineVsBaselineComparison() {
     }
 
     const sm = AppState.pipeline.smotencResult;
-    const baseProtocol = bEv.protocol === 'option-b'
+    const baseProtocol = bEv.protocol === 'option-c'
+        ? 'bootstrap internal validation of all patients (no separate test patients)'
+        : bEv.protocol === 'option-b'
         ? `a separate test file (Dataset ii)`
         : `a ${bEv.testPct || 20}% random test split (split seed ${bEv.splitSeed})`;
     const baseTestN = bEv.testCount || bEv.totalSamples || 0;
@@ -7189,7 +7331,8 @@ function downloadStandardAnalysisReport() {
         variables: Object.fromEntries(Object.entries(cfgs).map(([k, v]) => [k, { role: v.role, type: v.type, missing_data: v.role === 'feature' ? v.imputationStrategy : undefined }])),
         exclusions: { complete_case_analysis: Boolean(AppState.completeCase), test_rows_dropped: top.testDroppedRows ?? null },
         validation_design: {
-            protocol: top.protocol === 'option-b' ? 'separate testing dataset (Dataset ii)' : 'internal train/test split',
+            protocol: top.protocol === 'option-c' ? `internal validation by bootstrap optimism correction (${(top.optimismCorrection || {}).B || '?'} resamples)` : top.protocol === 'option-b' ? 'separate testing dataset (Dataset ii)' : 'internal train/test split',
+            optimism_correction: top.protocol === 'option-c' ? results.map(r => ({ model: (MODEL_INFO[r.modelId] || {}).name || r.modelId, ...(r.evalRes.optimismCorrection || {}) })) : undefined,
             split: top.protocol === 'option-b' ? null : describeSplit(top.splitInfo),
             train_percent: top.trainPct ?? null, split_seed: top.splitSeed ?? null,
             train_cases: top.trainCount, test_cases: top.testCount,

@@ -128,7 +128,9 @@ function renderPipelineVsBaselineComparison() {
     }
 
     const sm = AppState.pipeline.smotencResult;
-    const baseProtocol = bEv.protocol === 'option-b'
+    const baseProtocol = bEv.protocol === 'option-c'
+        ? 'bootstrap internal validation of all patients (no separate test patients)'
+        : bEv.protocol === 'option-b'
         ? `a separate test file (Dataset ii)`
         : `a ${bEv.testPct || 20}% random test split (split seed ${bEv.splitSeed})`;
     const baseTestN = bEv.testCount || bEv.totalSamples || 0;
@@ -244,7 +246,8 @@ function downloadStandardAnalysisReport() {
         variables: Object.fromEntries(Object.entries(cfgs).map(([k, v]) => [k, { role: v.role, type: v.type, missing_data: v.role === 'feature' ? v.imputationStrategy : undefined }])),
         exclusions: { complete_case_analysis: Boolean(AppState.completeCase), test_rows_dropped: top.testDroppedRows ?? null },
         validation_design: {
-            protocol: top.protocol === 'option-b' ? 'separate testing dataset (Dataset ii)' : 'internal train/test split',
+            protocol: top.protocol === 'option-c' ? `internal validation by bootstrap optimism correction (${(top.optimismCorrection || {}).B || '?'} resamples)` : top.protocol === 'option-b' ? 'separate testing dataset (Dataset ii)' : 'internal train/test split',
+            optimism_correction: top.protocol === 'option-c' ? results.map(r => ({ model: (MODEL_INFO[r.modelId] || {}).name || r.modelId, ...(r.evalRes.optimismCorrection || {}) })) : undefined,
             split: top.protocol === 'option-b' ? null : describeSplit(top.splitInfo),
             train_percent: top.trainPct ?? null, split_seed: top.splitSeed ?? null,
             train_cases: top.trainCount, test_cases: top.testCount,

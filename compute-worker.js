@@ -6,7 +6,10 @@
 'use strict';
 
 self.window = self; // the engines attach themselves to window.*
-importScripts('tf.min.js', 'data-engine.js', 'models.js');
+// Versioned engine URLs (passed by the page) so an update is never masked by the browser cache
+const qs = new URLSearchParams(self.location.search);
+const ver = k => (qs.get(k) ? `?h=${qs.get(k)}` : '');
+importScripts('tf.min.js', `data-engine.js${ver('de')}`, `models.js${ver('m')}`);
 
 async function fitModel(p, onProgress) {
     const m = ModelEngine.createModel(p.modelId, p.isClassification, p.numClasses, p.hp);
@@ -57,6 +60,21 @@ self.onmessage = async (ev) => {
             if (e) keep.forEach(k => { if (e[k] !== undefined) result[k] = e[k]; });
             if (m.dispose) m.dispose();
             self.postMessage({ id, result });
+            return;
+        }
+        if (op === 'fitEvalMulti') {
+            // Train once, then score on several datasets (e.g. bootstrap sample and original data)
+            const m = await fitModel(payload, progress);
+            const keep = ['accuracy', 'balancedAccuracy', 'macroF1', 'rocAuc', 'brierScore', 'r2', 'rmse', 'mae'];
+            const out = [];
+            for (const set of payload.evalSets) {
+                const e = await ModelEngine.evaluateAsync(m, set.X, set.y, payload.isClassification, set.targetClasses, payload.evalOptions || {});
+                const r = {};
+                if (e) { keep.forEach(k => { if (e[k] !== undefined) r[k] = e[k]; }); if (e.calibration) r.calibrationSlope = e.calibration.slope; }
+                out.push(r);
+            }
+            if (m.dispose) m.dispose();
+            self.postMessage({ id, result: out });
             return;
         }
         throw new Error(`Unknown operation: ${op}`);

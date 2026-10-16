@@ -9,10 +9,22 @@ let nextId = 1;
 const pending = new Map();
 let workerInfo = null;
 
+// Worker URL carrying the content-hash versions of its scripts (from the page's import map), so the worker
+// never runs stale cached engine code after an update
+function versionedWorkerUrl() {
+    try {
+        const map = JSON.parse(document.querySelector('script[type="importmap"]').textContent).imports || {};
+        const v = k => { const m = String(map[k] || '').match(/\?h=([0-9a-f]+)/); return m ? m[1] : ''; };
+        return `compute-worker.js?h=${v('./compute-worker.js')}&de=${v('./data-engine.js')}&m=${v('./models.js')}`;
+    } catch (e) {
+        return 'compute-worker.js';
+    }
+}
+
 function createWorker() {
     if (workerBroken || typeof Worker === 'undefined' || location.protocol === 'file:') return null;
     try {
-        const w = new Worker('compute-worker.js');
+        const w = new Worker(versionedWorkerUrl());
         w.onmessage = (ev) => {
             const { id, progress, result, error } = ev.data || {};
             const job = pending.get(id);
@@ -133,4 +145,29 @@ async function fitAndScore(modelId, isClassification, numClasses, hp, fold, eval
     }
 }
 
-export { fitModel, fitAndScore, cancelAll, workerAvailable, describeWorker };
+/** Trains once and returns metrics on each of several evaluation sets [{X, y, targetClasses}] */
+async function fitAndScoreMulti(modelId, isClassification, numClasses, hp, X, y, evalSets, evalOptions, { onProgress = null, isAborted = null } = {}) {
+    if (workerAvailable()) {
+        try {
+            return await call('fitEvalMulti', { modelId, isClassification, numClasses, hp, X, y, evalSets, evalOptions },
+                { onProgress: p => onProgress && onProgress(p.a, p.b, p.c), isAborted });
+        } catch (e) {
+            if (!e.workerUnavailable) throw e;
+        }
+    }
+    const m = await fitLocal(modelId, isClassification, numClasses, hp, X, y, onProgress, isAborted);
+    try {
+        const out = [];
+        for (const set of evalSets) {
+            const e = await ModelEngine.evaluateAsync(m, set.X, set.y, isClassification, set.targetClasses, evalOptions);
+            const r = {};
+            if (e) { ['accuracy', 'balancedAccuracy', 'macroF1', 'rocAuc', 'brierScore', 'r2', 'rmse', 'mae'].forEach(k => { if (e[k] !== undefined) r[k] = e[k]; }); if (e.calibration) r.calibrationSlope = e.calibration.slope; }
+            out.push(r);
+        }
+        return out;
+    } finally {
+        if (m.dispose) m.dispose();
+    }
+}
+
+export { fitModel, fitAndScore, fitAndScoreMulti, cancelAll, workerAvailable, describeWorker };

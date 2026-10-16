@@ -25,10 +25,10 @@ jobs:
       - name: Install Python reference libraries
         run: pip install numpy scipy scikit-learn statsmodels
 
-      - name: File-open fallback bundle is up to date with src/
+      - name: Fallback bundle and import-map versions are up to date with src/
         run: |
           node tools/build.js
-          git diff --exit-code dist/app.bundle.js
+          git diff --exit-code dist/app.bundle.js index.html
 
       - name: Edge cases (data engine and models)
         run: node tests/edge_cases.js

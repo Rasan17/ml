@@ -499,45 +499,30 @@ function setupEventListeners() {
         });
     }
 
-    // Protocol Mode Toggle (Option A vs Option B)
+    // Protocol Mode Toggle (Option A: split, Option B: separate test file, Option C: bootstrap internal validation)
     function setValidationMode(mode) {
         AppState.validationMode = mode;
-        if (mode === 'split') {
-            if (DOM.valModeA) DOM.valModeA.checked = true;
-            if (DOM.cardModeA) {
-                DOM.cardModeA.classList.add('selected-a');
-                DOM.cardModeA.style.borderColor = 'var(--accent-cyan)';
-                DOM.cardModeA.style.background = 'rgba(6, 182, 212, 0.08)';
-            }
-            if (DOM.cardModeB) {
-                DOM.cardModeB.classList.remove('selected-b');
-                DOM.cardModeB.style.borderColor = 'var(--border-color)';
-                DOM.cardModeB.style.background = 'var(--bg-surface-subtle)';
-            }
-            if (DOM.optionAContainer) DOM.optionAContainer.style.display = 'block';
-            if (DOM.optionBContainer) DOM.optionBContainer.style.display = 'none';
-        } else {
-            if (DOM.valModeB) DOM.valModeB.checked = true;
-            if (DOM.cardModeB) {
-                DOM.cardModeB.classList.add('selected-b');
-                DOM.cardModeB.style.borderColor = 'var(--accent-purple)';
-                DOM.cardModeB.style.background = 'rgba(168, 85, 247, 0.08)';
-            }
-            if (DOM.cardModeA) {
-                DOM.cardModeA.classList.remove('selected-a');
-                DOM.cardModeA.style.borderColor = 'var(--border-color)';
-                DOM.cardModeA.style.background = 'var(--bg-surface-subtle)';
-            }
-            if (DOM.optionAContainer) DOM.optionAContainer.style.display = 'none';
-            if (DOM.optionBContainer) DOM.optionBContainer.style.display = 'block';
-            refreshOptionBSummaries();
-        }
+        const cards = [
+            { mode: 'split', radio: 'val-mode-a', card: 'protocol-mode-a-label', box: 'option-a-container', colour: 'var(--accent-cyan)', bg: 'rgba(6, 182, 212, 0.08)' },
+            { mode: 'separate', radio: 'val-mode-b', card: 'protocol-mode-b-label', box: 'option-b-container', colour: 'var(--accent-purple)', bg: 'rgba(168, 85, 247, 0.08)' },
+            { mode: 'bootstrap', radio: 'val-mode-c', card: 'protocol-mode-c-label', box: 'option-c-container', colour: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.08)' }
+        ];
+        cards.forEach(c => {
+            const on = c.mode === mode;
+            const radio = document.getElementById(c.radio), card = document.getElementById(c.card), box = document.getElementById(c.box);
+            if (radio && on) radio.checked = true;
+            if (card) { card.style.borderColor = on ? c.colour : 'var(--border-color)'; card.style.background = on ? c.bg : 'var(--bg-surface-subtle)'; card.classList.toggle('selected', on); }
+            if (box) box.style.display = on ? 'block' : 'none';
+        });
+        if (mode === 'separate') refreshOptionBSummaries();
     }
 
-    if (DOM.valModeA) DOM.valModeA.addEventListener('change', () => setValidationMode('split'));
-    if (DOM.valModeB) DOM.valModeB.addEventListener('change', () => setValidationMode('separate'));
-    if (DOM.cardModeA) DOM.cardModeA.addEventListener('click', () => setValidationMode('split'));
-    if (DOM.cardModeB) DOM.cardModeB.addEventListener('click', () => setValidationMode('separate'));
+    [['val-mode-a', 'split'], ['val-mode-b', 'separate'], ['val-mode-c', 'bootstrap']].forEach(([id, mode]) => {
+        document.getElementById(id)?.addEventListener('change', () => setValidationMode(mode));
+    });
+    [['protocol-mode-a-label', 'split'], ['protocol-mode-b-label', 'separate'], ['protocol-mode-c-label', 'bootstrap']].forEach(([id, mode]) => {
+        document.getElementById(id)?.addEventListener('click', () => setValidationMode(mode));
+    });
 
     // Option B Testing Cohort Upload
     if (DOM.testDropzone && DOM.testFileInput) {
