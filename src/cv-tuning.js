@@ -13,10 +13,11 @@ import { disposeModels, evalAbortOpts, fitWithYields } from './standard-training
 // is never used. Encoding/scaling were fitted on the whole Training set before the folds are made
 // (a common simplification with negligible effect on the comparison).
 const TUNE_MAX_ROWS = 2000;        // larger training sets are tuned on a stratified sample of this size
-const TUNABLE_MODELS = new Set(['knn', 'rf', 'glm', 'nb', 'nn']);
+const TUNABLE_MODELS = new Set(['knn', 'rf', 'glm', 'nb', 'nn', 'gbm']);
 const TUNE_LABELS = {
     k: 'k (neighbours)', weighting: 'Neighbour weighting', maxDepth: 'Max tree depth', minSamplesSplit: 'Min samples to split',
-    lambdaL2: 'Ridge penalty (λ)', varSmoothing: 'Variance smoothing', dropoutRate: 'Dropout', l2Reg: 'L2 weight decay'
+    lambdaL2: 'Ridge penalty (λ)', varSmoothing: 'Variance smoothing', dropoutRate: 'Dropout', l2Reg: 'L2 weight decay',
+    learningRate: 'Learning rate', minSamplesLeaf: 'Min patients per leaf'
 };
 
 function tuningGrid(mId, base, minFoldTrain) {
@@ -32,6 +33,8 @@ function tuningGrid(mId, base, minFoldTrain) {
         [1e-9, 1e-4, 0.01, 0.1].forEach(v => combos.push({ varSmoothing: v }));
     } else if (mId === 'nn') {
         [0.1, 0.3].forEach(d => [0.0001, 0.001].forEach(l => combos.push({ dropoutRate: d, l2Reg: l })));
+    } else if (mId === 'gbm') {
+        [0.05, 0.1].forEach(lr => [2, 3, 4].forEach(d => combos.push({ learningRate: lr, maxDepth: d })));
     }
     const keys = combos.length ? Object.keys(combos[0]) : [];
     const own = {};
@@ -428,6 +431,7 @@ function applyHyperparamsToForm(mId, hp) {
     else if (mId === 'glm') { setVal('glm-lambda-select', hp.lambdaL2); }
     else if (mId === 'nb') { setVal('nb-smoothing-select', hp.varSmoothing); }
     else if (mId === 'nn') { setVal('nn-dropout-input', hp.dropoutRate); setVal('nn-l2-select', hp.l2Reg); }
+    else if (mId === 'gbm') { setVal('gbm-lr-select', hp.learningRate); setVal('gbm-depth-input', hp.maxDepth); }
 }
 
 function fmtTuneValue(key, v) {

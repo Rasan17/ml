@@ -45,9 +45,10 @@ const MODEL_INFO = {
     glm: { name: 'Logistic / Ridge Regression', short: 'GLM / Regression', tag: 'Generalized Linear', pillClass: 'pill-continuous', icon: '📈' },
     knn: { name: 'k-Nearest Neighbors (k-NN)', short: 'k-NN', tag: 'Instance-Based', pillClass: 'pill-ordinal', icon: '🎯' },
     nb: { name: 'Naive Bayes (Gaussian + Bernoulli)', short: 'Naive Bayes', tag: 'Probabilistic', pillClass: 'pill-nominal', icon: '🎲' },
+    gbm: { name: 'Gradient-Boosted Trees', short: 'Gradient Boosting', tag: 'Boosting', pillClass: 'pill-continuous', icon: '🌿' },
     ensemble: { name: 'Voting / Weighted Ensemble', short: 'Ensemble', tag: 'Voting Ensemble', pillClass: 'pill-target', icon: '⚡' }
 };
-const ALL_MODEL_IDS = ['nn', 'rf', 'glm', 'knn', 'nb', 'ensemble'];
+const ALL_MODEL_IDS = ['nn', 'rf', 'gbm', 'glm', 'knn', 'nb', 'ensemble'];
 
 // Escapes text for safe insertion into HTML (column names and cell values come from user CSVs)
 function escapeHtml(value) {
@@ -1084,7 +1085,7 @@ function setupEventListeners() {
             const mInfo = MODEL_INFO[AppState.selectedModelIds[0]] || { short: AppState.selectedModelIds[0].toUpperCase() };
             DOM.trainModelBtn.textContent = `🚀 Train & Test 1 Model (${mInfo.short})`;
         } else if (count === ALL_MODEL_IDS.length) {
-            DOM.trainModelBtn.textContent = `🏆 Run Full Tournament (Train & Test All 6 Models)`;
+            DOM.trainModelBtn.textContent = `🏆 Run Full Tournament (Train & Test All ${ALL_MODEL_IDS.length} Models)`;
         } else {
             DOM.trainModelBtn.textContent = `🚀 Train & Benchmark ${count} Selected Models`;
         }
@@ -2316,6 +2317,8 @@ function updateHyperparamsVisibility(targetModelId) {
     const isKNN = activeId === 'knn';
     const isNB = activeId === 'nb';
     const isEnsemble = activeId === 'ensemble';
+    const gbmBox = document.getElementById('gbm-params-box');
+    if (gbmBox) gbmBox.style.display = activeId === 'gbm' ? 'grid' : 'none';
 
     const nnBox = document.getElementById('nn-params-box');
     const rfBox = document.getElementById('rf-params-box');
@@ -2534,6 +2537,14 @@ function getHyperparamsForModel(modelId, prep) {
         hp.metric = metricEl ? metricEl.value : 'euclidean';
         const weightEl = document.getElementById('knn-weighting-select');
         hp.weighting = weightEl ? weightEl.value : 'uniform';
+    } else if (modelId === 'gbm') {
+        hp.nEstimators = parseInt(document.getElementById('gbm-rounds-input')?.value, 10) || 200;
+        hp.learningRate = parseFloat(document.getElementById('gbm-lr-select')?.value) || 0.1;
+        hp.maxDepth = parseInt(document.getElementById('gbm-depth-input')?.value, 10) || 3;
+        hp.minSamplesLeaf = parseInt(document.getElementById('gbm-minleaf-select')?.value, 10) || 5;
+        const l2 = parseFloat(document.getElementById('gbm-l2-select')?.value);
+        hp.l2 = isNaN(l2) ? 1 : l2;
+        hp.subsample = parseFloat(document.getElementById('gbm-subsample-select')?.value) || 0.8;
     } else if (modelId === 'nb') {
         const smoothEl = document.getElementById('nb-smoothing-select');
         hp.varSmoothing = smoothEl ? parseFloat(smoothEl.value) : 1e-4;
@@ -3141,10 +3152,11 @@ function renderOptimismPanel(containerId, results) {
 // is never used. Encoding/scaling were fitted on the whole Training set before the folds are made
 // (a common simplification with negligible effect on the comparison).
 const TUNE_MAX_ROWS = 2000;        // larger training sets are tuned on a stratified sample of this size
-const TUNABLE_MODELS = new Set(['knn', 'rf', 'glm', 'nb', 'nn']);
+const TUNABLE_MODELS = new Set(['knn', 'rf', 'glm', 'nb', 'nn', 'gbm']);
 const TUNE_LABELS = {
     k: 'k (neighbours)', weighting: 'Neighbour weighting', maxDepth: 'Max tree depth', minSamplesSplit: 'Min samples to split',
-    lambdaL2: 'Ridge penalty (λ)', varSmoothing: 'Variance smoothing', dropoutRate: 'Dropout', l2Reg: 'L2 weight decay'
+    lambdaL2: 'Ridge penalty (λ)', varSmoothing: 'Variance smoothing', dropoutRate: 'Dropout', l2Reg: 'L2 weight decay',
+    learningRate: 'Learning rate', minSamplesLeaf: 'Min patients per leaf'
 };
 
 function tuningGrid(mId, base, minFoldTrain) {
@@ -3160,6 +3172,8 @@ function tuningGrid(mId, base, minFoldTrain) {
         [1e-9, 1e-4, 0.01, 0.1].forEach(v => combos.push({ varSmoothing: v }));
     } else if (mId === 'nn') {
         [0.1, 0.3].forEach(d => [0.0001, 0.001].forEach(l => combos.push({ dropoutRate: d, l2Reg: l })));
+    } else if (mId === 'gbm') {
+        [0.05, 0.1].forEach(lr => [2, 3, 4].forEach(d => combos.push({ learningRate: lr, maxDepth: d })));
     }
     const keys = combos.length ? Object.keys(combos[0]) : [];
     const own = {};
@@ -3556,6 +3570,7 @@ function applyHyperparamsToForm(mId, hp) {
     else if (mId === 'glm') { setVal('glm-lambda-select', hp.lambdaL2); }
     else if (mId === 'nb') { setVal('nb-smoothing-select', hp.varSmoothing); }
     else if (mId === 'nn') { setVal('nn-dropout-input', hp.dropoutRate); setVal('nn-l2-select', hp.l2Reg); }
+    else if (mId === 'gbm') { setVal('gbm-lr-select', hp.learningRate); setVal('gbm-depth-input', hp.maxDepth); }
 }
 
 function fmtTuneValue(key, v) {

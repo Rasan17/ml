@@ -42,9 +42,10 @@ const MODEL_INFO = {
     glm: { name: 'Logistic / Ridge Regression', short: 'GLM / Regression', tag: 'Generalized Linear', pillClass: 'pill-continuous', icon: '📈' },
     knn: { name: 'k-Nearest Neighbors (k-NN)', short: 'k-NN', tag: 'Instance-Based', pillClass: 'pill-ordinal', icon: '🎯' },
     nb: { name: 'Naive Bayes (Gaussian + Bernoulli)', short: 'Naive Bayes', tag: 'Probabilistic', pillClass: 'pill-nominal', icon: '🎲' },
+    gbm: { name: 'Gradient-Boosted Trees', short: 'Gradient Boosting', tag: 'Boosting', pillClass: 'pill-continuous', icon: '🌿' },
     ensemble: { name: 'Voting / Weighted Ensemble', short: 'Ensemble', tag: 'Voting Ensemble', pillClass: 'pill-target', icon: '⚡' }
 };
-const ALL_MODEL_IDS = ['nn', 'rf', 'glm', 'knn', 'nb', 'ensemble'];
+const ALL_MODEL_IDS = ['nn', 'rf', 'gbm', 'glm', 'knn', 'nb', 'ensemble'];
 
 // Escapes text for safe insertion into HTML (column names and cell values come from user CSVs)
 function escapeHtml(value) {

@@ -37,7 +37,7 @@ from imblearn.over_sampling import SMOTENC
 from scipy import stats
 from sklearn import metrics
 from sklearn.datasets import load_breast_cancer, load_diabetes, load_wine, make_classification
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, HistGradientBoostingClassifier, HistGradientBoostingRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import train_test_split
@@ -59,6 +59,8 @@ H = {  # shared hyper-parameters (app and Python)
     'nn_val_fraction': 0.15,
     # Ensemble (app 'balanced' capacity): NN [48,24] x 35 epochs, RF 30 trees depth 6, GLM 150 epochs
     'ens_nn_hidden': [48, 24], 'ens_nn_epochs': 35, 'ens_rf_trees': 30, 'ens_rf_depth': 6,
+    # Gradient-boosted trees (app GBM vs scikit-learn HistGradientBoosting, early stopping on 15% of train)
+    'gbm_rounds': 200, 'gbm_lr': 0.1, 'gbm_depth': 3, 'gbm_l2': 1.0, 'gbm_bins': 32, 'gbm_min_leaf': 5,
 }
 CRITERIA = {
     'preprocessing_max_abs_diff': 1e-4,   # app stores z-scores to 5 decimal places
@@ -262,7 +264,7 @@ def main():
         k = len(np.unique(d['y'])) if task != 'regression' else 1
         runs = app['datasets'][name]
         pre_diff, knn_stats, nb_stats = 0.0, {}, {'agree': [], 'pdiff': 0.0}
-        stoch = {m: {} for m in ['rf', 'nn', 'glm', 'ensemble']}
+        stoch = {m: {} for m in ['rf', 'nn', 'glm', 'ensemble', 'gbm']}
         fallback_used = False
         for r, sp in zip(runs, d['splits']):
             tr, te = np.array(sp['train']), np.array(sp['test'])
@@ -336,6 +338,11 @@ def main():
                 e_rf = RandomForestRegressor(n_estimators=H['ens_rf_trees'], max_depth=H['ens_rf_depth'],
                                              max_features=1/3, random_state=seed).fit(Xtr, ytr).predict(Xte)
             py['ensemble'] = (e_nn + e_rf + py['glm']) / 3
+            gb_args = dict(max_iter=H['gbm_rounds'], learning_rate=H['gbm_lr'], max_depth=H['gbm_depth'], max_leaf_nodes=None,
+                           min_samples_leaf=H['gbm_min_leaf'], l2_regularization=H['gbm_l2'], max_bins=H['gbm_bins'],
+                           early_stopping=True, validation_fraction=0.15, n_iter_no_change=15, random_state=seed)
+            py['gbm'] = (HistGradientBoostingClassifier(**gb_args).fit(Xtr, ytr).predict_proba(Xte) if task != 'regression'
+                         else HistGradientBoostingRegressor(**gb_args).fit(Xtr, ytr).predict(Xte))
             for mname in stoch:
                 if task != 'regression':
                     a_out = app_probs(r['models'][mname], k)
@@ -486,7 +493,7 @@ def write_report(datasets, app, checks, tables, cal_rows, secs):
     for c in checks:
         L.append(f'| {c[0]} | {c[1]} | {c[2]} | {c[3]} | **{c[4]}** |')
     L.append('\n## Stochastic models: app vs Python on paired splits\n')
-    names = {'rf': 'Random Forest', 'nn': 'Neural network (MLP)', 'glm': 'Logistic / ridge regression',
+    names = {'gbm': 'Gradient-boosted trees', 'rf': 'Random Forest', 'nn': 'Neural network (MLP)', 'glm': 'Logistic / ridge regression',
              'ensemble': 'Voting ensemble (soft)'}
     for ds, rows in tables.items():
         L.append(f'### {ds}\n')

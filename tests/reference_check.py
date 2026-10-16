@@ -106,6 +106,25 @@ lo=qb-stats.t.ppf(.975,df)*np.sqrt(T); pv=2*stats.t.sf(np.abs(qb/np.sqrt(T)),df)
 chk("Rubin's rules: pooled estimate, SE, df",[[r['coef'],r['se'],r['df']] for r in R_],np.column_stack([qb,np.sqrt(T),df]),1e-8)
 chk("Rubin's rules: 95% CI lower bound and p-value",[[r['low'],r['p']] for r in R_],np.column_stack([lo,pv]),1e-6)
 chk('t distribution quantiles and CDF',o['tq']+o['tc'],[stats.t.ppf(.975,4.3),stats.t.ppf(.9,17),stats.t.cdf(1.7,6),stats.t.cdf(-2.4,11.5)],1e-6)
+# Cox model vs statsmodels PHReg (Efron ties); C-index and Kaplan-Meier vs independent NumPy implementations
+from statsmodels.duration.hazard_regression import PHReg
+from statsmodels.duration.survfunc import SurvfuncRight
+cT=np.array(o['cxT']); cE=np.array(o['cxE']); cX=np.array(o['cxX'])
+ph=PHReg(cT,cX,status=cE,ties='efron').fit()
+chk('Cox coefficients (Efron ties, vs statsmodels PHReg)',o['cox']['beta'],ph.params,1e-6)
+chk('Cox standard errors',o['cox']['se'],ph.bse,1e-6)
+chk('Cox log partial likelihood',o['cox']['loglik'],ph.llf,1e-6)
+lp=cX@np.array(o['cox']['beta']); w=np.exp(lp); Hb=[]
+for t in [0.3,0.8,1.5]:
+    Hb.append(sum(np.sum((cT==u)&(cE==1))/w[cT>=u].sum() for u in np.unique(cT[(cE==1)&(cT<=t)])))
+chk('Breslow baseline cumulative hazard',o['cox']['H'],Hb,1e-9)
+conc=comp=0.0
+for i in range(len(cT)):
+    if cE[i]!=1: continue
+    m=(cT>cT[i])|((cT==cT[i])&(cE==0)); comp+=m.sum(); conc+=(lp[i]>lp[m]).sum()+0.5*(lp[i]==lp[m]).sum()
+chk("Harrell's C-index",o['cindex'],conc/comp,1e-12)
+sf=SurvfuncRight(cT,cE)
+chk('Kaplan-Meier survival (vs statsmodels SurvfuncRight)',o['km'],[sf.surv_prob[sf.surv_times<=t][-1] for t in [0.5,1,2]],1e-12)
 w=max(len(x[1]) for x in res)
 for st,nm,d,t in res: print(f'{st}  {nm:<{w}}  max|diff|={d:.2e}  (tol {t:.0e})')
 print(f"\n{sum(1 for x in res if x[0]=='PASS')}/{len(res)} checks passed")

@@ -112,6 +112,13 @@ function outputsOf(model, X, k) {
             res.models.ensemble = outputsOf(ens, test.X, k);
             ens.dispose();
 
+            const gbm = new GradientBoostingModel(isClf, k, {
+                nEstimators: H.gbm_rounds, learningRate: H.gbm_lr, maxDepth: H.gbm_depth, l2: H.gbm_l2, maxBins: H.gbm_bins,
+                minSamplesLeaf: H.gbm_min_leaf, subsample: 1, earlyStopping: true, validationFraction: 0.15, patience: 15, seed
+            });
+            await gbm.fitAsync(prep.X, prep.y);
+            res.models.gbm = outputsOf(gbm, test.X, k);
+
             out.datasets[ds.name].push(res);
             process.stderr.write(`  app: ${ds.name} split seed ${seed} done\n`);
         }

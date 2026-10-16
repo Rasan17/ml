@@ -1647,6 +1647,326 @@
     // ==========================================
     // 7. MODEL MANAGER & EVALUATION METRICS
     // ==========================================
+
+    // ==========================================
+    // GRADIENT-BOOSTED TREES (histogram GBM)
+    // ==========================================
+    // Second-order gradient boosting of depth-limited regression trees on quantile-binned features (as in
+    // LightGBM / scikit-learn HistGradientBoosting): logistic loss (binary), softmax (multiclass) or squared
+    // error (regression); leaf values -G/(H+lambda); row subsampling; early stopping on an internal,
+    // stratified validation slice of the training data (the test set is never used).
+    class GradientBoostingModel {
+        constructor(isClassification = true, numClasses = 2, config = {}) {
+            this.isClassification = isClassification;
+            this.numClasses = isClassification ? Math.max(2, numClasses) : 1;
+            this.nEstimators = config.nEstimators || 200;
+            this.learningRate = config.learningRate || 0.1;
+            this.maxDepth = config.maxDepth || 3;
+            this.minSamplesLeaf = config.minSamplesLeaf || 5;
+            this.lambda = config.l2 !== undefined ? config.l2 : 1;
+            this.subsample = config.subsample || 0.8;
+            this.maxBins = config.maxBins || 32;
+            this.earlyStopping = config.earlyStopping !== false;
+            this.validationFraction = config.validationFraction || 0.15;
+            this.patience = config.patience || 15;
+            this.seed = config.seed !== null && config.seed !== undefined && config.seed !== '' ? Number(config.seed) : null;
+            this.trees = [];       // rounds x K trees
+            this.init = [];        // initial raw scores
+            this.binEdges = [];    // per feature: thresholds between bins
+            this.featureImportances = [];
+            this.trainingInfo = null;
+        }
+
+        get K() { return this.isClassification && this.numClasses > 2 ? this.numClasses : 1; }
+
+        _bin(X) {
+            const p = X[0].length;
+            this.binEdges = [];
+            for (let j = 0; j < p; j++) {
+                const vals = X.map(r => r[j]).sort((a, b) => a - b);
+                const uniq = [...new Set(vals)];
+                let edges;
+                if (uniq.length <= this.maxBins) edges = uniq.slice(0, -1).map((v, i) => (v + uniq[i + 1]) / 2);
+                else {
+                    edges = [];
+                    for (let b = 1; b < this.maxBins; b++) {
+                        const q = vals[Math.floor((b * vals.length) / this.maxBins)];
+                        const prev = vals[Math.floor((b * vals.length) / this.maxBins) - 1];
+                        const e = (q + prev) / 2;
+                        if (!edges.length || e > edges[edges.length - 1]) edges.push(e);
+                    }
+                }
+                this.binEdges.push(edges);
+            }
+        }
+
+        _binIndex(j, v) {
+            const e = this.binEdges[j];
+            let lo = 0, hi = e.length;
+            while (lo < hi) { const mid = (lo + hi) >> 1; if (v <= e[mid]) hi = mid; else lo = mid + 1; }
+            return lo;
+        }
+
+        _buildTree(B, rows, g, h, depth, gainAcc) {
+            let G = 0, H = 0;
+            rows.forEach(i => { G += g[i]; H += h[i]; });
+            const leaf = { leaf: true, v: -G / (H + this.lambda) };
+            if (depth >= this.maxDepth || rows.length < 2 * this.minSamplesLeaf) return leaf;
+            const p = this.binEdges.length;
+            const parentScore = (G * G) / (H + this.lambda);
+            let best = null;
+            for (let j = 0; j < p; j++) {
+                const nb = this.binEdges[j].length + 1;
+                if (nb < 2) continue;
+                const hg = new Float64Array(nb), hh = new Float64Array(nb), hc = new Int32Array(nb);
+                rows.forEach(i => { const b = B[i][j]; hg[b] += g[i]; hh[b] += h[i]; hc[b]++; });
+                let gl = 0, hl = 0, cl = 0;
+                for (let b = 0; b < nb - 1; b++) {
+                    gl += hg[b]; hl += hh[b]; cl += hc[b];
+                    const cr = rows.length - cl;
+                    if (cl < this.minSamplesLeaf || cr < this.minSamplesLeaf) continue;
+                    const gr = G - gl, hr = H - hl;
+                    const gain = (gl * gl) / (hl + this.lambda) + (gr * gr) / (hr + this.lambda) - parentScore;
+                    if (gain > 1e-12 && (!best || gain > best.gain)) best = { gain, j, b };
+                }
+            }
+            if (!best) return leaf;
+            gainAcc[best.j] += best.gain;
+            const left = [], right = [];
+            rows.forEach(i => (B[i][best.j] <= best.b ? left : right).push(i));
+            return {
+                leaf: false, f: best.j, t: this.binEdges[best.j][best.b],
+                l: this._buildTree(B, left, g, h, depth + 1, gainAcc),
+                r: this._buildTree(B, right, g, h, depth + 1, gainAcc)
+            };
+        }
+
+        _treeValue(node, x) {
+            while (!node.leaf) node = x[node.f] <= node.t ? node.l : node.r;
+            return node.v;
+        }
+
+        _raw(x, nRounds = this.trees.length) {
+            const f = this.init.slice();
+            for (let m = 0; m < nRounds; m++) for (let k = 0; k < this.K; k++) f[k] += this.learningRate * this._treeValue(this.trees[m][k], x);
+            return f;
+        }
+
+        _loss(F, y) {
+            // mean loss of raw scores F (n x K) against labels y
+            let L = 0;
+            for (let i = 0; i < y.length; i++) {
+                if (!this.isClassification) L += (F[i][0] - y[i]) ** 2;
+                else if (this.K === 1) { const p = 1 / (1 + Math.exp(-F[i][0])); L -= y[i] === 1 ? Math.log(Math.max(p, 1e-15)) : Math.log(Math.max(1 - p, 1e-15)); }
+                else { const mx = Math.max(...F[i]); const z = F[i].reduce((a, v) => a + Math.exp(v - mx), 0); L -= F[i][y[i]] - mx - Math.log(z); }
+            }
+            return L / y.length;
+        }
+
+        fit(X, y) { for (const _ of this._fitGen(X, y)) { /* run to completion */ } }
+
+        async fitAsync(X, y, opts = {}) {
+            let n = 0;
+            for (const _ of this._fitGen(X, y)) {
+                if (++n % 5 === 0) { await yieldToBrowser(); if (typeof opts.onYield === 'function') opts.onYield(n); }
+            }
+        }
+
+        *_fitGen(X, y) {
+            const rng = createPRNG(this.seed);
+            const nAll = X.length;
+            // Internal validation slice for early stopping (stratified for classification)
+            let trI = Array.from({ length: nAll }, (_, i) => i), vaI = [];
+            if (this.earlyStopping && nAll >= 40) {
+                const groups = {};
+                trI.forEach(i => { const key = this.isClassification ? y[i] : 0; (groups[key] = groups[key] || []).push(i); });
+                trI = []; vaI = [];
+                Object.values(groups).forEach(list => {
+                    for (let a = list.length - 1; a > 0; a--) { const b = Math.floor(rng() * (a + 1)); [list[a], list[b]] = [list[b], list[a]]; }
+                    const nv = Math.round(list.length * this.validationFraction);
+                    vaI.push(...list.slice(0, nv)); trI.push(...list.slice(nv));
+                });
+            }
+            const Xtr = trI.map(i => X[i]), ytr = trI.map(i => y[i]);
+            this._bin(Xtr);
+            const p = X[0].length;
+            const Btr = Xtr.map(r => r.map((v, j) => this._binIndex(j, v)));
+            const K = this.K, n = Xtr.length;
+            // Initial scores: log-odds / log priors / mean
+            if (!this.isClassification) this.init = [ytr.reduce((a, b) => a + b, 0) / n];
+            else if (K === 1) { const pr = Math.min(1 - 1e-6, Math.max(1e-6, ytr.filter(v => v === 1).length / n)); this.init = [Math.log(pr / (1 - pr))]; }
+            else this.init = Array.from({ length: K }, (_, k) => Math.log(Math.max(1e-6, ytr.filter(v => v === k).length / n)));
+            const F = Xtr.map(() => this.init.slice());
+            const Fva = vaI.map(() => this.init.slice());
+            const gainAcc = new Float64Array(p);
+            this.trees = [];
+            let bestLoss = Infinity, bestRound = 0, sinceBest = 0;
+            for (let m = 0; m < this.nEstimators; m++) {
+                const round = [];
+                // Gradients and hessians for every output
+                const grads = [], hess = [];
+                for (let k = 0; k < K; k++) { grads.push(new Float64Array(n)); hess.push(new Float64Array(n)); }
+                for (let i = 0; i < n; i++) {
+                    if (!this.isClassification) { grads[0][i] = F[i][0] - ytr[i]; hess[0][i] = 1; }
+                    else if (K === 1) { const pr = 1 / (1 + Math.exp(-F[i][0])); grads[0][i] = pr - (ytr[i] === 1 ? 1 : 0); hess[0][i] = Math.max(pr * (1 - pr), 1e-12); }
+                    else {
+                        const mx = Math.max(...F[i]); const ex = F[i].map(v => Math.exp(v - mx)); const z = ex.reduce((a, b) => a + b, 0);
+                        for (let k = 0; k < K; k++) { const pr = ex[k] / z; grads[k][i] = pr - (ytr[i] === k ? 1 : 0); hess[k][i] = Math.max(pr * (1 - pr), 1e-12); }
+                    }
+                }
+                // Row subsample shared by the K trees of this round
+                const rows = [];
+                for (let i = 0; i < n; i++) if (this.subsample >= 1 || rng() < this.subsample) rows.push(i);
+                for (let k = 0; k < K; k++) {
+                    const tree = this._buildTree(Btr, rows.length ? rows : Array.from({ length: n }, (_, i) => i), grads[k], hess[k], 0, gainAcc);
+                    round.push(tree);
+                    for (let i = 0; i < n; i++) F[i][k] += this.learningRate * this._treeValue(tree, Xtr[i]);
+                    for (let i = 0; i < vaI.length; i++) Fva[i][k] += this.learningRate * this._treeValue(tree, X[vaI[i]]);
+                }
+                this.trees.push(round);
+                if (vaI.length) {
+                    const L = this._loss(Fva, vaI.map(i => y[i]));
+                    if (L < bestLoss - 1e-9) { bestLoss = L; bestRound = m + 1; sinceBest = 0; } else if (++sinceBest >= this.patience) break;
+                } else bestRound = m + 1;
+                yield m;
+            }
+            const roundsRun = this.trees.length;
+            this.trees = this.trees.slice(0, Math.max(1, bestRound));
+            const tot = gainAcc.reduce((a, b) => a + b, 0);
+            this.featureImportances = Array.from(gainAcc, v => (tot > 0 ? Number((v / tot).toFixed(4)) : 0));
+            this.trainingInfo = { fitCases: n, validationCases: vaI.length, roundsRun, bestRounds: this.trees.length, earlyStopped: roundsRun < this.nEstimators, maxRounds: this.nEstimators };
+        }
+
+        predictSingle(x) {
+            const f = this._raw(x);
+            if (!this.isClassification) return { pred: Number(f[0].toFixed(4)), confidence: null };
+            let probs;
+            if (this.K === 1) { const p1 = 1 / (1 + Math.exp(-f[0])); probs = { 0: 1 - p1, 1: p1 }; }
+            else { const mx = Math.max(...f); const ex = f.map(v => Math.exp(v - mx)); const z = ex.reduce((a, b) => a + b, 0); probs = {}; ex.forEach((v, k) => { probs[k] = v / z; }); }
+            let pred = 0;
+            Object.keys(probs).forEach(k => { if (probs[k] > probs[pred]) pred = Number(k); });
+            Object.keys(probs).forEach(k => { probs[k] = Number(probs[k].toFixed(4)); });
+            return { pred, probabilities: probs, confidence: probs[pred], probabilityType: 'model' };
+        }
+
+        predict(X) { return X.map(x => this.predictSingle(x).pred); }
+        predictOutputs(X) { return X.map(x => this.predictSingle(x)); }
+    }
+
+
+    // ==========================================
+    // COX PROPORTIONAL-HAZARDS MODEL (time-to-event outcomes)
+    // ==========================================
+    // Partial likelihood with Efron's handling of tied event times, fitted by Newton-Raphson (optional small
+    // ridge penalty for stability); hazard ratios with Wald 95% CIs; Breslow baseline cumulative hazard for
+    // predicted survival S(t | x) = exp(-H0(t) * exp(x'b)).
+    class CoxModel {
+        constructor(config = {}) {
+            this.penalty = config.penalty || 0;
+            this.maxIter = config.maxIter || 50;
+            this.beta = null;
+            this.se = null;
+            this.loglik = null;
+            this.baseline = { times: [], cumHaz: [] };
+            this.converged = false;
+            this.note = null;
+        }
+
+        fit(X, time, event) {
+            const n = X.length, p = X[0].length;
+            const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => time[b] - time[a]); // descending time
+            let beta = new Array(p).fill(0);
+            let ll = -Infinity, info = null;
+            const evalAt = (b) => {
+                const eta = X.map(x => x.reduce((a, v, j) => a + v * b[j], 0));
+                const w = eta.map(e => Math.exp(e));
+                let loglik = 0;
+                const grad = new Array(p).fill(0);
+                const hess = Array.from({ length: p }, () => new Array(p).fill(0));
+                let S0 = 0; const S1 = new Array(p).fill(0); const S2 = Array.from({ length: p }, () => new Array(p).fill(0));
+                let k = 0;
+                while (k < n) {
+                    // all cases sharing this time enter the risk set together
+                    const t = time[order[k]];
+                    const group = [];
+                    while (k < n && time[order[k]] === t) { group.push(order[k]); k++; }
+                    group.forEach(i => {
+                        S0 += w[i];
+                        for (let a = 0; a < p; a++) { S1[a] += w[i] * X[i][a]; for (let c = a; c < p; c++) S2[a][c] += w[i] * X[i][a] * X[i][c]; }
+                    });
+                    const deaths = group.filter(i => event[i] === 1);
+                    const d = deaths.length;
+                    if (!d) continue;
+                    let D0 = 0; const D1 = new Array(p).fill(0); const D2 = Array.from({ length: p }, () => new Array(p).fill(0));
+                    deaths.forEach(i => {
+                        D0 += w[i]; loglik += eta[i];
+                        for (let a = 0; a < p; a++) { D1[a] += w[i] * X[i][a]; grad[a] += X[i][a]; for (let c = a; c < p; c++) D2[a][c] += w[i] * X[i][a] * X[i][c]; }
+                    });
+                    for (let l = 0; l < d; l++) {
+                        const f = l / d;
+                        const s0 = S0 - f * D0;
+                        loglik -= Math.log(s0);
+                        const s1 = S1.map((v, a) => v - f * D1[a]);
+                        for (let a = 0; a < p; a++) {
+                            grad[a] -= s1[a] / s0;
+                            for (let c = a; c < p; c++) hess[a][c] -= (S2[a][c] - f * D2[a][c]) / s0 - (s1[a] * s1[c]) / (s0 * s0);
+                        }
+                    }
+                }
+                for (let a = 0; a < p; a++) for (let c = 0; c < a; c++) hess[a][c] = hess[c][a];
+                if (this.penalty > 0) for (let a = 0; a < p; a++) { loglik -= 0.5 * this.penalty * b[a] * b[a]; grad[a] -= this.penalty * b[a]; hess[a][a] -= this.penalty; }
+                return { loglik, grad, hess };
+            };
+            for (let it = 0; it < this.maxIter; it++) {
+                const r = evalAt(beta);
+                const negH = r.hess.map(row => row.map(v => -v));
+                const step = solveLinear(negH, r.grad);
+                if (!step) { this.note = 'The predictors are collinear, so the Cox model cannot be estimated; try fewer predictors.'; break; }
+                // step halving keeps the partial likelihood increasing
+                let t = 1, nb = beta.map((b, j) => b + step[j]), r2 = evalAt(nb);
+                while (r2.loglik < r.loglik - 1e-10 && t > 1e-4) { t /= 2; nb = beta.map((b, j) => b + t * step[j]); r2 = evalAt(nb); }
+                beta = nb; ll = r2.loglik; info = r2.hess.map(row => row.map(v => -v));
+                if (beta.some(b => !isFinite(b) || Math.abs(b) > 30)) { this.note = 'The model did not converge: a predictor separates the event times (almost) perfectly.'; break; }
+                if (Math.max(...step.map(v => Math.abs(v * t))) < 1e-9) { this.converged = true; break; }
+            }
+            this.beta = beta;
+            this.loglik = ll;
+            const inv = info ? invertMatrix(info) : null;
+            this.se = inv ? inv.map((row, j) => Math.sqrt(Math.max(row[j], 0))) : beta.map(() => NaN);
+            if (!this.converged && !this.note) this.note = 'The model did not converge within the iteration limit.';
+            // Breslow baseline cumulative hazard at each distinct event time
+            const risk = X.map(x => Math.exp(x.reduce((a, v, j) => a + v * beta[j], 0)));
+            const eventTimes = [...new Set(time.filter((t, i) => event[i] === 1))].sort((a, b) => a - b);
+            let H = 0;
+            this.baseline = { times: [], cumHaz: [] };
+            eventTimes.forEach(t => {
+                let d = 0, s = 0;
+                for (let i = 0; i < n; i++) { if (time[i] >= t) s += risk[i]; if (time[i] === t && event[i] === 1) d++; }
+                H += d / s;
+                this.baseline.times.push(t); this.baseline.cumHaz.push(H);
+            });
+            return this;
+        }
+
+        linearPredictor(x) { return x.reduce((a, v, j) => a + v * this.beta[j], 0); }
+
+        cumHazAt(t) {
+            const ts = this.baseline.times;
+            let lo = 0, hi = ts.length;
+            while (lo < hi) { const mid = (lo + hi) >> 1; if (ts[mid] <= t) lo = mid + 1; else hi = mid; }
+            return lo === 0 ? 0 : this.baseline.cumHaz[lo - 1];
+        }
+
+        survivalAt(x, t) { return Math.exp(-this.cumHazAt(t) * Math.exp(this.linearPredictor(x))); }
+
+        summary(names) {
+            return this.beta.map((b, j) => {
+                const se = this.se[j], z = se > 0 ? b / se : null;
+                return { name: names ? names[j] : `x${j + 1}`, coef: b, se, z, p: z === null ? null : 2 * (1 - normalCdf(Math.abs(z))), hr: Math.exp(b), hrLow: Math.exp(b - 1.959964 * se), hrHigh: Math.exp(b + 1.959964 * se) };
+            });
+        }
+    }
+
     // ==========================================
     // RECALIBRATION WRAPPER (binary outcomes)
     // ==========================================
@@ -1739,6 +2059,8 @@
                     userHyperparams.weighting || 'uniform',
                     seed
                 );
+            } else if (modelId === 'gbm') {
+                model = new GradientBoostingModel(isClassification, numClasses, userHyperparams);
             } else if (modelId === 'nb') {
                 if (!isClassification) throw new Error("Naive Bayes is only supported for classification tasks.");
                 model = new GaussianNaiveBayes(
@@ -2197,6 +2519,7 @@
             if (model instanceof GeneralizedLinearModel) return { type: 'glm', state: plain(model) };
             if (model instanceof KNNModel) return { type: 'knn', state: plain(model) };
             if (model instanceof GaussianNaiveBayes) return { type: 'nb', state: plain(model) };
+            if (model instanceof GradientBoostingModel) return { type: 'gbm', state: plain(model) };
             if (model instanceof DeepNeuralNetwork) {
                 const out = { type: 'nn', state: plain(model, ['tfModel', 'fallbackGLM', 'history']) };
                 if (model.fallbackGLM) out.fallbackGLM = await this.serializeModel(model.fallbackGLM);
@@ -2240,6 +2563,7 @@
             if (obj.type === 'glm') return restore(GeneralizedLinearModel.prototype, obj.state);
             if (obj.type === 'knn') return restore(KNNModel.prototype, obj.state);
             if (obj.type === 'nb') return restore(GaussianNaiveBayes.prototype, obj.state);
+            if (obj.type === 'gbm') return restore(GradientBoostingModel.prototype, obj.state);
             if (obj.type === 'nn') {
                 const m = restore(DeepNeuralNetwork.prototype, obj.state);
                 m.history = { loss: [], valLoss: [], accuracy: [], valAccuracy: [] };
@@ -2326,6 +2650,37 @@
             }
             return out;
         },
+
+        /** Harrell's concordance index: share of comparable pairs (earlier event vs later time) ranked correctly by risk */
+        concordanceIndex(time, event, risk) {
+            let conc = 0, comp = 0;
+            const n = time.length;
+            for (let i = 0; i < n; i++) {
+                if (event[i] !== 1) continue;
+                for (let j = 0; j < n; j++) {
+                    if (time[j] > time[i] || (time[j] === time[i] && event[j] === 0 && j !== i)) {
+                        comp++;
+                        if (risk[i] > risk[j]) conc++; else if (risk[i] === risk[j]) conc += 0.5;
+                    }
+                }
+            }
+            return comp ? conc / comp : null;
+        },
+
+        /** Kaplan-Meier survival estimate: [{time, survival, atRisk, events}] */
+        kaplanMeier(time, event) {
+            const ts = [...new Set(time)].sort((a, b) => a - b);
+            let S = 1;
+            const out = [{ time: 0, survival: 1, atRisk: time.length, events: 0 }];
+            ts.forEach(t => {
+                const atRisk = time.filter(v => v >= t).length;
+                const d = time.filter((v, i) => v === t && event[i] === 1).length;
+                if (d > 0 && atRisk > 0) { S *= 1 - d / atRisk; out.push({ time: t, survival: S, atRisk, events: d }); }
+            });
+            return out;
+        },
+        kmAt(km, t) { let s = 1; for (const k of km) { if (k.time <= t) s = k.survival; else break; } return s; },
+        createCox(config) { return new CoxModel(config); },
 
         /** Platt scaling: logistic regression of the outcome on logit(p) (Newton-Raphson); null if not estimable */
         fitPlatt(y, p) {
@@ -2474,4 +2829,6 @@
     window.GaussianNaiveBayes = GaussianNaiveBayes;
     window.EnsembleModel = EnsembleModel;
     window.CalibratedModel = CalibratedModel;
+    window.GradientBoostingModel = GradientBoostingModel;
+    window.CoxModel = CoxModel;
 })(window);

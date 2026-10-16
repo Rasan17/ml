@@ -16,6 +16,8 @@ function updateHyperparamsVisibility(targetModelId) {
     const isKNN = activeId === 'knn';
     const isNB = activeId === 'nb';
     const isEnsemble = activeId === 'ensemble';
+    const gbmBox = document.getElementById('gbm-params-box');
+    if (gbmBox) gbmBox.style.display = activeId === 'gbm' ? 'grid' : 'none';
 
     const nnBox = document.getElementById('nn-params-box');
     const rfBox = document.getElementById('rf-params-box');
@@ -234,6 +236,14 @@ function getHyperparamsForModel(modelId, prep) {
         hp.metric = metricEl ? metricEl.value : 'euclidean';
         const weightEl = document.getElementById('knn-weighting-select');
         hp.weighting = weightEl ? weightEl.value : 'uniform';
+    } else if (modelId === 'gbm') {
+        hp.nEstimators = parseInt(document.getElementById('gbm-rounds-input')?.value, 10) || 200;
+        hp.learningRate = parseFloat(document.getElementById('gbm-lr-select')?.value) || 0.1;
+        hp.maxDepth = parseInt(document.getElementById('gbm-depth-input')?.value, 10) || 3;
+        hp.minSamplesLeaf = parseInt(document.getElementById('gbm-minleaf-select')?.value, 10) || 5;
+        const l2 = parseFloat(document.getElementById('gbm-l2-select')?.value);
+        hp.l2 = isNaN(l2) ? 1 : l2;
+        hp.subsample = parseFloat(document.getElementById('gbm-subsample-select')?.value) || 0.8;
     } else if (modelId === 'nb') {
         const smoothEl = document.getElementById('nb-smoothing-select');
         hp.varSmoothing = smoothEl ? parseFloat(smoothEl.value) : 1e-4;

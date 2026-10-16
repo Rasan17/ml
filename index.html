@@ -336,7 +336,7 @@
                                 <input type="radio" name="model-scope" id="scope-all" value="all" style="accent-color: var(--accent-emerald); cursor: pointer;">
                                 <div>
                                     <div style="font-size: 13px; font-weight: 700; color: var(--text-primary);">Test All Models</div>
-                                    <div style="font-size: 11px; color: var(--text-secondary);">Benchmark all 6 models in tournament</div>
+                                    <div style="font-size: 11px; color: var(--text-secondary);">Benchmark all 7 models in tournament</div>
                                 </div>
                             </label>
                         </div>
@@ -524,6 +524,42 @@
                             </div>
                         </div>
 
+                        <div class="model-card" data-model-id="gbm">
+                            <div class="model-card-header">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <input type="checkbox" class="model-select-checkbox" data-model-id="gbm" style="accent-color: var(--accent-cyan); width: 16px; height: 16px; cursor: pointer;">
+                                    <span class="model-card-title">Gradient-Boosted Trees</span>
+                                </div>
+                                <span class="pill pill-continuous">Boosting</span>
+                            </div>
+                            <div class="model-card-desc">
+                                Shallow decision trees added one after another, each correcting the errors of the previous ones (histogram gradient boosting, as in LightGBM / XGBoost). Often the strongest model for tabular data; early stopping on an internal validation slice of the training data limits overfitting.
+                            </div>
+                            <!-- Model Seed Control -->
+                            <div class="model-seed-box" data-model="gbm" onclick="event.stopPropagation()">
+                                <div class="model-seed-header">
+                                    <span class="model-seed-title">🌱 Seed:</span>
+                                    <div class="seed-mode-selector">
+                                        <label class="seed-mode-pill">
+                                            <input type="radio" name="seed-mode-gbm" value="default" class="seed-mode-radio" data-model="gbm" checked>
+                                            <span>Default (42)</span>
+                                        </label>
+                                        <label class="seed-mode-pill">
+                                            <input type="radio" name="seed-mode-gbm" value="custom" class="seed-mode-radio" data-model="gbm">
+                                            <span>Custom</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="custom-seed-row" id="custom-seed-row-gbm" style="display: none;">
+                                    <div class="seed-input-wrap">
+                                        <input type="number" id="gbm-card-seed-input" class="control-input card-seed-input" data-model="gbm" placeholder="Custom seed" value="42">
+                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="gbm" title="Generate random seed">🎲</button>
+                                    </div>
+                                    <span class="seed-hint">Reference seed recorded for provenance.</span>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="model-card" data-model-id="ensemble">
                             <div class="model-card-header">
                                 <div style="display: flex; align-items: center; gap: 8px;">
@@ -573,6 +609,7 @@
                                     <option value="glm">Logistic / Ridge Regression</option>
                                     <option value="knn">k-Nearest Neighbors (k-NN)</option>
                                     <option value="nb">Naive Bayes (Gaussian + Bernoulli)</option>
+                                    <option value="gbm">Gradient-Boosted Trees</option>
                                     <option value="ensemble">Voting / Weighted Ensemble</option>
                                 </select>
                             </div>
@@ -1048,6 +1085,71 @@
                                 <div class="seed-input-wrap" id="hp-seed-wrap-nb" style="display: none;">
                                     <input type="number" id="nb-seed-input" class="control-input" placeholder="e.g. 42" value="42">
                                     <button type="button" class="btn-roll-seed" id="btn-roll-nb-seed" title="Generate random seed">🎲</button>
+                                </div>
+                                <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
+                            </div>
+                        </div>
+
+                        <!-- Gradient-Boosted Trees Hyperparams -->
+                        <div id="gbm-params-box" class="hyperparam-box" style="display: none;">
+                            <div class="param-group">
+                                <label for="gbm-rounds-input">Maximum Boosting Rounds</label>
+                                <input type="number" id="gbm-rounds-input" class="control-input" value="200" min="10" max="2000" step="10">
+                            </div>
+                            <div class="param-group">
+                                <label for="gbm-lr-select">Learning Rate (Shrinkage)</label>
+                                <select id="gbm-lr-select" class="control-select">
+                                    <option value="0.03">0.03 (slow, cautious)</option>
+                                    <option value="0.05">0.05</option>
+                                    <option value="0.1" selected>0.1 (standard)</option>
+                                    <option value="0.2">0.2 (fast)</option>
+                                </select>
+                            </div>
+                            <div class="param-group">
+                                <label for="gbm-depth-input">Maximum Tree Depth</label>
+                                <input type="number" id="gbm-depth-input" class="control-input" value="3" min="1" max="8">
+                            </div>
+                            <div class="param-group">
+                                <label for="gbm-minleaf-select">Minimum Patients per Leaf</label>
+                                <select id="gbm-minleaf-select" class="control-select">
+                                    <option value="3">3</option>
+                                    <option value="5" selected>5</option>
+                                    <option value="10">10</option>
+                                    <option value="20">20</option>
+                                </select>
+                            </div>
+                            <div class="param-group">
+                                <label for="gbm-l2-select">L2 Leaf Regularisation (λ)</label>
+                                <select id="gbm-l2-select" class="control-select">
+                                    <option value="0">0</option>
+                                    <option value="1" selected>1</option>
+                                    <option value="5">5</option>
+                                    <option value="10">10</option>
+                                </select>
+                            </div>
+                            <div class="param-group">
+                                <label for="gbm-subsample-select">Row Subsample per Round</label>
+                                <select id="gbm-subsample-select" class="control-select">
+                                    <option value="1">100% (no subsampling)</option>
+                                    <option value="0.8" selected>80% (stochastic boosting)</option>
+                                    <option value="0.6">60%</option>
+                                </select>
+                            </div>
+                            <div class="param-group">
+                                <span class="group-label" id="group-label-hp-seed-mode-gbm">Random Seed (Reproducibility)</span>
+                                <div role="radiogroup" aria-labelledby="group-label-hp-seed-mode-gbm" style="display: flex; gap: 6px; align-items: center; margin-bottom: 4px;">
+                                    <label class="seed-mode-pill" style="font-size: 10.5px; padding: 2px 7px;">
+                                        <input type="radio" name="hp-seed-mode-gbm" value="default" class="hp-seed-mode-radio" data-model="gbm" checked>
+                                        <span>Default (42)</span>
+                                    </label>
+                                    <label class="seed-mode-pill" style="font-size: 10.5px; padding: 2px 7px;">
+                                        <input type="radio" name="hp-seed-mode-gbm" value="custom" class="hp-seed-mode-radio" data-model="gbm">
+                                        <span>Custom Seed</span>
+                                    </label>
+                                </div>
+                                <div class="seed-input-wrap" id="hp-seed-wrap-gbm" style="display: none;">
+                                    <input type="number" id="gbm-seed-input" class="control-input" placeholder="e.g. 42" value="42">
+                                    <button type="button" class="btn-roll-seed" id="btn-roll-gbm-seed" title="Generate random seed">🎲</button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
                             </div>
@@ -1899,11 +2001,11 @@
     <script src="chart.umd.min.js"></script>
     <script src="tf.min.js"></script>
     <script src="data-engine.js?h=c64ca266d5"></script>
-    <script src="models.js?h=b94c22ecc9"></script>
+    <script src="models.js?h=e203942f41"></script>
     <!-- Application controller: ES modules (src/); when opened directly from disk (file://), where browsers
          block modules, the generated single-file bundle is used instead (node tools/build.js). -->
     <!-- IMPORTMAP:START (generated by tools/build.js) -->
-    <script type="importmap">{"imports":{"./src/batch-prediction.js":"./src/batch-prediction.js?h=23849bd4e2","./src/compute.js":"./src/compute.js?h=f39dd1fc2e","./src/core.js":"./src/core.js?h=8bf68990f8","./src/cv-tuning.js":"./src/cv-tuning.js?h=b6d7865dca","./src/imputation.js":"./src/imputation.js?h=4dc58d1908","./src/ingest.js":"./src/ingest.js?h=49c018c231","./src/main.js":"./src/main.js?h=8c179e9833","./src/model-io.js":"./src/model-io.js?h=b6013f41d0","./src/navigation.js":"./src/navigation.js?h=8832ca5a59","./src/panels.js":"./src/panels.js?h=ca5c2f392e","./src/pipeline-results.js":"./src/pipeline-results.js?h=dcfce4d612","./src/pipeline.js":"./src/pipeline.js?h=ece98d6ff2","./src/reports.js":"./src/reports.js?h=13ab6d86fb","./src/settings.js":"./src/settings.js?h=e1a4f741f7","./src/shell.js":"./src/shell.js?h=a3abcdfe86","./src/single-prediction.js":"./src/single-prediction.js?h=75f6769b32","./src/standard-training.js":"./src/standard-training.js?h=ca7905d98a","./src/training-setup.js":"./src/training-setup.js?h=060e3c4bb9","./src/variables.js":"./src/variables.js?h=bf4376fc58","./src/watchdog.js":"./src/watchdog.js?h=582f5a6b6e","./data-engine.js":"./data-engine.js?h=c64ca266d5","./models.js":"./models.js?h=b94c22ecc9","./compute-worker.js":"./compute-worker.js?h=efe57bab28"}}</script>
+    <script type="importmap">{"imports":{"./src/batch-prediction.js":"./src/batch-prediction.js?h=23849bd4e2","./src/compute.js":"./src/compute.js?h=f39dd1fc2e","./src/core.js":"./src/core.js?h=a4a5aa70f1","./src/cv-tuning.js":"./src/cv-tuning.js?h=d173c363a9","./src/imputation.js":"./src/imputation.js?h=4dc58d1908","./src/ingest.js":"./src/ingest.js?h=49c018c231","./src/main.js":"./src/main.js?h=8c179e9833","./src/model-io.js":"./src/model-io.js?h=b6013f41d0","./src/navigation.js":"./src/navigation.js?h=8832ca5a59","./src/panels.js":"./src/panels.js?h=ca5c2f392e","./src/pipeline-results.js":"./src/pipeline-results.js?h=dcfce4d612","./src/pipeline.js":"./src/pipeline.js?h=ece98d6ff2","./src/reports.js":"./src/reports.js?h=13ab6d86fb","./src/settings.js":"./src/settings.js?h=e1a4f741f7","./src/shell.js":"./src/shell.js?h=57f29132c5","./src/single-prediction.js":"./src/single-prediction.js?h=75f6769b32","./src/standard-training.js":"./src/standard-training.js?h=ca7905d98a","./src/training-setup.js":"./src/training-setup.js?h=2263435747","./src/variables.js":"./src/variables.js?h=bf4376fc58","./src/watchdog.js":"./src/watchdog.js?h=582f5a6b6e","./data-engine.js":"./data-engine.js?h=c64ca266d5","./models.js":"./models.js?h=e203942f41","./compute-worker.js":"./compute-worker.js?h=efe57bab28"}}</script>
     <!-- IMPORTMAP:END -->
     <script type="module" src="src/main.js?h=8c179e9833"></script>
     <script>if (location.protocol === 'file:') document.write('<script src="dist/app.bundle.js"><\/script>');</script>

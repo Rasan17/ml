@@ -438,7 +438,7 @@ function setupEventListeners() {
             const mInfo = MODEL_INFO[AppState.selectedModelIds[0]] || { short: AppState.selectedModelIds[0].toUpperCase() };
             DOM.trainModelBtn.textContent = `🚀 Train & Test 1 Model (${mInfo.short})`;
         } else if (count === ALL_MODEL_IDS.length) {
-            DOM.trainModelBtn.textContent = `🏆 Run Full Tournament (Train & Test All 6 Models)`;
+            DOM.trainModelBtn.textContent = `🏆 Run Full Tournament (Train & Test All ${ALL_MODEL_IDS.length} Models)`;
         } else {
             DOM.trainModelBtn.textContent = `🚀 Train & Benchmark ${count} Selected Models`;
         }
