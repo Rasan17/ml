@@ -31,9 +31,9 @@ svg text { font-family: inherit; }
 @media print { body { margin: 0; max-width: none; } h2 { break-after: avoid; } table, svg, .cal-panel, .tune-model { break-inside: avoid; } }
 `;
 
-const pct = v => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—');
-const n3 = v => (typeof v === 'number' ? v.toFixed(3) : '—');
-const ciTxt = (ev, k, f) => (ev && ev.ci && ev.ci[k] ? `<span class="ci">95% CI ${f(ev.ci[k][0])}–${f(ev.ci[k][1])}</span>` : '');
+const rptPct = v => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—');
+const rptN3 = v => (typeof v === 'number' ? v.toFixed(3) : '—');
+const rptCi = (ev, k, f) => (ev && ev.ci && ev.ci[k] ? `<span class="ci">95% CI ${f(ev.ci[k][0])}–${f(ev.ci[k][1])}</span>` : '');
 
 function reportItems(source) {
     if (source === 'pipeline') {
@@ -45,14 +45,14 @@ function reportItems(source) {
 function resultsTable(items, isClassification, optionC) {
     if (isClassification) {
         return `<table><thead><tr><th>Model</th>${items.some(it => it.ev.cv) ? '<th>Cross-validated score (selection)</th>' : ''}<th>${optionC ? 'Corrected accuracy' : 'Accuracy'}</th><th>ROC-AUC</th><th>Brier ↓</th><th>Balanced accuracy</th><th>Macro F1</th><th>Calibration slope</th></tr></thead><tbody>
-            ${items.map(it => { const ev = it.ev; const cv = ev.cv; return `<tr><td><strong>${escapeHtml(it.name)}</strong></td>${items.some(x => x.ev.cv) ? `<td>${cv && typeof cv[cv.metricKey] === 'number' ? (['brierScore', 'rocAuc'].includes(cv.metricKey) ? n3(cv[cv.metricKey]) : pct(cv[cv.metricKey])) : '—'}</td>` : ''}
-                <td>${pct(ev.accuracy)}${ciTxt(ev, 'accuracy', pct)}</td><td>${n3(ev.rocAuc)}${ciTxt(ev, 'rocAuc', n3)}</td><td>${n3(ev.brierScore)}${ciTxt(ev, 'brierScore', n3)}</td>
-                <td>${pct(ev.balancedAccuracy)}${ciTxt(ev, 'balancedAccuracy', pct)}</td><td>${pct(ev.macroF1)}${ciTxt(ev, 'macroF1', pct)}</td>
-                <td>${ev.calibration && typeof ev.calibration.slope === 'number' ? n3(ev.calibration.slope) : (ev.optimismCorrection && typeof ev.optimismCorrection.calibrationSlope === 'number' ? `${n3(ev.optimismCorrection.calibrationSlope)} (corrected)` : '—')}</td></tr>`; }).join('')}
+            ${items.map(it => { const ev = it.ev; const cv = ev.cv; return `<tr><td><strong>${escapeHtml(it.name)}</strong></td>${items.some(x => x.ev.cv) ? `<td>${cv && typeof cv[cv.metricKey] === 'number' ? (['brierScore', 'rocAuc'].includes(cv.metricKey) ? rptN3(cv[cv.metricKey]) : rptPct(cv[cv.metricKey])) : '—'}</td>` : ''}
+                <td>${rptPct(ev.accuracy)}${rptCi(ev, 'accuracy', rptPct)}</td><td>${rptN3(ev.rocAuc)}${rptCi(ev, 'rocAuc', rptN3)}</td><td>${rptN3(ev.brierScore)}${rptCi(ev, 'brierScore', rptN3)}</td>
+                <td>${rptPct(ev.balancedAccuracy)}${rptCi(ev, 'balancedAccuracy', rptPct)}</td><td>${rptPct(ev.macroF1)}${rptCi(ev, 'macroF1', rptPct)}</td>
+                <td>${ev.calibration && typeof ev.calibration.slope === 'number' ? rptN3(ev.calibration.slope) : (ev.optimismCorrection && typeof ev.optimismCorrection.calibrationSlope === 'number' ? `${rptN3(ev.optimismCorrection.calibrationSlope)} (corrected)` : '—')}</td></tr>`; }).join('')}
         </tbody></table>`;
     }
     return `<table><thead><tr><th>Model</th><th>R²</th><th>RMSE ↓</th><th>MAE ↓</th></tr></thead><tbody>
-        ${items.map(it => `<tr><td><strong>${escapeHtml(it.name)}</strong></td><td>${n3(it.ev.r2)}${ciTxt(it.ev, 'r2', n3)}</td><td>${n3(it.ev.rmse)}${ciTxt(it.ev, 'rmse', n3)}</td><td>${n3(it.ev.mae)}${ciTxt(it.ev, 'mae', n3)}</td></tr>`).join('')}
+        ${items.map(it => `<tr><td><strong>${escapeHtml(it.name)}</strong></td><td>${rptN3(it.ev.r2)}${rptCi(it.ev, 'r2', rptN3)}</td><td>${rptN3(it.ev.rmse)}${rptCi(it.ev, 'rmse', rptN3)}</td><td>${rptN3(it.ev.mae)}${rptCi(it.ev, 'mae', rptN3)}</td></tr>`).join('')}
     </tbody></table>`;
 }
 

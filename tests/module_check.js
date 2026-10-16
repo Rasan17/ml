@@ -39,9 +39,14 @@ files.forEach(f => {
     }));
 });
 
+// The file:// fallback joins every module into one script, so top-level names must be unique across modules
+const vm = require('vm');
+const bundlePath = path.join(__dirname, '..', 'dist', 'app.bundle.js');
+try { new vm.Script(fs.readFileSync(bundlePath, 'utf8'), { filename: 'dist/app.bundle.js' }); } catch (e) { problems.push(`dist/app.bundle.js does not compile (${e.message}): rename the clashing top-level name and run node tools/build.js`); }
+
 if (problems.length) {
     console.log(problems.join('\n'));
     console.log(`\n${problems.length} module problem(s)`);
     process.exit(1);
 }
-console.log(`${files.length} modules: every import resolves and every cross-module call is imported`);
+console.log(`${files.length} modules: every import resolves, every cross-module call is imported, and the file:// bundle compiles`);
