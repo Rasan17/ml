@@ -224,7 +224,7 @@ node tests/edge_cases.js                                           # robustness:
 node tests/end_to_end.js                                           # 19 end-to-end checks: binary/multiclass/regression, missing values, unseen categories, rare outcome, tiny cohort, patient/date splits, calibration, threshold, NN fallback, batch = evaluation preprocessing, export/import of all model types; Option C on pure noise (tuning repeated, .632+ for flexible models, model-selection correction); .632+ no-information rates; TreeSHAP and sampled Shapley vs brute force; time-dependent AUC/Brier under censoring
 python3 tests/benchmark_vs_python.py                               # app vs scikit-learn / PyTorch / imbalanced-learn (~2 min)
 python3 tests/nn_forward_check.py                                  # exact forward pass of the trained TF.js network, recomputed in NumPy
-npm ci && npx playwright install chromium && npx playwright test   # browser smoke tests of the user interface (also run in CI)
+npm ci && npx playwright install --with-deps && npx playwright test   # 14 browser tests in Chromium, Firefox and WebKit (Safari's engine): every workflow, yes/no, numerical and three-category outcomes, and an axe-core accessibility scan (WCAG 2.1 AA) of every main screen in both themes
 node tools/build.js                                                # rebuild the file:// bundle and import-map versions after editing src/
 ```
 
@@ -235,6 +235,8 @@ These checks also run automatically on every push (GitHub Actions, `.github/work
 `tests/gpu_cpu_check.html` checks, in the browser itself, that the GPU (WebGL) backend users get gives the same neural-network predictions as the CPU backend used by the automated tests. Serve the project folder (`python3 -m http.server`) and open `http://localhost:8000/tests/gpu_cpu_check.html`; it also reports whether the GPU computes in full float32 precision on that machine.
 
 The benchmark runs the app's own engine (with the real TensorFlow.js network) on three public datasets over 10 paired train/test splits and writes [`tests/BENCHMARK_REPORT.md`](tests/BENCHMARK_REPORT.md). Latest result: preprocessing, k-NN and naive Bayes match scikit-learn to rounding; Random Forest, gradient-boosted trees (vs HistGradientBoosting), the neural network (vs PyTorch), logistic/ridge regression and the voting ensemble are equivalent within pre-specified margins (AUC ±0.02, accuracy/F1 ±0.03, R² ±0.05); SMOTENC matches imbalanced-learn in synthetic-data distribution and downstream AUC. Additional requirements: Python packages `torch` and `imbalanced-learn`.
+
+**Browsers.** The automated browser tests run in Chromium (Chrome, Edge, Brave), Firefox and WebKit, the engine of Safari, on every push. Chrome or Edge on a computer is recommended; Safari itself (on a Mac or iPad) is covered only through WebKit on Linux, which is close but not identical.
 
 ## 🚀 How to Run
 
