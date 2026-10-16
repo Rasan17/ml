@@ -18,6 +18,7 @@ import './pipeline.js';
 import './pipeline-results.js';
 import './reports.js';
 import './model-io.js';
+import './survival.js';
 import { handleUnexpectedError } from './settings.js';
 
 AppState.pipeline = createEmptyPipelineState(42);

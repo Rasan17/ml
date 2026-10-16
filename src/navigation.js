@@ -1,4 +1,5 @@
 // navigation.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+import { renderSurvivalSetup } from './survival.js';
 import { renderSampleSizePanel } from './panels.js';
 import { AppState, escapeHtml } from './core.js';
 import { renderImputationTable } from './imputation.js';
@@ -204,7 +205,11 @@ window.launch7StepPipeline = async function(event) {
 
 function goToStep(stepNum) {
     // Enforce prerequisites
-    if (stepNum !== 'pipeline') {
+    if (stepNum === 'survival' && !AppState.parsedData) {
+        alert("Please upload a CSV file or load a sample dataset first.");
+        return;
+    }
+    if (stepNum !== 'pipeline' && stepNum !== 'survival') {
         const num = parseInt(stepNum, 10);
         if (num > 1 && !AppState.parsedData && !(num > 4 && AppState.deployedSource === 'imported' && AppState.trainedModel)) {
             alert("Please upload a CSV file or load a sample dataset first.");
@@ -249,6 +254,7 @@ function goToStep(stepNum) {
     if (stepNum === 3 || stepNum === '3') renderImputationTable();
     if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); }
     if (stepNum === 5 || stepNum === '5') renderSinglePredictionForm();
+    if (stepNum === 'survival') renderSurvivalSetup();
     if (stepNum === 'pipeline') {
         initPipelineUI();
         goToPipelineSubstep(AppState.pipeline && AppState.pipeline.substep ? AppState.pipeline.substep : 1);

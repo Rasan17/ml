@@ -326,6 +326,10 @@ function setupEventListeners() {
     });
 
     // Sample Data Loaders
+    document.getElementById('sample-survival-btn')?.addEventListener('click', async () => {
+        await loadSampleDataset('medical_shunt_revision_survival.csv', 'Shunt Revision Time-to-Event Cohort (simulated, 320 patients)');
+        if (AppState.parsedData) goToStep('survival');
+    });
     document.getElementById('sample-breast-btn')?.addEventListener('click', () => loadSampleDataset('breast_cancer_wisconsin.csv', 'Breast Cancer Wisconsin Diagnostic (public UCI data, 569 patients)'));
     if (DOM.sampleCardioBtn) {
         DOM.sampleCardioBtn.addEventListener('click', () => loadSampleDataset('universal_medical_cohort.csv', 'Cardiometabolic Risk Cohort (Binary)'));

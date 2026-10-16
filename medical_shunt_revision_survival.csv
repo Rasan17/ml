@@ -1,0 +1,321 @@
+Patient_ID,Age,Sex,BMI,Aetiology,Valve_Type,Prior_Shunt_Surgery,Months_To_Revision_Or_Censoring,Shunt_Revision
+SR0001,63,Female,25.1,Idiopathic NPH,Programmable,No,23.6,No
+SR0002,72,Female,25.0,Post-traumatic,Programmable,No,8.7,No
+SR0003,53,Female,25.7,Idiopathic NPH,Fixed pressure,No,25.7,No
+SR0004,83,Female,32.9,Post-haemorrhagic,Programmable,Yes,19.2,Yes
+SR0005,76,Male,33.8,Idiopathic NPH,Fixed pressure,Yes,2.3,Yes
+SR0006,67,Female,29.2,Post-haemorrhagic,Programmable,No,21.6,No
+SR0007,67,Male,31.4,Idiopathic NPH,Programmable,No,17.3,Yes
+SR0008,73,Female,38.1,Idiopathic NPH,Programmable,No,14.5,Yes
+SR0009,68,Female,27.4,Idiopathic NPH,Programmable,No,49.8,No
+SR0010,68,Male,22.4,Idiopathic NPH,Programmable,No,30.9,No
+SR0011,76,Male,30.1,Post-haemorrhagic,Programmable,No,29.2,Yes
+SR0012,75,Female,31.0,Idiopathic NPH,Fixed pressure,No,6.8,No
+SR0013,69,Male,26.7,Post-traumatic,Programmable,No,16.5,Yes
+SR0014,69,Female,26.5,Idiopathic NPH,Programmable,No,10.3,No
+SR0015,71,Female,38.2,Idiopathic NPH,Fixed pressure,No,15.2,No
+SR0016,64,Female,26.2,Idiopathic NPH,Programmable,Yes,57.9,No
+SR0017,66,Female,23.0,Idiopathic NPH,Programmable,No,4.8,Yes
+SR0018,75,Female,17.0,Idiopathic NPH,Fixed pressure,No,40.3,No
+SR0019,69,Female,31.6,Post-haemorrhagic,Programmable,No,29.2,Yes
+SR0020,58,Male,33.8,Idiopathic NPH,Programmable,No,39.6,Yes
+SR0021,66,Female,21.7,Idiopathic NPH,Programmable,No,28.4,No
+SR0022,76,Male,,Idiopathic NPH,Programmable,No,35.7,No
+SR0023,68,Female,25.8,Idiopathic NPH,Fixed pressure,No,11.9,No
+SR0024,69,Female,27.8,Idiopathic NPH,Fixed pressure,No,33.7,Yes
+SR0025,76,Female,24.6,Idiopathic NPH,Fixed pressure,No,13.3,No
+SR0026,86,Male,27.5,Idiopathic NPH,Programmable,No,23.3,No
+SR0027,64,Female,,Idiopathic NPH,Programmable,No,19.3,No
+SR0028,82,Female,25.0,Post-haemorrhagic,Fixed pressure,Yes,35.7,Yes
+SR0029,59,Male,24.2,Idiopathic NPH,Fixed pressure,No,29.0,Yes
+SR0030,72,Male,22.5,Idiopathic NPH,Fixed pressure,Yes,6.3,Yes
+SR0031,59,Female,33.2,Post-haemorrhagic,Programmable,No,33.5,Yes
+SR0032,82,Male,23.4,Idiopathic NPH,Fixed pressure,No,11.9,No
+SR0033,78,Male,30.7,Idiopathic NPH,Fixed pressure,No,12.3,Yes
+SR0034,80,Male,21.4,Post-traumatic,Fixed pressure,No,40.3,Yes
+SR0035,62,Male,17.0,Idiopathic NPH,Programmable,Yes,25.0,No
+SR0036,76,Female,24.8,Idiopathic NPH,Fixed pressure,No,36.8,No
+SR0037,65,Female,28.7,Idiopathic NPH,Fixed pressure,No,10.0,No
+SR0038,66,Male,33.0,Idiopathic NPH,Programmable,No,1.1,Yes
+SR0039,75,Male,31.5,Post-haemorrhagic,Programmable,No,23.1,No
+SR0040,78,Male,29.2,Post-haemorrhagic,Programmable,No,7.1,Yes
+SR0041,72,Male,17.0,Idiopathic NPH,Fixed pressure,No,10.8,No
+SR0042,64,Male,30.0,Idiopathic NPH,Programmable,No,33.2,Yes
+SR0043,63,Male,20.2,Idiopathic NPH,Programmable,No,4.4,Yes
+SR0044,83,Female,24.1,Idiopathic NPH,Fixed pressure,No,27.0,No
+SR0045,75,Female,36.5,Idiopathic NPH,Fixed pressure,No,50.4,No
+SR0046,76,Female,32.6,Idiopathic NPH,Programmable,No,33.3,No
+SR0047,90,Male,22.2,Post-haemorrhagic,Fixed pressure,No,11.0,Yes
+SR0048,63,Male,25.9,Idiopathic NPH,Programmable,No,24.0,Yes
+SR0049,92,Male,31.5,Post-haemorrhagic,Programmable,Yes,4.3,Yes
+SR0050,92,Female,26.9,Idiopathic NPH,Programmable,No,37.4,Yes
+SR0051,85,Female,26.5,Idiopathic NPH,Programmable,No,29.9,Yes
+SR0052,77,Female,22.0,Idiopathic NPH,Fixed pressure,No,8.3,No
+SR0053,64,Male,30.3,Post-haemorrhagic,Fixed pressure,No,10.5,No
+SR0054,79,Female,,Idiopathic NPH,Programmable,No,19.8,No
+SR0055,66,Female,23.6,Idiopathic NPH,Programmable,No,14.8,No
+SR0056,70,Male,17.5,Idiopathic NPH,Fixed pressure,No,11.0,No
+SR0057,67,Female,36.6,Idiopathic NPH,Fixed pressure,No,1.6,Yes
+SR0058,73,Female,24.1,Idiopathic NPH,Fixed pressure,No,19.1,No
+SR0059,82,Male,29.7,Idiopathic NPH,Programmable,No,46.5,No
+SR0060,65,Male,23.4,Post-haemorrhagic,Programmable,No,21.7,No
+SR0061,61,Male,23.9,Idiopathic NPH,Programmable,No,2.6,Yes
+SR0062,61,Female,32.4,Idiopathic NPH,Programmable,No,45.8,No
+SR0063,61,Male,26.1,Idiopathic NPH,Fixed pressure,No,16.2,Yes
+SR0064,57,Male,31.5,Idiopathic NPH,Programmable,No,30.8,No
+SR0065,62,Female,31.6,Post-haemorrhagic,Programmable,Yes,15.4,Yes
+SR0066,82,Male,25.1,Post-haemorrhagic,Fixed pressure,No,17.9,Yes
+SR0067,65,Male,29.1,Idiopathic NPH,Programmable,No,19.4,No
+SR0068,72,Male,31.5,Idiopathic NPH,Programmable,No,4.9,Yes
+SR0069,59,Female,33.9,Idiopathic NPH,Fixed pressure,No,14.0,No
+SR0070,72,Female,26.4,Idiopathic NPH,Fixed pressure,No,21.4,No
+SR0071,54,Male,27.7,Post-haemorrhagic,Fixed pressure,No,36.2,No
+SR0072,64,Male,23.0,Idiopathic NPH,Fixed pressure,No,40.2,No
+SR0073,90,Male,31.6,Idiopathic NPH,Fixed pressure,Yes,4.5,Yes
+SR0074,65,Female,28.2,Idiopathic NPH,Fixed pressure,Yes,21.5,No
+SR0075,80,Female,21.1,Idiopathic NPH,Fixed pressure,No,33.1,Yes
+SR0076,74,Male,26.0,Post-haemorrhagic,Programmable,No,40.0,No
+SR0077,69,Male,27.1,Post-haemorrhagic,Programmable,No,9.0,Yes
+SR0078,64,Female,24.8,Post-haemorrhagic,Programmable,No,57.7,Yes
+SR0079,82,Male,24.1,Post-traumatic,Programmable,No,31.4,No
+SR0080,68,Male,19.6,Idiopathic NPH,Programmable,No,27.9,No
+SR0081,84,Female,28.2,Idiopathic NPH,Programmable,Yes,9.5,Yes
+SR0082,64,Male,25.6,Post-haemorrhagic,Fixed pressure,No,7.2,No
+SR0083,71,Female,32.3,Idiopathic NPH,Fixed pressure,No,26.2,Yes
+SR0084,74,Female,27.2,Post-traumatic,Programmable,Yes,41.8,Yes
+SR0085,73,Male,31.9,Idiopathic NPH,Programmable,No,40.4,Yes
+SR0086,59,Male,21.8,Idiopathic NPH,Fixed pressure,No,7.1,No
+SR0087,64,Male,29.6,Idiopathic NPH,Programmable,No,39.1,No
+SR0088,68,Female,31.4,Post-traumatic,Programmable,No,27.9,No
+SR0089,62,Female,31.5,Idiopathic NPH,Programmable,No,2.5,Yes
+SR0090,76,Male,26.4,Post-traumatic,Fixed pressure,No,18.2,Yes
+SR0091,75,Male,23.4,Idiopathic NPH,Programmable,No,28.2,No
+SR0092,52,Male,36.1,Post-traumatic,Programmable,No,37.1,No
+SR0093,54,Male,26.8,Idiopathic NPH,Programmable,No,25.7,No
+SR0094,58,Male,21.9,Idiopathic NPH,Programmable,Yes,22.1,No
+SR0095,71,Male,26.8,Post-haemorrhagic,Fixed pressure,No,0.5,Yes
+SR0096,88,Male,29.5,Idiopathic NPH,Programmable,No,50.7,No
+SR0097,67,Female,24.3,Idiopathic NPH,Programmable,No,6.4,Yes
+SR0098,72,Male,29.9,Idiopathic NPH,Programmable,No,33.4,No
+SR0099,60,Male,32.3,Idiopathic NPH,Fixed pressure,No,13.6,No
+SR0100,61,Female,27.6,Post-haemorrhagic,Programmable,No,12.4,No
+SR0101,52,Female,32.9,Idiopathic NPH,Fixed pressure,No,12.8,No
+SR0102,70,Female,27.3,Post-haemorrhagic,Programmable,No,9.4,Yes
+SR0103,79,Female,25.5,Idiopathic NPH,Programmable,No,48.4,No
+SR0104,67,Male,35.8,Idiopathic NPH,Fixed pressure,Yes,12.3,Yes
+SR0105,83,Female,31.0,Post-traumatic,Programmable,Yes,1.4,Yes
+SR0106,72,Female,28.4,Post-traumatic,Programmable,No,7.4,No
+SR0107,70,Male,18.9,Idiopathic NPH,Fixed pressure,Yes,10.2,No
+SR0108,75,Male,21.0,Idiopathic NPH,Programmable,Yes,21.8,Yes
+SR0109,74,Male,19.6,Idiopathic NPH,Fixed pressure,No,23.7,No
+SR0110,80,Female,27.7,Idiopathic NPH,Programmable,No,7.2,Yes
+SR0111,63,Female,27.7,Idiopathic NPH,Programmable,No,56.1,No
+SR0112,49,Male,,Idiopathic NPH,Fixed pressure,No,40.6,Yes
+SR0113,71,Male,33.0,Idiopathic NPH,Fixed pressure,No,29.4,No
+SR0114,64,Female,20.3,Post-haemorrhagic,Programmable,No,23.9,No
+SR0115,70,Male,,Idiopathic NPH,Fixed pressure,Yes,18.4,No
+SR0116,85,Female,23.3,Post-traumatic,Fixed pressure,No,37.3,No
+SR0117,60,Male,30.2,Idiopathic NPH,Fixed pressure,No,2.1,Yes
+SR0118,77,Male,29.3,Post-haemorrhagic,Fixed pressure,Yes,19.2,No
+SR0119,79,Male,22.7,Idiopathic NPH,Programmable,No,56.2,No
+SR0120,74,Female,24.4,Post-haemorrhagic,Fixed pressure,No,9.2,No
+SR0121,80,Female,29.8,Idiopathic NPH,Programmable,No,16.2,No
+SR0122,66,Female,,Idiopathic NPH,Programmable,No,10.2,No
+SR0123,64,Female,32.9,Idiopathic NPH,Fixed pressure,Yes,1.5,Yes
+SR0124,79,Female,23.8,Post-traumatic,Fixed pressure,No,9.7,Yes
+SR0125,76,Female,27.2,Idiopathic NPH,Fixed pressure,No,0.5,Yes
+SR0126,83,Male,22.9,Idiopathic NPH,Programmable,No,57.2,No
+SR0127,72,Female,33.6,Idiopathic NPH,Fixed pressure,No,47.1,Yes
+SR0128,85,Male,33.0,Idiopathic NPH,Fixed pressure,No,10.9,Yes
+SR0129,67,Female,30.3,Idiopathic NPH,Programmable,Yes,58.6,No
+SR0130,60,Male,32.7,Idiopathic NPH,Fixed pressure,No,9.8,Yes
+SR0131,52,Female,34.7,Post-traumatic,Fixed pressure,Yes,0.8,Yes
+SR0132,60,Male,35.1,Idiopathic NPH,Programmable,No,36.2,Yes
+SR0133,77,Female,36.4,Idiopathic NPH,Programmable,No,16.6,Yes
+SR0134,57,Male,24.4,Idiopathic NPH,Programmable,No,15.5,No
+SR0135,66,Male,24.0,Idiopathic NPH,Fixed pressure,No,47.6,No
+SR0136,89,Female,34.3,Idiopathic NPH,Fixed pressure,No,1.7,Yes
+SR0137,78,Male,25.8,Idiopathic NPH,Fixed pressure,Yes,16.6,Yes
+SR0138,86,Male,19.2,Idiopathic NPH,Fixed pressure,No,38.7,Yes
+SR0139,61,Female,,Post-haemorrhagic,Fixed pressure,No,30.4,No
+SR0140,48,Female,33.1,Post-traumatic,Fixed pressure,No,13.0,No
+SR0141,84,Female,25.7,Idiopathic NPH,Programmable,No,7.0,Yes
+SR0142,57,Male,31.8,Idiopathic NPH,Programmable,No,12.3,No
+SR0143,71,Male,29.5,Post-haemorrhagic,Fixed pressure,Yes,13.6,Yes
+SR0144,72,Female,21.3,Idiopathic NPH,Programmable,No,4.6,Yes
+SR0145,61,Female,30.2,Idiopathic NPH,Programmable,No,9.9,No
+SR0146,84,Male,28.0,Idiopathic NPH,Programmable,No,13.8,No
+SR0147,84,Male,,Post-traumatic,Programmable,No,11.5,No
+SR0148,75,Female,20.9,Post-haemorrhagic,Programmable,No,33.3,Yes
+SR0149,70,Male,36.0,Idiopathic NPH,Fixed pressure,No,53.0,No
+SR0150,72,Female,23.4,Idiopathic NPH,Programmable,No,19.9,No
+SR0151,60,Male,17.8,Post-traumatic,Fixed pressure,No,28.4,No
+SR0152,68,Female,32.1,Idiopathic NPH,Programmable,No,54.6,No
+SR0153,69,Male,25.8,Idiopathic NPH,Fixed pressure,No,24.3,No
+SR0154,62,Male,33.9,Post-haemorrhagic,Fixed pressure,No,16.9,Yes
+SR0155,78,Male,27.5,Post-haemorrhagic,Programmable,No,29.3,Yes
+SR0156,57,Male,,Idiopathic NPH,Programmable,No,10.4,Yes
+SR0157,66,Female,30.9,Idiopathic NPH,Fixed pressure,No,15.0,Yes
+SR0158,50,Female,28.6,Idiopathic NPH,Programmable,No,9.4,No
+SR0159,74,Female,28.5,Post-traumatic,Fixed pressure,No,2.5,Yes
+SR0160,77,Female,33.4,Idiopathic NPH,Fixed pressure,No,9.2,Yes
+SR0161,76,Female,23.5,Idiopathic NPH,Fixed pressure,No,36.5,No
+SR0162,92,Male,30.8,Idiopathic NPH,Fixed pressure,Yes,5.6,Yes
+SR0163,78,Male,29.4,Post-traumatic,Programmable,Yes,5.5,Yes
+SR0164,62,Female,20.0,Idiopathic NPH,Fixed pressure,Yes,25.9,Yes
+SR0165,92,Male,33.5,Idiopathic NPH,Programmable,Yes,17.9,Yes
+SR0166,62,Male,31.8,Idiopathic NPH,Programmable,Yes,7.5,No
+SR0167,77,Male,35.7,Idiopathic NPH,Fixed pressure,Yes,0.7,Yes
+SR0168,77,Male,25.8,Post-haemorrhagic,Programmable,Yes,5.9,Yes
+SR0169,62,Female,22.5,Idiopathic NPH,Programmable,No,28.8,No
+SR0170,83,Female,43.3,Post-traumatic,Fixed pressure,No,21.7,Yes
+SR0171,73,Male,22.9,Post-traumatic,Fixed pressure,Yes,12.4,Yes
+SR0172,75,Female,24.0,Idiopathic NPH,Programmable,No,42.5,No
+SR0173,64,Female,30.8,Idiopathic NPH,Fixed pressure,Yes,13.9,Yes
+SR0174,82,Male,25.8,Post-traumatic,Fixed pressure,Yes,3.1,Yes
+SR0175,62,Female,30.1,Post-haemorrhagic,Fixed pressure,No,5.7,Yes
+SR0176,54,Male,21.4,Post-haemorrhagic,Programmable,No,16.6,Yes
+SR0177,83,Female,19.5,Idiopathic NPH,Programmable,No,22.7,No
+SR0178,66,Male,25.3,Idiopathic NPH,Programmable,Yes,40.7,No
+SR0179,70,Female,,Post-haemorrhagic,Programmable,No,19.1,No
+SR0180,87,Male,,Idiopathic NPH,Programmable,Yes,0.5,Yes
+SR0181,80,Male,34.0,Idiopathic NPH,Programmable,No,26.1,No
+SR0182,76,Female,26.7,Idiopathic NPH,Programmable,Yes,51.3,No
+SR0183,80,Male,28.9,Post-haemorrhagic,Programmable,No,15.5,Yes
+SR0184,63,Female,23.5,Idiopathic NPH,Programmable,Yes,18.6,Yes
+SR0185,77,Female,20.7,Post-haemorrhagic,Fixed pressure,No,6.2,No
+SR0186,80,Female,21.9,Idiopathic NPH,Programmable,No,15.8,No
+SR0187,77,Female,24.0,Post-haemorrhagic,Programmable,Yes,42.3,Yes
+SR0188,68,Male,37.8,Idiopathic NPH,Fixed pressure,No,29.5,Yes
+SR0189,36,Male,21.6,Post-traumatic,Fixed pressure,No,52.9,Yes
+SR0190,75,Male,23.6,Idiopathic NPH,Programmable,Yes,27.0,No
+SR0191,71,Male,34.8,Post-haemorrhagic,Fixed pressure,No,6.9,Yes
+SR0192,67,Female,24.7,Idiopathic NPH,Fixed pressure,No,40.8,No
+SR0193,77,Male,30.9,Post-haemorrhagic,Programmable,Yes,17.1,Yes
+SR0194,72,Male,17.0,Idiopathic NPH,Fixed pressure,Yes,21.2,No
+SR0195,72,Male,23.1,Idiopathic NPH,Fixed pressure,Yes,28.2,No
+SR0196,57,Male,30.6,Post-haemorrhagic,Programmable,No,19.2,Yes
+SR0197,57,Female,19.5,Idiopathic NPH,Fixed pressure,No,25.4,Yes
+SR0198,73,Female,28.9,Idiopathic NPH,Fixed pressure,No,7.6,Yes
+SR0199,71,Male,28.2,Idiopathic NPH,Fixed pressure,No,32.3,No
+SR0200,71,Male,25.2,Idiopathic NPH,Programmable,No,1.5,Yes
+SR0201,71,Female,26.6,Idiopathic NPH,Fixed pressure,No,36.5,Yes
+SR0202,74,Male,31.5,Post-traumatic,Fixed pressure,No,14.8,Yes
+SR0203,70,Male,27.7,Idiopathic NPH,Programmable,No,35.1,No
+SR0204,71,Male,32.9,Post-haemorrhagic,Programmable,No,6.4,No
+SR0205,72,Male,31.9,Idiopathic NPH,Fixed pressure,No,47.2,No
+SR0206,78,Female,35.7,Idiopathic NPH,Programmable,No,43.8,No
+SR0207,65,Female,25.9,Idiopathic NPH,Programmable,No,10.1,No
+SR0208,77,Male,28.8,Idiopathic NPH,Programmable,No,13.0,No
+SR0209,76,Female,,Idiopathic NPH,Programmable,No,9.1,No
+SR0210,71,Female,31.1,Idiopathic NPH,Programmable,No,29.2,No
+SR0211,66,Male,24.4,Post-traumatic,Programmable,No,16.5,Yes
+SR0212,73,Male,31.1,Post-haemorrhagic,Programmable,No,10.3,No
+SR0213,78,Female,26.6,Idiopathic NPH,Programmable,No,57.3,No
+SR0214,60,Male,27.1,Idiopathic NPH,Fixed pressure,No,8.9,No
+SR0215,71,Female,29.1,Idiopathic NPH,Programmable,No,14.4,No
+SR0216,71,Male,24.3,Idiopathic NPH,Fixed pressure,No,48.6,No
+SR0217,64,Male,24.6,Post-haemorrhagic,Programmable,No,41.3,No
+SR0218,64,Female,24.9,Post-haemorrhagic,Programmable,No,43.6,Yes
+SR0219,56,Female,25.3,Idiopathic NPH,Fixed pressure,No,12.1,Yes
+SR0220,60,Male,31.1,Idiopathic NPH,Fixed pressure,No,44.8,Yes
+SR0221,56,Female,26.0,Idiopathic NPH,Fixed pressure,No,37.4,Yes
+SR0222,64,Female,25.1,Idiopathic NPH,Programmable,No,37.0,No
+SR0223,65,Male,32.0,Post-traumatic,Fixed pressure,No,6.8,No
+SR0224,65,Female,31.4,Idiopathic NPH,Fixed pressure,No,31.6,No
+SR0225,73,Male,27.2,Idiopathic NPH,Fixed pressure,No,21.2,No
+SR0226,68,Female,40.2,Post-haemorrhagic,Fixed pressure,Yes,5.7,Yes
+SR0227,63,Male,22.7,Post-haemorrhagic,Fixed pressure,No,4.8,Yes
+SR0228,64,Male,36.0,Idiopathic NPH,Fixed pressure,Yes,8.4,No
+SR0229,60,Female,29.2,Idiopathic NPH,Fixed pressure,No,40.0,No
+SR0230,68,Male,32.9,Idiopathic NPH,Fixed pressure,No,14.6,Yes
+SR0231,68,Male,26.4,Post-traumatic,Fixed pressure,Yes,10.8,Yes
+SR0232,85,Female,33.8,Post-haemorrhagic,Programmable,No,10.8,Yes
+SR0233,84,Male,23.0,Idiopathic NPH,Programmable,Yes,6.5,No
+SR0234,83,Male,31.9,Idiopathic NPH,Fixed pressure,No,0.5,Yes
+SR0235,89,Male,29.2,Post-haemorrhagic,Fixed pressure,No,0.9,Yes
+SR0236,59,Male,32.4,Idiopathic NPH,Programmable,No,19.7,No
+SR0237,76,Female,25.5,Idiopathic NPH,Programmable,No,7.3,No
+SR0238,77,Female,30.0,Idiopathic NPH,Programmable,Yes,4.5,Yes
+SR0239,74,Female,24.0,Idiopathic NPH,Programmable,No,48.0,No
+SR0240,89,Female,26.1,Idiopathic NPH,Fixed pressure,No,2.9,Yes
+SR0241,92,Female,26.7,Idiopathic NPH,Fixed pressure,No,6.0,Yes
+SR0242,79,Male,24.9,Idiopathic NPH,Programmable,No,43.3,Yes
+SR0243,76,Female,,Post-haemorrhagic,Fixed pressure,No,15.7,Yes
+SR0244,60,Male,21.8,Post-haemorrhagic,Programmable,No,30.2,Yes
+SR0245,60,Female,27.3,Idiopathic NPH,Fixed pressure,Yes,35.8,Yes
+SR0246,76,Female,35.2,Post-haemorrhagic,Programmable,No,7.0,No
+SR0247,69,Male,42.1,Idiopathic NPH,Fixed pressure,No,16.3,Yes
+SR0248,58,Female,,Post-haemorrhagic,Programmable,Yes,39.2,No
+SR0249,69,Female,24.1,Idiopathic NPH,Fixed pressure,No,36.5,Yes
+SR0250,73,Female,29.6,Idiopathic NPH,Programmable,No,1.1,Yes
+SR0251,78,Male,30.4,Idiopathic NPH,Programmable,Yes,2.7,Yes
+SR0252,69,Female,21.5,Idiopathic NPH,Fixed pressure,No,14.8,No
+SR0253,68,Male,17.0,Idiopathic NPH,Fixed pressure,No,9.5,No
+SR0254,70,Male,29.2,Post-haemorrhagic,Programmable,No,40.2,No
+SR0255,72,Female,34.6,Idiopathic NPH,Fixed pressure,No,23.5,No
+SR0256,60,Male,35.0,Post-haemorrhagic,Programmable,No,34.8,No
+SR0257,77,Male,27.9,Idiopathic NPH,Programmable,Yes,26.4,No
+SR0258,90,Male,,Idiopathic NPH,Programmable,No,11.1,Yes
+SR0259,77,Male,27.1,Idiopathic NPH,Fixed pressure,No,20.8,Yes
+SR0260,57,Female,21.0,Idiopathic NPH,Fixed pressure,No,49.3,No
+SR0261,71,Female,27.3,Idiopathic NPH,Fixed pressure,No,21.5,No
+SR0262,54,Male,33.1,Idiopathic NPH,Fixed pressure,Yes,24.0,No
+SR0263,54,Male,28.6,Post-traumatic,Fixed pressure,No,8.2,Yes
+SR0264,76,Male,25.1,Idiopathic NPH,Fixed pressure,Yes,30.6,No
+SR0265,71,Female,,Idiopathic NPH,Programmable,No,3.7,Yes
+SR0266,64,Male,29.6,Idiopathic NPH,Fixed pressure,No,20.9,Yes
+SR0267,51,Male,28.6,Idiopathic NPH,Fixed pressure,No,51.2,No
+SR0268,59,Female,,Idiopathic NPH,Programmable,No,26.6,Yes
+SR0269,71,Female,29.8,Idiopathic NPH,Programmable,No,48.6,No
+SR0270,70,Male,33.3,Idiopathic NPH,Fixed pressure,No,16.0,No
+SR0271,76,Female,28.6,Idiopathic NPH,Programmable,No,51.5,No
+SR0272,84,Female,27.2,Post-haemorrhagic,Programmable,No,19.4,No
+SR0273,67,Female,29.8,Post-traumatic,Fixed pressure,No,28.8,No
+SR0274,74,Male,30.9,Idiopathic NPH,Fixed pressure,Yes,29.6,Yes
+SR0275,69,Female,19.3,Idiopathic NPH,Fixed pressure,No,23.5,No
+SR0276,66,Female,33.7,Idiopathic NPH,Programmable,No,37.9,Yes
+SR0277,68,Male,36.4,Idiopathic NPH,Programmable,No,15.3,Yes
+SR0278,79,Female,28.1,Idiopathic NPH,Programmable,No,3.0,Yes
+SR0279,61,Female,31.0,Post-haemorrhagic,Fixed pressure,No,8.5,Yes
+SR0280,80,Female,24.3,Idiopathic NPH,Programmable,No,23.2,Yes
+SR0281,83,Female,31.3,Post-haemorrhagic,Fixed pressure,Yes,9.9,Yes
+SR0282,70,Male,23.7,Idiopathic NPH,Fixed pressure,No,15.3,No
+SR0283,72,Male,,Idiopathic NPH,Fixed pressure,No,31.7,Yes
+SR0284,57,Female,,Post-haemorrhagic,Fixed pressure,No,39.2,Yes
+SR0285,91,Male,24.0,Idiopathic NPH,Fixed pressure,No,14.7,Yes
+SR0286,79,Male,22.4,Post-haemorrhagic,Programmable,Yes,4.6,Yes
+SR0287,72,Male,26.2,Post-haemorrhagic,Programmable,No,8.5,Yes
+SR0288,71,Male,25.2,Idiopathic NPH,Fixed pressure,Yes,17.0,No
+SR0289,74,Male,,Idiopathic NPH,Fixed pressure,No,51.4,No
+SR0290,64,Male,22.5,Idiopathic NPH,Fixed pressure,Yes,0.5,Yes
+SR0291,73,Female,33.4,Idiopathic NPH,Programmable,Yes,38.0,Yes
+SR0292,62,Male,26.6,Idiopathic NPH,Programmable,Yes,26.5,No
+SR0293,74,Female,30.2,Post-haemorrhagic,Programmable,No,46.0,Yes
+SR0294,64,Male,19.8,Post-haemorrhagic,Programmable,Yes,40.8,Yes
+SR0295,78,Male,25.0,Idiopathic NPH,Programmable,No,24.1,Yes
+SR0296,69,Female,35.9,Idiopathic NPH,Programmable,No,28.5,No
+SR0297,72,Female,23.6,Post-haemorrhagic,Fixed pressure,No,12.2,Yes
+SR0298,92,Male,29.4,Idiopathic NPH,Fixed pressure,No,15.3,Yes
+SR0299,77,Male,,Idiopathic NPH,Programmable,No,17.2,No
+SR0300,72,Male,28.0,Idiopathic NPH,Fixed pressure,No,54.1,No
+SR0301,70,Female,35.5,Idiopathic NPH,Programmable,No,2.9,Yes
+SR0302,61,Female,23.5,Idiopathic NPH,Programmable,No,29.8,No
+SR0303,80,Male,25.6,Idiopathic NPH,Fixed pressure,No,15.7,Yes
+SR0304,84,Male,27.7,Idiopathic NPH,Fixed pressure,No,40.0,No
+SR0305,71,Male,25.3,Post-traumatic,Fixed pressure,No,11.3,Yes
+SR0306,85,Female,29.7,Idiopathic NPH,Programmable,Yes,28.4,Yes
+SR0307,69,Female,19.1,Idiopathic NPH,Programmable,No,12.3,No
+SR0308,54,Female,22.7,Idiopathic NPH,Programmable,No,3.0,Yes
+SR0309,64,Male,34.5,Idiopathic NPH,Fixed pressure,Yes,26.3,Yes
+SR0310,60,Female,28.6,Post-traumatic,Fixed pressure,No,6.1,Yes
+SR0311,68,Female,30.4,Idiopathic NPH,Fixed pressure,Yes,29.5,Yes
+SR0312,76,Female,36.4,Idiopathic NPH,Fixed pressure,No,40.4,Yes
+SR0313,62,Female,19.2,Post-haemorrhagic,Programmable,No,45.7,Yes
+SR0314,69,Female,17.0,Post-traumatic,Fixed pressure,No,7.8,No
+SR0315,72,Male,,Idiopathic NPH,Fixed pressure,No,38.3,Yes
+SR0316,63,Female,21.1,Post-haemorrhagic,Programmable,No,20.0,No
+SR0317,62,Female,28.3,Post-traumatic,Programmable,No,15.4,No
+SR0318,71,Female,19.8,Idiopathic NPH,Programmable,Yes,11.6,No
+SR0319,78,Male,17.0,Idiopathic NPH,Fixed pressure,No,11.3,Yes
+SR0320,65,Male,27.5,Idiopathic NPH,Fixed pressure,Yes,44.2,Yes
