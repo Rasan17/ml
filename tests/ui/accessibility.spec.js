@@ -6,12 +6,21 @@ const AxeBuilder = require('@axe-core/playwright').default;
 const RULES = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 
 async function scan(page, label) {
-    const res = await new AxeBuilder({ page }).withTags(RULES).analyze();
-    const problems = res.violations.map(v => `${label}: [${v.impact}] ${v.id} (${v.help}) at ${v.nodes.slice(0, 4).map(n => n.target.join(' ')).join(' | ')}${v.nodes.length > 4 ? ` and ${v.nodes.length - 4} more` : ''}`);
+    const problems = [];
+    for (const theme of ['dark', 'light']) {
+        // switch theme with transitions off, so colours are final when measured
+        await page.evaluate(t => {
+            if (!document.getElementById('no-transitions')) { const st = document.createElement('style'); st.id = 'no-transitions'; st.textContent = '*,*::before,*::after{transition:none!important;animation:none!important}'; document.head.appendChild(st); }
+            if ((document.documentElement.getAttribute('data-theme') || 'dark') !== t) document.getElementById('theme-toggle').click();
+        }, theme);
+        const res = await new AxeBuilder({ page }).withTags(RULES).analyze();
+        problems.push(...res.violations.map(v => `${label} (${theme}): [${v.impact}] ${v.id} (${v.help}) at ${v.nodes.slice(0, 4).map(n => n.target.join(' ')).join(' | ')}${v.nodes.length > 4 ? ` and ${v.nodes.length - 4} more` : ''}`));
+    }
     return problems;
 }
 
-test('accessibility of every main screen (axe-core, WCAG 2.1 AA)', async ({ page }) => {
+test('accessibility of every main screen (axe-core, WCAG 2.1 AA), dark and light themes', async ({ page }) => {
+    test.setTimeout(400000);
     page.on('dialog', d => d.accept());
     const problems = [];
     await page.goto('/index.html');
@@ -35,6 +44,7 @@ test('accessibility of every main screen (axe-core, WCAG 2.1 AA)', async ({ page
     await page.click('#run-single-predict-btn');
     await expect(page.locator('#single-result-banner')).toContainText('Why this prediction');
     problems.push(...await scan(page, 'step 5 (prediction)'));
+    await page.click('button.step-tab[data-step="1"]');
     await page.click('#sample-survival-btn');
     await page.fill('#surv-horizon', '24');
     await page.click('#surv-run-btn');

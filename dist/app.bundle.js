@@ -1546,14 +1546,10 @@ function setupEventListeners() {
             }
             AppState.activeHyperparamModelId = mId;
 
-            if (AppState.selectedModelIds.length === ALL_MODEL_IDS.length) {
-                AppState.modelScope = 'all';
-            } else if (AppState.selectedModelIds.length === 1) {
-                AppState.modelScope = 'single';
-                AppState.selectedModelId = AppState.selectedModelIds[0];
-            } else {
-                AppState.modelScope = 'multi';
-            }
+            // Stay in multi-model mode even when one model is left ticked: switching to single mode here made
+            // the next ticks replace the selection instead of adding to it (untick defaults, then tick others)
+            AppState.modelScope = AppState.selectedModelIds.length === ALL_MODEL_IDS.length ? 'all' : 'multi';
+            if (AppState.selectedModelIds.length === 1) AppState.selectedModelId = AppState.selectedModelIds[0];
             if (DOM.scopeSingle) DOM.scopeSingle.checked = (AppState.modelScope === 'single');
             if (DOM.scopeMulti) DOM.scopeMulti.checked = (AppState.modelScope === 'multi');
             if (DOM.scopeAll) DOM.scopeAll.checked = (AppState.modelScope === 'all');
