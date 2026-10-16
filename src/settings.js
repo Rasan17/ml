@@ -1,0 +1,319 @@
+// settings.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+import { APP_VERSION, AppState, escapeHtml } from './core.js';
+import { executeImputation, renderImputationTable } from './imputation.js';
+import { goToStep } from './navigation.js';
+import { executePipelineStep1, executePipelineStep6, executePipelineStep7, goToPipelineSubstep, updatePipelineCompleteCaseInfo } from './pipeline.js';
+import { DOM, initDOM, setupEventListeners } from './shell.js';
+import { showSeedToast, startModelTraining, syncRankingSelectors } from './standard-training.js';
+import { renderVariableConfigGrid } from './variables.js';
+
+
+// =========================================================================
+// ANALYSIS SETTINGS: SAVE / RESTORE / ONE-CLICK RE-RUN
+// Settings hold the user's choices only (column names, roles, options, seeds, hyper-parameters),
+// never patient data. Stored as a downloadable .json file and, per dataset, in this browser.
+// =========================================================================
+const SETTINGS_SCHEMA = 1;
+const SETTINGS_APP = 'Universal Medical ML/NeuralNet Predictor';
+const SETTINGS_KEY_PREFIX = 'ummp-settings:';
+const SETTINGS_MAX_STORED = 20;
+const VARIABLE_FIELDS = ['role', 'prevRole', 'type', 'imputationStrategy', 'prevImputationStrategy', 'customImputeVal', 'positiveClass', 'ordinalOrder'];
+
+// Identifies a dataset by its column headers (FNV-1a hash), so a re-loaded or updated file matches
+function datasetSignature(headers) {
+    let h = 0x811c9dc5;
+    const str = headers.join('\u0001');
+    for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16).padStart(8, '0');
+}
+
+// Form controls to remember (by id; radio groups by name). Controls whose state lives in AppState,
+// or that are rebuilt per run (model cards, scope, ranking metric, results tables), are excluded.
+function isRememberedControl(el) {
+    if (el.type === 'file' || el.type === 'button' || el.type === 'submit') return false;
+    if (el.classList.contains('model-select-checkbox') || el.classList.contains('ranking-metric-select')) return false;
+    if (el.type === 'radio') return Boolean(el.name) && el.name !== 'model-scope' && !/^scope-/.test(el.id);
+    if (!el.id || /^scope-/.test(el.id) || el.id === 'pipeline-univ-master-check') return false;
+    return true;
+}
+
+function collectFormState(rootSelector) {
+    const root = document.querySelector(rootSelector);
+    const state = {};
+    if (!root) return state;
+    root.querySelectorAll('input, select, textarea').forEach(el => {
+        if (!isRememberedControl(el)) return;
+        if (el.type === 'radio') {
+            if (el.checked) state[`radio:${el.name}`] = el.value;
+        } else if (el.type === 'checkbox') {
+            state[el.id] = el.checked;
+        } else {
+            state[el.id] = el.value;
+        }
+    });
+    return state;
+}
+
+function applyFormState(state) {
+    if (!state) return;
+    const fire = (el, types) => types.forEach(t => el.dispatchEvent(new Event(t, { bubbles: true })));
+    // Radios first: some (seed mode, validation mode) reset related inputs when they change
+    Object.keys(state).filter(k => k.startsWith('radio:')).forEach(k => {
+        const name = k.slice(6);
+        const el = Array.from(document.querySelectorAll('input[type="radio"]')).find(r => r.name === name && r.value === state[k]);
+        if (el && !el.checked) { el.checked = true; fire(el, ['change']); }
+    });
+    Object.keys(state).filter(k => !k.startsWith('radio:')).forEach(id => {
+        const el = document.getElementById(id);
+        if (!el || !isRememberedControl(el)) return;
+        if (el.type === 'checkbox') {
+            if (el.checked !== Boolean(state[id])) { el.checked = Boolean(state[id]); fire(el, ['change']); }
+        } else if (el.value !== String(state[id])) {
+            el.value = state[id];
+            fire(el, ['input', 'change']);
+        }
+    });
+}
+
+function collectSettings() {
+    const { headers, totalRows } = AppState.parsedData;
+    const variables = {};
+    headers.forEach(h => {
+        const c = AppState.columnConfigs[h] || {};
+        variables[h] = {};
+        VARIABLE_FIELDS.forEach(f => { if (c[f] !== undefined) variables[h][f] = c[f]; });
+    });
+    return {
+        app: SETTINGS_APP,
+        appVersion: APP_VERSION,
+        schema: SETTINGS_SCHEMA,
+        savedAt: new Date().toISOString(),
+        note: 'Analysis choices only; contains no patient data.',
+        dataset: { fileName: AppState.fileName, headers, rowCount: totalRows, signature: datasetSignature(headers) },
+        variables,
+        standard: {
+            completeCase: Boolean(AppState.completeCase),
+            modelScope: AppState.modelScope,
+            selectedModelIds: (AppState.selectedModelIds || []).slice(),
+            rankingMetricClf: AppState.rankingMetricClf || 'macroF1',
+            rankingMetricReg: AppState.rankingMetricReg || 'r2',
+            form: collectFormState('#step-4-content')
+        },
+        pipeline: {
+            form: collectFormState('#step-pipeline-content'),
+            droppedFeatures: Array.from((AppState.pipeline && AppState.pipeline.droppedFeatures) || []),
+            // Step 1 resets the evaluation seed to the split seed, so the seed used in Step 7 is kept separately
+            evalSeed: DOM.pipelineEvalSeedInput ? DOM.pipelineEvalSeedInput.value : '',
+            reinstatedFeatures: Array.from((AppState.pipeline && AppState.pipeline.reinstatedFeatures) || [])
+        },
+        used: {
+            standard: Boolean(AppState.allTestedResults && AppState.allTestedResults.length),
+            pipeline: Boolean(AppState.pipeline && AppState.pipeline.benchmarkResults && AppState.pipeline.benchmarkResults.length)
+        }
+    };
+}
+
+// Browser memory (per-viewer convenience; may be unavailable or cleared, so always optional)
+function saveSettingsToBrowser() {
+    if (!AppState.parsedData) return;
+    try {
+        const settings = collectSettings();
+        const key = SETTINGS_KEY_PREFIX + settings.dataset.signature;
+        localStorage.setItem(key, JSON.stringify(settings));
+        const index = JSON.parse(localStorage.getItem(SETTINGS_KEY_PREFIX + 'index') || '[]').filter(k => k !== key);
+        index.unshift(key);
+        index.slice(SETTINGS_MAX_STORED).forEach(k => localStorage.removeItem(k));
+        localStorage.setItem(SETTINGS_KEY_PREFIX + 'index', JSON.stringify(index.slice(0, SETTINGS_MAX_STORED)));
+    } catch (e) { /* storage unavailable: the downloadable file still works */ }
+}
+
+function readStoredSettings(headers) {
+    try {
+        const raw = localStorage.getItem(SETTINGS_KEY_PREFIX + datasetSignature(headers));
+        return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function downloadSettings() {
+    if (!AppState.parsedData) {
+        alert('Load a dataset first.');
+        return;
+    }
+    const settings = collectSettings();
+    saveSettingsToBrowser();
+    const base = String(AppState.fileName || 'dataset').replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '_').slice(0, 60) || 'dataset';
+    const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${base}_analysis-settings_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showSeedToast('Settings saved (file downloaded and remembered in this browser)');
+}
+
+function loadSettingsFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        let settings;
+        try {
+            settings = JSON.parse(e.target.result);
+        } catch (err) {
+            alert('This file is not a valid settings file (it could not be read as JSON).');
+            return;
+        }
+        if (!settings || settings.app !== SETTINGS_APP || !settings.variables || !settings.dataset) {
+            alert('This file is not a settings file from this app.');
+            return;
+        }
+        if (!AppState.parsedData) {
+            alert(`Please load the dataset first (settings were saved for "${settings.dataset.fileName}"), then load the settings file.`);
+            return;
+        }
+        applySettings(settings);
+    };
+    reader.readAsText(file);
+}
+
+function offerStoredSettings(headers) {
+    const banner = document.getElementById('settings-banner');
+    if (!banner) return;
+    banner.innerHTML = '';
+    const stored = readStoredSettings(headers);
+    if (!stored) return;
+    const when = new Date(stored.savedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+    banner.innerHTML = `
+        <div class="settings-banner-box">
+            <div>📂 Settings from a previous session with this dataset are available (saved ${escapeHtml(when)}${stored.dataset.fileName ? `, file "${escapeHtml(stored.dataset.fileName)}"` : ''}).</div>
+            <div class="settings-banner-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="settings-apply-stored">Apply these settings</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="settings-dismiss">Dismiss</button>
+            </div>
+        </div>`;
+    document.getElementById('settings-apply-stored').addEventListener('click', () => applySettings(stored));
+    document.getElementById('settings-dismiss').addEventListener('click', () => { banner.innerHTML = ''; });
+}
+
+function applySettings(settings) {
+    const headers = AppState.parsedData.headers;
+    const savedHeaders = settings.dataset.headers || Object.keys(settings.variables);
+    const missing = savedHeaders.filter(h => !headers.includes(h));
+    const extra = headers.filter(h => !savedHeaders.includes(h));
+
+    // Step 2/3 choices (only for columns present in this file)
+    headers.forEach(h => {
+        const saved = settings.variables[h];
+        if (!saved || !AppState.columnConfigs[h]) return;
+        const cfg = AppState.columnConfigs[h];
+        // Optional choices absent from the saved file must not linger from the current session
+        ['prevRole', 'prevImputationStrategy', 'positiveClass', 'ordinalOrder'].forEach(f => { delete cfg[f]; });
+        VARIABLE_FIELDS.forEach(f => { if (saved[f] !== undefined) cfg[f] = Array.isArray(saved[f]) ? saved[f].slice() : saved[f]; });
+    });
+    // Exactly one target
+    const targets = headers.filter(h => AppState.columnConfigs[h].role === 'target');
+    targets.slice(1).forEach(h => { AppState.columnConfigs[h].role = 'feature'; });
+
+    // Standard workflow (Step 4)
+    const std = settings.standard || {};
+    AppState.completeCase = Boolean(std.completeCase);
+    if (std.rankingMetricClf) AppState.rankingMetricClf = std.rankingMetricClf;
+    if (std.rankingMetricReg) AppState.rankingMetricReg = std.rankingMetricReg;
+    if (AppState.applyModelSelection && std.selectedModelIds) AppState.applyModelSelection(std.modelScope, std.selectedModelIds);
+    applyFormState(std.form);
+
+    // 7-step pipeline
+    const pipe = settings.pipeline || {};
+    applyFormState(pipe.form);
+    AppState.pendingPipelineDropped = (pipe.droppedFeatures || []).filter(f => headers.includes(f));
+    AppState.pendingPipelineReinstated = (pipe.reinstatedFeatures || []).filter(f => headers.includes(f));
+    AppState.pendingPipelineEvalSeed = pipe.evalSeed !== undefined && pipe.evalSeed !== '' ? String(pipe.evalSeed)
+        : (DOM.pipelineEvalSeedInput && DOM.pipelineEvalSeedInput.value ? DOM.pipelineEvalSeedInput.value : null);
+
+    // Earlier results no longer match the restored choices
+    AppState.imputedData = null;
+    if (DOM.toStep4Btn) DOM.toStep4Btn.disabled = true;
+    if (DOM.imputeAuditBox) DOM.imputeAuditBox.innerHTML = '';
+    const targetCol = headers.find(h => AppState.columnConfigs[h].role === 'target');
+    syncRankingSelectors(targetCol ? AppState.columnConfigs[targetCol].type !== 'continuous' : true);
+    if (String(AppState.currentStep) === '2') renderVariableConfigGrid();
+    if (String(AppState.currentStep) === '3') renderImputationTable();
+    updatePipelineCompleteCaseInfo();
+
+    // Confirmation with one-click re-run
+    const banner = document.getElementById('settings-banner');
+    const when = new Date(settings.savedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+    const warnings = [];
+    if (missing.length) warnings.push(`Saved column(s) not in this file (ignored): ${missing.join(', ')}.`);
+    if (extra.length) warnings.push(`New column(s) in this file kept their automatic settings: ${extra.join(', ')}.`);
+    const optionB = std.form && std.form['radio:validation-mode'] === 'separate';
+    if (optionB) warnings.push('These settings use Option B: load the separate testing file (Dataset ii) in Step 4 before running the standard workflow.');
+    if (banner) {
+        banner.innerHTML = `
+            <div class="settings-banner-box">
+                <div>✓ Settings applied (saved ${escapeHtml(when)}). Every step is filled in; review anything you like, or reproduce the analysis now:</div>
+                ${warnings.map(w => `<div class="settings-warn">⚠️ ${escapeHtml(w)}</div>`).join('')}
+                <div class="settings-banner-actions">
+                    <button type="button" class="btn ${settings.used && settings.used.standard ? 'btn-primary' : 'btn-secondary'} btn-sm" id="settings-run-standard">▶ Run standard workflow</button>
+                    <button type="button" class="btn ${settings.used && settings.used.pipeline ? 'btn-primary' : 'btn-secondary'} btn-sm" id="settings-run-pipeline">▶ Run 7-step pipeline</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="settings-dismiss">Close</button>
+                </div>
+            </div>`;
+        document.getElementById('settings-run-standard').addEventListener('click', runStandardWithSettings);
+        document.getElementById('settings-run-pipeline').addEventListener('click', runPipelineWithSettings);
+        document.getElementById('settings-dismiss').addEventListener('click', () => { banner.innerHTML = ''; });
+    }
+    showSeedToast('Settings applied');
+}
+
+async function runStandardWithSettings() {
+    goToStep(2);
+    goToStep(3);               // renders the imputation table (applies the complete-case choice)
+    executeImputation();
+    if (!AppState.imputedData) return;
+    goToStep(4);
+    const optionB = DOM.valModeB && DOM.valModeB.checked;
+    if (optionB && (!AppState.separateTestRawRows || AppState.separateTestRawRows.length === 0)) {
+        alert('These settings use Option B. Please load the separate testing file (Dataset ii) in this step, then click Train.');
+        return;
+    }
+    await startModelTraining();
+}
+
+async function runPipelineWithSettings() {
+    goToStep('pipeline');
+    goToPipelineSubstep(1);
+    executePipelineStep1();
+    if (!AppState.pipeline.trainRows) return;
+    const dropped = (AppState.pendingPipelineDropped || []).filter(f => AppState.pipeline.featureCols.includes(f));
+    AppState.pipeline.droppedFeatures = new Set(dropped);
+    if (AppState.pendingPipelineEvalSeed !== null && AppState.pendingPipelineEvalSeed !== undefined && DOM.pipelineEvalSeedInput) {
+        DOM.pipelineEvalSeedInput.value = AppState.pendingPipelineEvalSeed;
+    }
+    for (const n of [2, 3, 4, 5]) goToPipelineSubstep(n);
+    goToPipelineSubstep(6);
+    AppState.pipeline.reinstatedFeatures = new Set(AppState.pendingPipelineReinstated || []);
+    await executePipelineStep6();
+    if (!AppState.pipeline.rfImportance || AppState.pipeline.rfImportance.length === 0) return;
+    goToPipelineSubstep(7);
+    await executePipelineStep7();
+}
+
+// Safety net: an unexpected error anywhere (e.g. in a form renderer) is reported to the user and the
+// training buttons are re-enabled, instead of leaving the app looking busy or half-updated
+function handleUnexpectedError(err) {
+    const msg = err && err.message ? err.message : String(err || 'Unknown error');
+    if (msg === 'Training aborted by user.' || msg === 'Operation halted by user.') return;
+    console.error('Unexpected error:', err);
+    if (DOM.trainModelBtn) DOM.trainModelBtn.disabled = false;
+    if (DOM.pipelineTrainModelsBtn) DOM.pipelineTrainModelsBtn.disabled = false;
+    try { showSeedToast(`⚠️ Unexpected error: ${msg}. Please check your data/settings and retry.`); } catch (e) { /* ignore */ }
+}
+
+export { SETTINGS_SCHEMA, SETTINGS_APP, SETTINGS_KEY_PREFIX, SETTINGS_MAX_STORED, VARIABLE_FIELDS, datasetSignature, isRememberedControl, collectFormState, applyFormState, collectSettings, saveSettingsToBrowser, readStoredSettings, downloadSettings, loadSettingsFile, offerStoredSettings, applySettings, runStandardWithSettings, runPipelineWithSettings, handleUnexpectedError };
