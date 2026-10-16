@@ -476,6 +476,36 @@ async function optionC(VC, rows, cfg, modelId, hp, B, tune) {
         return `${Math.round(missShare * 100)}% of X1 missing (MAR); test AUC ${mEv.rocAuc.toFixed(3)} with MI vs ${sEv.rocAuc.toFixed(3)} with median, Brier ${mEv.brierScore.toFixed(3)} vs ${sEv.brierScore.toFixed(3)}; outcome-blind, reproducible, export-safe`;
     });
 
+    await check('Multiple imputation in the background worker gives the same result as the page, and stays fast for large cohorts', async () => {
+        const sent = [];
+        const scope = { location: { search: '' }, postMessage: m => sent.push(m), importScripts: () => {} };
+        const ws = {};
+        new Function('self', 'importScripts', `${fs.readFileSync(path.join(dir, 'compute-worker.js'), 'utf8')}\nreturn self;`)(Object.assign(ws, scope), scope.importScripts);
+        ws.postMessage = scope.postMessage;
+        const rng = DE.createPRNG(21);
+        const g = () => Math.sqrt(-2 * Math.log(rng() || 1e-12)) * Math.cos(2 * Math.PI * rng());
+        const make = n => Array.from({ length: n }, () => {
+            const r = { Y: rng() < 0.4 ? 'Yes' : 'No', Cat: ['A', 'B', 'C'][Math.floor(rng() * 3)] };
+            for (let j = 0; j < 15; j++) r[`X${j}`] = rng() < 0.1 ? '' : g().toFixed(3);
+            return r;
+        });
+        const cfg = { Y: { role: 'target', type: 'nominal' }, Cat: { role: 'feature', type: 'nominal' } };
+        for (let j = 0; j < 15; j++) cfg[`X${j}`] = { role: 'feature', type: 'continuous' };
+        const small = make(300);
+        await ws.onmessage({ data: { id: 7, op: 'miceFit', payload: { rows: JSON.parse(JSON.stringify(small)), columnConfigs: cfg, options: { m: 3, seed: 5 } } } });
+        const done = sent.find(m => m.id === 7 && (m.result || m.error));
+        assert(done && done.result, `worker failed: ${done && done.error}`);
+        const page = DE.miceFit(small, cfg, { m: 3, seed: 5 });
+        assert(JSON.stringify(done.result.datasets) === JSON.stringify(page.datasets) && JSON.stringify(done.result.imputer) === JSON.stringify(page.imputer), 'worker and page imputations differ');
+        const progress = sent.filter(m => m.progress && m.progress.kind === 'mice').length;
+        // Speed guard: 5,000 patients, 16 predictors, 5 imputations (about 4 s on a laptop; was 24 s)
+        const t0 = Date.now();
+        DE.miceFit(make(5000), cfg, { m: 5 });
+        const secs = (Date.now() - t0) / 1000;
+        assert(secs < 30, `multiple imputation of 5,000 patients took ${secs.toFixed(1)} s`);
+        return `identical in worker and page (${progress} progress messages); 5,000 patients imputed 5 times in ${secs.toFixed(1)} s`;
+    });
+
     await check('Shapley explanations: exact TreeSHAP (RF, boosted trees) and sampled Shapley (logistic) match brute-force enumeration', async () => {
         const rows = cohort(200, 31, 'binary', { missing: true });
         const cfg = configs('binary');

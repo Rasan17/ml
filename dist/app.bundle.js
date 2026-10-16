@@ -478,7 +478,7 @@ class ExecutionWatchdog {
 // compute.js: runs model training and cross-validation fits in a background Web Worker (compute-worker.js),
 // so the page stays responsive and Force Stop takes effect at once (the worker is terminated). When workers
 // are unavailable (e.g. the app opened directly from disk) or fail, the same code runs on the page instead.
-/* global ModelEngine */
+/* global ModelEngine, DataEngine */
 
 let worker = null;
 let workerBroken = false;
@@ -672,6 +672,24 @@ async function bootstrapRun(payload, { onResample = null, onInnerProgress = null
         ...payload, fitAndScoreMulti, isAborted, onResample, onInnerProgress,
         tune: t ? { ...t, fitAndScore, groupOf: t.groupCol ? (r => String(r[t.groupCol] ?? '').trim()) : null } : null
     });
+}
+
+/**
+ * Multiple imputation of training rows (DataEngine.miceFit) in the background worker, so the page stays
+ * responsive and Force Stop works; on the page when workers are unavailable. onProgress(l, m, it, iters).
+ */
+async function miceFitRun(rows, columnConfigs, options = {}, { onProgress = null, isAborted = null } = {}) {
+    if (workerAvailable()) {
+        try {
+            return await call('miceFit', { rows, columnConfigs, options }, {
+                isAborted,
+                onProgress: p => { if (p && p.kind === 'mice' && onProgress) onProgress(p.l, p.m, p.it, p.iters); }
+            });
+        } catch (e) {
+            if (!e.workerUnavailable) throw e;
+        }
+    }
+    return DataEngine.miceFit(rows, columnConfigs, { ...options, onProgress });
 }
 
 // ---- src/validation-core.js ----
@@ -1729,6 +1747,7 @@ function setupEventListeners() {
 
 
 
+
 function syncTrainTestSplit(trainVal) {
     let train = Math.min(95, Math.max(50, Math.round(trainVal)));
     let test = 100 - train;
@@ -1971,7 +1990,7 @@ function goToStep(stepNum) {
 
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
     if (stepNum === 3 || stepNum === '3') renderImputationTable();
-    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); }
+    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); }
     if (stepNum === 5 || stepNum === '5') renderSinglePredictionForm();
     if (stepNum === 'survival') renderSurvivalSetup();
     if (stepNum === 'pipeline') {
@@ -3831,6 +3850,7 @@ function runSubgroupAnalysis(containerId) {
 // patients are imputed with the same fitted chains by DataEngine.transformSingleRow.
 /* global DataEngine, ModelEngine */
 
+
 // Number of imputations chosen in Step 4 (0 = single imputation)
 function readMultipleImputation() {
     const v = document.getElementById('mi-select')?.value || 'single';
@@ -3841,8 +3861,12 @@ function readMultipleImputation() {
  * Multiply imputes raw training rows and returns the encoding fitted on all completed copies (prep, whose
  * X / y are the first copy, for counts and displays) and the encoded copies (sets) to train on.
  */
-function prepareMultipleImputation(rawRows, columnConfigs, m, seed) {
-    const mi = DataEngine.miceFit(rawRows, columnConfigs, { m, seed });
+async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onProgress = null, isAborted = null } = {}) {
+    // Plain copies: the rows are sent to the background worker
+    const plainRows = rawRows.map(r => ({ ...r }));
+    const mi = await miceFitRun(plainRows, JSON.parse(JSON.stringify(columnConfigs)), { m, seed }, { onProgress, isAborted });
+    if (isAborted && isAborted()) throw new Error('Training aborted by user.');
+    await ModelEngine.yieldToBrowser();
     const stacked = [].concat(...mi.datasets);
     const prep = DataEngine.prepareFeaturesAndTarget(stacked, columnConfigs);
     prep.imputation = { configs: JSON.parse(JSON.stringify(columnConfigs)), mice: mi.imputer };
@@ -3856,6 +3880,12 @@ function prepareMultipleImputation(rawRows, columnConfigs, m, seed) {
     return { prep, sets, imputedColumns: mi.imputedColumns };
 }
 
+// Rough duration of the imputation step, for a warning before large runs (measured: 5,000 patients with
+// 16 predictors take about 4 s for 5 imputations, growing with patients, predictors and imputations)
+function estimateImputationSeconds(nRows, nPredictors, m) {
+    return Math.round((nRows / 5000) * Math.pow(nPredictors / 16, 1.6) * (m / 5) * 4);
+}
+
 /** Trains one model per completed copy and returns the pooled model */
 async function fitPooledModel(modelId, isClassification, numClasses, hp, sets, opts = {}) {
     const models = [];
@@ -3864,6 +3894,20 @@ async function fitPooledModel(modelId, isClassification, numClasses, hp, sets, o
         models.push(await fitModel(modelId, isClassification, numClasses, hp, sets[l].X, sets[l].y, opts));
     }
     return ModelEngine.createMIPooled(models);
+}
+
+// Shown under the Step 4 choice: how long multiple imputation will take for the loaded cohort
+function updateImputationEstimate() {
+    const box = document.getElementById('mi-estimate');
+    if (!box) return;
+    const m = readMultipleImputation();
+    const rows = AppState.parsedData && AppState.parsedData.rows ? AppState.parsedData.rows.length : 0;
+    const nPred = AppState.columnConfigs ? Object.keys(AppState.columnConfigs).filter(c => AppState.columnConfigs[c].role === 'feature').length : 0;
+    if (!m || !rows || !nPred) { box.style.display = 'none'; return; }
+    const est = estimateImputationSeconds(rows, nPred, m);
+    const t = s => (s < 10 ? 'a few seconds' : s < 60 ? `about ${Math.round(s / 5) * 5} seconds` : `about ${Math.round(s / 60)} minute${Math.round(s / 60) === 1 ? '' : 's'}`);
+    box.style.display = 'block';
+    box.innerHTML = `⏱️ For ${rows.toLocaleString('en-GB')} patients and ${nPred} predictors, the imputation step takes ${t(est)} (twice with Option A when the final model is retrained on all patients), and each selected model is trained ${m} times. It runs in the background: the page stays usable and Force Stop works. Keep this window in front while it runs: browsers slow down background work in hidden or minimised windows.`;
 }
 
 // ---- src/cv-tuning.js ----
@@ -4274,6 +4318,21 @@ async function startModelTraining() {
         tuningReport.selectByCV = selectByCV;
         // Optional recalibration of two-outcome probabilities (fitted on out-of-fold Training-set predictions)
         const recalMethod = prep.isClassification && (prep.targetClasses || []).length === 2 ? readRecalibration('recalibration-select') : 'none';
+        // Progress and Force Stop for the multiple-imputation step (it runs in the background worker)
+        const miProgress = (what, nRows, m) => {
+            const est = estimateImputationSeconds(nRows, prep.featureCols.length, m);
+            const t0 = Date.now();
+            const say = msg => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">${msg}</span>`; if (watchdog) watchdog.tick(1, msg); };
+            say(`🧩 Multiple imputation of ${what}: ${nRows.toLocaleString('en-GB')} patients, ${m} imputations${est >= 10 ? ` (about ${est < 60 ? `${Math.max(10, Math.round(est / 5) * 5)} s` : `${Math.round(est / 60)} min`})` : ''}...`);
+            return {
+                isAborted: () => Boolean(watchdog && watchdog.aborted),
+                onProgress: (l, mm, it, iters) => {
+                    const done = ((l - 1) * iters + it) / (mm * iters);
+                    const left = done > 0 ? ((Date.now() - t0) / done) * (1 - done) / 1000 : null;
+                    say(`🧩 Multiple imputation of ${what}: imputation ${l}/${mm}, round ${it}/${iters}${left !== null && left >= 5 ? ` (about ${left < 60 ? `${Math.round(left / 5) * 5} s` : `${Math.round(left / 60)} min`} left)` : ''}...`);
+                }
+            };
+        };
         const foldCache = {};
         const foldsFor = async (rawTrainRows, k, label, i) => {
             if (!foldCache[k]) {
@@ -4477,9 +4536,7 @@ async function startModelTraining() {
             const miM = readMultipleImputation();
             let miSplit = null, miFull = null;
             if (miM) {
-                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">🧩 Multiple imputation of the Training set (${miM} imputations)...</span>`;
-                await ModelEngine.yieldToBrowser();
-                miSplit = prepareMultipleImputation(rowSplit.trainX, AppState.columnConfigs, miM, splitSeed);
+                miSplit = await prepareMultipleImputation(rowSplit.trainX, AppState.columnConfigs, miM, splitSeed, miProgress('the Training set', rowSplit.trainX.length, miM));
                 splitPrep = miSplit.prep;
                 testData = DataEngine.prepareTestingDataset(rowSplit.testX, splitPrep);
                 split = { trainX: miSplit.sets[0].X, trainY: miSplit.sets[0].y, testX: testData.X, testY: testData.y };
@@ -4487,9 +4544,7 @@ async function startModelTraining() {
                 AppState.lastTestRows = rowSplit.testX; // raw: imputed per chain when scored
                 AppState.baselineTestRawRows = rowSplit.testX;
                 if (shouldRetrain) {
-                    DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">🧩 Multiple imputation of all patients for the final models (${miM} imputations)...</span>`;
-                    await ModelEngine.yieldToBrowser();
-                    miFull = prepareMultipleImputation(rawRows, AppState.columnConfigs, miM, splitSeed);
+                    miFull = await prepareMultipleImputation(rawRows, AppState.columnConfigs, miM, splitSeed, miProgress('all patients (for the final models)', rawRows.length, miM));
                     prep = miFull.prep;
                 }
             }
@@ -4655,9 +4710,8 @@ async function startModelTraining() {
             const miMB = readMultipleImputation();
             let miB = null;
             if (miMB) {
-                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">🧩 Multiple imputation of Training Dataset (i) (${miMB} imputations)...</span>`;
-                await ModelEngine.yieldToBrowser();
-                miB = prepareMultipleImputation(optionBTrainRawRows(prep), AppState.columnConfigs, miMB, 42);
+                const rowsB = optionBTrainRawRows(prep);
+                miB = await prepareMultipleImputation(rowsB, AppState.columnConfigs, miMB, 42, miProgress('Training Dataset (i)', rowsB.length, miMB));
                 prep = miB.prep;
             }
             // Transform separate test data using training metadata (strict zero leakage)
@@ -9265,6 +9319,7 @@ function start() {
     setupEventListeners();
     document.getElementById('standard-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('standard'));
     document.getElementById('pipeline-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('pipeline'));
+    document.getElementById('mi-select')?.addEventListener('change', updateImputationEstimate);
     // Keep the sample-size check in step with the chosen split and validation protocol
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
         const el = document.getElementById(id);

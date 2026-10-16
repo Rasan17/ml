@@ -1,8 +1,8 @@
 // Background compute worker: trains models (and scores cross-validation folds) off the page's main thread,
 // so the interface stays responsive and Force Stop can end a computation immediately.
-// Messages in:  { id, op: 'fit' | 'fitEval' | 'fitEvalMulti' | 'bootstrap' | 'ping', payload }
+// Messages in:  { id, op: 'fit' | 'fitEval' | 'fitEvalMulti' | 'bootstrap' | 'miceFit' | 'ping', payload }
 // Messages out: { id, progress } during training, then { id, result } or { id, error }.
-/* global importScripts, tf, ModelEngine */
+/* global importScripts, tf, ModelEngine, DataEngine */
 'use strict';
 
 self.window = self; // the engines attach themselves to window.*
@@ -83,6 +83,13 @@ self.onmessage = async (ev) => {
             if (e) keep.forEach(k => { if (e[k] !== undefined) result[k] = e[k]; });
             if (m.dispose) m.dispose();
             self.postMessage({ id, result });
+            return;
+        }
+        if (op === 'miceFit') {
+            // Multiple imputation of the training patients (DataEngine.miceFit), off the page
+            const p = payload;
+            const res = DataEngine.miceFit(p.rows, p.columnConfigs, { ...p.options, onProgress: (l, m, it, iters) => progress({ kind: 'mice', l, m, it, iters }) });
+            self.postMessage({ id, result: res });
             return;
         }
         if (op === 'bootstrap') {

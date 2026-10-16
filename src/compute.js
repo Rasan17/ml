@@ -1,7 +1,7 @@
 // compute.js: runs model training and cross-validation fits in a background Web Worker (compute-worker.js),
 // so the page stays responsive and Force Stop takes effect at once (the worker is terminated). When workers
 // are unavailable (e.g. the app opened directly from disk) or fail, the same code runs on the page instead.
-/* global ModelEngine */
+/* global ModelEngine, DataEngine */
 import { bootstrapOptimism } from './validation-core.js';
 
 let worker = null;
@@ -198,4 +198,22 @@ async function bootstrapRun(payload, { onResample = null, onInnerProgress = null
     });
 }
 
-export { fitModel, fitAndScore, fitAndScoreMulti, bootstrapRun, cancelAll, workerAvailable, describeWorker };
+/**
+ * Multiple imputation of training rows (DataEngine.miceFit) in the background worker, so the page stays
+ * responsive and Force Stop works; on the page when workers are unavailable. onProgress(l, m, it, iters).
+ */
+async function miceFitRun(rows, columnConfigs, options = {}, { onProgress = null, isAborted = null } = {}) {
+    if (workerAvailable()) {
+        try {
+            return await call('miceFit', { rows, columnConfigs, options }, {
+                isAborted,
+                onProgress: p => { if (p && p.kind === 'mice' && onProgress) onProgress(p.l, p.m, p.it, p.iters); }
+            });
+        } catch (e) {
+            if (!e.workerUnavailable) throw e;
+        }
+    }
+    return DataEngine.miceFit(rows, columnConfigs, { ...options, onProgress });
+}
+
+export { fitModel, fitAndScore, fitAndScoreMulti, bootstrapRun, miceFitRun, cancelAll, workerAvailable, describeWorker };

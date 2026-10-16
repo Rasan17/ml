@@ -1,5 +1,6 @@
 // navigation.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { renderSurvivalSetup } from './survival.js';
+import { updateImputationEstimate } from './multiple-imputation.js';
 import { renderSampleSizePanel } from './panels.js';
 import { AppState, escapeHtml } from './core.js';
 import { renderImputationTable } from './imputation.js';
@@ -252,7 +253,7 @@ function goToStep(stepNum) {
 
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
     if (stepNum === 3 || stepNum === '3') renderImputationTable();
-    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); }
+    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); }
     if (stepNum === 5 || stepNum === '5') renderSinglePredictionForm();
     if (stepNum === 'survival') renderSurvivalSetup();
     if (stepNum === 'pipeline') {

@@ -12,7 +12,7 @@ import './imputation.js';
 import './training-setup.js';
 import { renderSampleSizePanel } from './panels.js';
 import './subgroups.js';
-import './multiple-imputation.js';
+import { updateImputationEstimate } from './multiple-imputation.js';
 import './cv-tuning.js';
 import './standard-training.js';
 import './training-actions.js';
@@ -58,6 +58,7 @@ function start() {
     setupEventListeners();
     document.getElementById('standard-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('standard'));
     document.getElementById('pipeline-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('pipeline'));
+    document.getElementById('mi-select')?.addEventListener('change', updateImputationEstimate);
     // Keep the sample-size check in step with the chosen split and validation protocol
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
         const el = document.getElementById(id);

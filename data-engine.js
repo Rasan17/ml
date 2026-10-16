@@ -1164,7 +1164,7 @@
          * fitted "imputer" (one set of imputation models per completed dataset, for every predictor) that
          * miceApplyRow uses to impute any new patient.
          */
-        miceFit(rows, columnConfigs, { m = 5, iterations = 10, seed = 2024, donors = 5, maxDonors = 500 } = {}) {
+        miceFit(rows, columnConfigs, { m = 5, iterations = 10, seed = 2024, donors = 5, maxDonors = 500, maxFitRows = 2000, maxSearch = 1000, onProgress = null } = {}) {
             const cols = Object.keys(columnConfigs).filter(c => columnConfigs[c].role === 'feature');
             const numeric = {}, levels = {}, start = {};
             cols.forEach(c => {
@@ -1180,63 +1180,126 @@
             const usable = cols.filter(c => missingIdx[c].length < n);            // has observed values
             const incomplete = usable.filter(c => missingIdx[c].length > 0);
             const ridge = this._ridgeSolve;
-            const fitModel = (data, c, rng, obsIdxAll) => {
+            // Each column read from text once: numbers, or the index of the category (-1 = missing)
+            const coded = {};
+            usable.forEach(c => {
+                const a = new Float64Array(n);
+                rows.forEach((r, i) => {
+                    if (this.isMissing(r[c])) a[i] = NaN;
+                    else a[i] = numeric[c] ? Number(r[c]) : levels[c].indexOf(String(r[c]).trim());
+                });
+                coded[c] = a;
+            });
+            const obsOf = {};
+            usable.forEach(c => { const mis = new Set(missingIdx[c]); obsOf[c] = []; for (let i = 0; i < n; i++) if (!mis.has(i)) obsOf[c].push(i); });
+            const respOf = c => (numeric[c] ? (i => [coded[c][i]]) : (i => levels[c].map((_, k) => (coded[c][i] === k ? 1 : 0))));
+            const fitModel = (cur, c, rng, obsIdxAll) => {
                 // Imputation model for c on all other usable predictors (current completed values)
                 const others = usable.filter(o => o !== c);
                 const stats = {};
                 others.forEach(o => {
                     if (numeric[o]) {
-                        const v = data.map(r => Number(r[o]));
-                        const mu = v.reduce((a, b) => a + b, 0) / n;
-                        const sd = Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / n) || 1;
-                        stats[o] = { mu, sd };
+                        const v = cur[o];
+                        let mu = 0; for (let i = 0; i < n; i++) mu += v[i];
+                        mu /= n;
+                        let ss = 0; for (let i = 0; i < n; i++) ss += (v[i] - mu) ** 2;
+                        stats[o] = { mu, sd: Math.sqrt(ss / n) || 1 };
                     }
                 });
-                const spec = { c, others, stats };
-                const design = r => this._miceDesign(r, spec, numeric, levels);
-                const resp = r => (numeric[c] ? [Number(r[c])] : levels[c].map(lv => (String(r[c]).trim() === lv ? 1 : 0)));
-                const obsIdx = obsIdxAll;
-                const Xall = data.map(design);
+                const Xall = new Array(n);
+                for (let i = 0; i < n; i++) {
+                    const x = [1];
+                    others.forEach(o => {
+                        if (numeric[o]) x.push((cur[o][i] - stats[o].mu) / stats[o].sd);
+                        else for (let k = 1; k < levels[o].length; k++) x.push(cur[o][i] === k ? 1 : 0);
+                    });
+                    Xall[i] = x;
+                }
+                // Large cohorts: each imputation model is fitted on a random subset of the observed rows
+                // (results are practically unchanged; cohorts below maxFitRows use every row)
+                let obsIdx = obsIdxAll;
+                if (obsIdx.length > maxFitRows) {
+                    const pick = obsIdx.slice();
+                    for (let k = 0; k < maxFitRows; k++) { const j = k + Math.floor(rng() * (pick.length - k)); [pick[k], pick[j]] = [pick[j], pick[k]]; }
+                    obsIdx = pick.slice(0, maxFitRows);
+                }
+                const resp = respOf(c);
                 const lam = 1e-3 * obsIdx.length;
-                const betaHat = ridge(obsIdx.map(i => Xall[i]), obsIdx.map(i => resp(rows[i])), lam);
+                const betaHat = ridge(obsIdx.map(i => Xall[i]), obsIdx.map(resp), lam);
                 const boot = obsIdx.map(() => obsIdx[Math.floor(rng() * obsIdx.length)]);
-                const betaStar = ridge(boot.map(i => Xall[i]), boot.map(i => resp(rows[i])), lam);
-                return { spec, Xall, betaHat, betaStar, obsIdx };
+                const betaStar = ridge(boot.map(i => Xall[i]), boot.map(resp), lam);
+                return { spec: { c, others, stats }, Xall, betaHat, betaStar, obsIdx };
             };
-            const pred = (x, B) => B[0].map((_, k) => x.reduce((a, xv, j) => a + xv * B[j][k], 0));
+            const pred = (x, B) => {
+                const q = B[0].length, out = new Array(q).fill(0);
+                for (let j = 0; j < x.length; j++) { const xv = x[j]; if (xv === 0) continue; const Bj = B[j]; for (let k = 0; k < q; k++) out[k] += xv * Bj[k]; }
+                return out;
+            };
             const nearest = (target, preds, rng) => {
                 const best = [];
-                preds.forEach((pv, k) => {
-                    const d = pv.reduce((a, v, j) => a + (v - target[j]) ** 2, 0);
+                const q = target.length;
+                for (let k = 0; k < preds.length; k++) {
+                    const pv = preds[k];
+                    let d = 0;
+                    for (let j = 0; j < q; j++) d += (pv[j] - target[j]) ** 2;
                     if (best.length < donors) { best.push({ k, d }); best.sort((a, b) => a.d - b.d); }
                     else if (d < best[donors - 1].d) { best[donors - 1] = { k, d }; best.sort((a, b) => a.d - b.d); }
-                });
+                }
                 return best[Math.floor(rng() * best.length)].k;
             };
-            const obsOf = {};
-            usable.forEach(c => { const mis = new Set(missingIdx[c]); obsOf[c] = []; for (let i = 0; i < n; i++) if (!mis.has(i)) obsOf[c].push(i); });
+            // Same result as nearest() for one-dimensional predictions (numeric predictors), but by binary search
+            // in the sorted predictions: the closest `donors` (ties by position, as above), one chosen at random
+            const nearestSorted = preds => {
+                const order = preds.map((_, k) => k).sort((a, b) => preds[a][0] - preds[b][0] || a - b);
+                const vals = order.map(k => preds[k][0]);
+                return (target, rng) => {
+                    const t = target[0];
+                    let lo = 0, hi = vals.length;
+                    while (lo < hi) { const mid = (lo + hi) >> 1; if (vals[mid] < t) lo = mid + 1; else hi = mid; }
+                    let L = lo - 1, R = lo;
+                    const cand = [];
+                    while (cand.length < donors && (L >= 0 || R < vals.length)) {
+                        if (R >= vals.length || (L >= 0 && t - vals[L] <= vals[R] - t)) cand.push(order[L--]); else cand.push(order[R++]);
+                    }
+                    const dist = k => (preds[k][0] - t) ** 2;
+                    const worst = Math.max(...cand.map(dist));
+                    while (L >= 0 && dist(order[L]) <= worst) cand.push(order[L--]);
+                    while (R < vals.length && dist(order[R]) <= worst) cand.push(order[R++]);
+                    cand.sort((a, b) => dist(a) - dist(b) || a - b);
+                    const best = cand.slice(0, donors);
+                    return best[Math.floor(rng() * best.length)];
+                };
+            };
 
             const datasets = [], chains = [];
             for (let l = 0; l < m; l++) {
                 const rng = this.createPRNG(seed + 1009 * l);
-                const data = rows.map(r => ({ ...r }));
+                const cur = {}, src = {}; // current values, and the row each imputed value was taken from
+                usable.forEach(c => { cur[c] = Float64Array.from(coded[c]); src[c] = {}; });
                 incomplete.forEach(c => {
-                    const obs = obsOf[c].map(i => rows[i][c]);
-                    missingIdx[c].forEach(i => { data[i][c] = obs[Math.floor(rng() * obs.length)]; });
+                    const obs = obsOf[c];
+                    missingIdx[c].forEach(i => { const d = obs[Math.floor(rng() * obs.length)]; cur[c][i] = coded[c][d]; src[c][i] = d; });
                 });
-                cols.filter(c => missingIdx[c].length === n).forEach(c => missingIdx[c].forEach(i => { data[i][c] = start[c]; }));
                 for (let it = 0; it < iterations; it++) {
                     incomplete.forEach(c => {
-                        const f = fitModel(data, c, rng, obsOf[c]);
-                        const obsPred = f.obsIdx.map(i => pred(f.Xall[i], f.betaHat));
-                        missingIdx[c].forEach(i => { data[i][c] = rows[f.obsIdx[nearest(pred(f.Xall[i], f.betaStar), obsPred, rng)]][c]; });
+                        const f = fitModel(cur, c, rng, obsOf[c]);
+                        // Donors for predictive mean matching (a random subset of maxSearch in large cohorts)
+                        const pool = f.obsIdx.length > maxSearch ? Array.from({ length: maxSearch }, () => f.obsIdx[Math.floor(rng() * f.obsIdx.length)]) : f.obsIdx;
+                        const poolPred = pool.map(i => pred(f.Xall[i], f.betaHat));
+                        const find = numeric[c] ? nearestSorted(poolPred) : (target => nearest(target, poolPred, rng));
+                        missingIdx[c].forEach(i => { const d = pool[find(pred(f.Xall[i], f.betaStar), rng)]; cur[c][i] = coded[c][d]; src[c][i] = d; });
                     });
+                    if (onProgress) onProgress(l + 1, m, it + 1, iterations);
                 }
+                // The completed dataset: imputed cells take the donor's original text value
+                const data = rows.map(r => ({ ...r }));
+                incomplete.forEach(c => missingIdx[c].forEach(i => { data[i][c] = rows[src[c][i]][c]; }));
+                cols.filter(c => missingIdx[c].length === n).forEach(c => missingIdx[c].forEach(i => { data[i][c] = start[c]; }));
                 datasets.push(data);
                 // Imputation models kept for new patients: every usable predictor, fitted on the completed data
                 const models = {};
                 usable.forEach(c => {
-                    const f = fitModel(data, c, rng, obsOf[c]);
+                    const f = fitModel(cur, c, rng, obsOf[c]);
                     const take = f.obsIdx.length > maxDonors ? Array.from({ length: maxDonors }, () => Math.floor(rng() * f.obsIdx.length)) : f.obsIdx.map((_, k) => k);
                     const r4 = v => Number(v.toPrecision(6));
                     models[c] = {
