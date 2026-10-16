@@ -41,6 +41,20 @@ test('app loads without errors and shows the sample data', async ({ page }) => {
     expect(errors).toEqual([]);
 });
 
+test('the main iNPH demo (420 simulated patients) and its external validation cohort load', async ({ page }) => {
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await page.click('#sample-shunt-large-btn');
+    await expect(page.locator('#data-stats-grid')).toContainText('420');
+    await page.click('button.step-tab[data-step="3"]');
+    await page.click('#apply-imputation-btn');
+    await page.click('button.step-tab[data-step="4"]');
+    await page.check('input[name="validation-mode"][value="separate"]', { force: true });
+    await page.getByRole('button', { name: 'Load Built-In Validation Cohort' }).click();
+    await expect(page.locator('#option-b-container')).toContainText('Hospital D');
+    expect(errors).toEqual([]);
+});
+
 test('standard workflow: train, compare, predict, explain', async ({ page }) => {
     const errors = watch(page);
     await loadShuntAndImpute(page);

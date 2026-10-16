@@ -192,7 +192,7 @@ window.launch7StepPipeline = async function(event) {
     // If dataset is not loaded yet, auto-load the default clinical cohort so the user is never blocked
     if (!AppState.parsedData || !AppState.parsedData.rows || AppState.parsedData.rows.length === 0) {
         try {
-            await loadSampleDataset('medical_shunt_cohort.csv', 'Neurosurgical Shunt Response Cohort');
+            await loadSampleDataset('medical_shunt_cohort_large.csv', 'iNPH Shunt Response Cohort (simulated, 420 patients)');
         } catch (err) {
             console.warn("Auto-load shunt cohort error:", err);
         }

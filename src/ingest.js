@@ -8,6 +8,7 @@ import { disposeModels } from './training-actions.js';
 // Known built-in cohorts and their matching validation (testing) files
 const SAMPLE_COHORTS = {
     'universal_medical_cohort.csv': { id: 'cardio', testFile: 'universal_medical_test_cohort.csv', testLabel: 'Cardiometabolic Risk Test Cohort' },
+    'medical_shunt_cohort_large.csv': { id: 'shunt-large', testFile: 'medical_shunt_validation_cohort.csv', testLabel: 'iNPH External Validation Cohort (Hospital D, 150 patients)' },
     'medical_shunt_cohort.csv': { id: 'shunt', testFile: 'medical_batch_unseen_cases.csv', testLabel: 'Neurosurgical External Validation Cohort' },
     'medical_recovery_score.csv': { id: 'recovery', testFile: 'medical_recovery_test_cohort.csv', testLabel: 'Functional Recovery Test Cohort' }
 };

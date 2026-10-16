@@ -31,6 +31,7 @@ function initDOM() {
     DOM.stepContents = document.querySelectorAll('.step-content');
     DOM.fileInput = document.getElementById('csv-file-input');
     DOM.dropzone = document.getElementById('upload-dropzone');
+    DOM.sampleShuntLargeBtn = document.getElementById('sample-shunt-large-btn');
     DOM.sampleCardioBtn = document.getElementById('sample-cardio-btn');
     DOM.sampleCohortBtn = document.getElementById('sample-cohort-btn');
     DOM.sampleRegressionBtn = document.getElementById('sample-regression-btn');
@@ -231,7 +232,7 @@ function setupEventListeners() {
     }
     if (DOM.pipelineLoadShuntBtn) {
         DOM.pipelineLoadShuntBtn.addEventListener('click', async () => {
-            await loadSampleDataset('medical_shunt_cohort.csv', 'Neurosurgical Shunt Response Cohort');
+            await loadSampleDataset('medical_shunt_cohort_large.csv', 'iNPH Shunt Response Cohort (simulated, 420 patients)');
             initPipelineUI();
         });
     }
@@ -340,6 +341,7 @@ function setupEventListeners() {
         DOM.sampleCardioBtn.addEventListener('click', () => loadSampleDataset('universal_medical_cohort.csv', 'Cardiometabolic Risk Cohort (Binary)'));
     }
     DOM.sampleCohortBtn.addEventListener('click', () => loadSampleDataset('medical_shunt_cohort.csv', 'Neurosurgical Shunt Response Cohort'));
+    if (DOM.sampleShuntLargeBtn) DOM.sampleShuntLargeBtn.addEventListener('click', () => loadSampleDataset('medical_shunt_cohort_large.csv', 'iNPH Shunt Response Cohort (simulated, 420 patients)'));
     DOM.sampleRegressionBtn.addEventListener('click', () => loadSampleDataset('medical_recovery_score.csv', 'Functional Recovery Score (Continuous Regression)'));
 
     // Imputation execution

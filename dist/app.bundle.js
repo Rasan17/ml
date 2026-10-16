@@ -1082,6 +1082,7 @@ function initDOM() {
     DOM.stepContents = document.querySelectorAll('.step-content');
     DOM.fileInput = document.getElementById('csv-file-input');
     DOM.dropzone = document.getElementById('upload-dropzone');
+    DOM.sampleShuntLargeBtn = document.getElementById('sample-shunt-large-btn');
     DOM.sampleCardioBtn = document.getElementById('sample-cardio-btn');
     DOM.sampleCohortBtn = document.getElementById('sample-cohort-btn');
     DOM.sampleRegressionBtn = document.getElementById('sample-regression-btn');
@@ -1282,7 +1283,7 @@ function setupEventListeners() {
     }
     if (DOM.pipelineLoadShuntBtn) {
         DOM.pipelineLoadShuntBtn.addEventListener('click', async () => {
-            await loadSampleDataset('medical_shunt_cohort.csv', 'Neurosurgical Shunt Response Cohort');
+            await loadSampleDataset('medical_shunt_cohort_large.csv', 'iNPH Shunt Response Cohort (simulated, 420 patients)');
             initPipelineUI();
         });
     }
@@ -1391,6 +1392,7 @@ function setupEventListeners() {
         DOM.sampleCardioBtn.addEventListener('click', () => loadSampleDataset('universal_medical_cohort.csv', 'Cardiometabolic Risk Cohort (Binary)'));
     }
     DOM.sampleCohortBtn.addEventListener('click', () => loadSampleDataset('medical_shunt_cohort.csv', 'Neurosurgical Shunt Response Cohort'));
+    if (DOM.sampleShuntLargeBtn) DOM.sampleShuntLargeBtn.addEventListener('click', () => loadSampleDataset('medical_shunt_cohort_large.csv', 'iNPH Shunt Response Cohort (simulated, 420 patients)'));
     DOM.sampleRegressionBtn.addEventListener('click', () => loadSampleDataset('medical_recovery_score.csv', 'Functional Recovery Score (Continuous Regression)'));
 
     // Imputation execution
@@ -1909,7 +1911,7 @@ window.launch7StepPipeline = async function(event) {
     // If dataset is not loaded yet, auto-load the default clinical cohort so the user is never blocked
     if (!AppState.parsedData || !AppState.parsedData.rows || AppState.parsedData.rows.length === 0) {
         try {
-            await loadSampleDataset('medical_shunt_cohort.csv', 'Neurosurgical Shunt Response Cohort');
+            await loadSampleDataset('medical_shunt_cohort_large.csv', 'iNPH Shunt Response Cohort (simulated, 420 patients)');
         } catch (err) {
             console.warn("Auto-load shunt cohort error:", err);
         }
@@ -2003,6 +2005,7 @@ function handleFileUpload(file) {
 // Known built-in cohorts and their matching validation (testing) files
 const SAMPLE_COHORTS = {
     'universal_medical_cohort.csv': { id: 'cardio', testFile: 'universal_medical_test_cohort.csv', testLabel: 'Cardiometabolic Risk Test Cohort' },
+    'medical_shunt_cohort_large.csv': { id: 'shunt-large', testFile: 'medical_shunt_validation_cohort.csv', testLabel: 'iNPH External Validation Cohort (Hospital D, 150 patients)' },
     'medical_shunt_cohort.csv': { id: 'shunt', testFile: 'medical_batch_unseen_cases.csv', testLabel: 'Neurosurgical External Validation Cohort' },
     'medical_recovery_score.csv': { id: 'recovery', testFile: 'medical_recovery_test_cohort.csv', testLabel: 'Functional Recovery Test Cohort' }
 };
