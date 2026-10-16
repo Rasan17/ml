@@ -1,12 +1,13 @@
 // pipeline.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { fitRecalibrator, readRecalibration, recalibrateAndEvaluate } from './cv-tuning.js';
 import { fitModel } from './compute.js';
-import { AppState, compareEvalResults, describeNNTraining, displayModelName, escapeHtml, fmtR2, fmtValue, jsArg, parseSeed, rankingMetricLabel, summariseHeldOutSet, trainingMedian } from './core.js';
-import { TUNABLE_MODELS, TUNE_MAX_ROWS, bootstrapFor, buildPipelineFolds, ciSpan, cvSummaryFrom, describeSplit, formatCvScore, readDecisionThreshold, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow } from './cv-tuning.js';
+import { AppState, compareEvalResults, describeNNTraining, displayModelName, escapeHtml, fmtR2, fmtValue, actionAttrs, parseSeed, rankingMetricLabel, summariseHeldOutSet, trainingMedian } from './core.js';
+import { TUNABLE_MODELS, TUNE_MAX_ROWS, bootstrapFor, ciScopeNote, buildPipelineFolds, ciSpan, cvSummaryFrom, describeSplit, formatCvScore, readDecisionThreshold, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow } from './cv-tuning.js';
 import { renderCalibrationPanel, renderExplainPanel } from './panels.js';
 import { deployPipelineModel, renderPipelineBenchmarkResults, renderTooGoodToBeTrueCheck, updatePipelineActiveDeploymentStatus, updatePredictionProvenanceBar } from './pipeline-results.js';
 import { saveSettingsToBrowser } from './settings.js';
 import { DOM } from './shell.js';
+import { renderSubgroupPanel } from './subgroups.js';
 import { disposeModels, evalAbortOpts, fitWithYields, syncRankingSelectors } from './standard-training.js';
 
 
@@ -415,13 +416,13 @@ function renderPipelineStep2() {
                         </div>
                     </div>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                        <button class="btn btn-rose btn-sm" onclick="window.pipelineDropFeature(${jsArg(p.var1)})" ${var1Dropped ? 'disabled' : ''}>
+                        <button class="btn btn-rose btn-sm" ${actionAttrs('pipelineDropFeature', p.var1)} ${var1Dropped ? 'disabled' : ''}>
                             ${var1Dropped ? `✓ Dropped ${escapeHtml(p.var1)}` : `🗑️ Drop ${escapeHtml(p.var1)}`}
                         </button>
-                        <button class="btn btn-rose btn-sm" onclick="window.pipelineDropFeature(${jsArg(p.var2)})" ${var2Dropped ? 'disabled' : ''}>
+                        <button class="btn btn-rose btn-sm" ${actionAttrs('pipelineDropFeature', p.var2)} ${var2Dropped ? 'disabled' : ''}>
                             ${var2Dropped ? `✓ Dropped ${escapeHtml(p.var2)}` : `🗑️ Drop ${escapeHtml(p.var2)}`}
                         </button>
-                        <button class="btn btn-secondary btn-sm" onclick="window.pipelineKeepBothPairs(${jsArg(p.var1)}, ${jsArg(p.var2)})">
+                        <button class="btn btn-secondary btn-sm" ${actionAttrs('pipelineKeepBothPairs', p.var1, p.var2)}>
                             🤝 Keep Both
                         </button>
                     </div>
@@ -594,11 +595,11 @@ function renderPipelineStep4() {
                 <td><strong style="color: ${isSig ? 'var(--accent-emerald)' : 'var(--text-muted)'}; font-size: 13.5px;">${r.pValue < 0.0001 ? '< 0.0001' : r.pValue}</strong></td>
                 <td>
                     ${isDropped ? `
-                        <button class="btn btn-secondary btn-sm" onclick="window.pipelineRestoreFeatureStep4(${jsArg(r.feature)})" title="Restore variable into modeling pipeline">
+                        <button class="btn btn-secondary btn-sm" ${actionAttrs('pipelineRestoreFeatureStep4', r.feature)} title="Restore variable into modeling pipeline">
                             ↩️ Include
                         </button>
                     ` : `
-                        <button class="btn btn-rose btn-sm" onclick="window.pipelineDropFeatureStep4(${jsArg(r.feature)})" title="Exclude this variable from modeling">
+                        <button class="btn btn-rose btn-sm" ${actionAttrs('pipelineDropFeatureStep4', r.feature)} title="Exclude this variable from modeling">
                             🗑️ Exclude
                         </button>
                     `}
@@ -932,8 +933,8 @@ function renderRfImportanceChart() {
                         ${isPruned ? 'Bottom 30%' : 'Top 70%'}
                     </span>`;
         const action = !isBottomTier ? '' : (isReinstated
-            ? `<button type="button" class="btn btn-outline btn-sm" onclick="window.pipelineToggleReinstateFeature(${jsArg(r.name)})" title="Remove this feature again for k-NN and Naive Bayes">✂️ Remove again</button>`
-            : `<button type="button" class="btn btn-outline btn-sm" onclick="window.pipelineToggleReinstateFeature(${jsArg(r.name)})" title="Keep this feature for k-NN and Naive Bayes in Step 7">↩️ Reinstate</button>`);
+            ? `<button type="button" class="btn btn-outline btn-sm" ${actionAttrs('pipelineToggleReinstateFeature', r.name)} title="Remove this feature again for k-NN and Naive Bayes">✂️ Remove again</button>`
+            : `<button type="button" class="btn btn-outline btn-sm" ${actionAttrs('pipelineToggleReinstateFeature', r.name)} title="Keep this feature for k-NN and Naive Bayes in Step 7">↩️ Reinstate</button>`);
 
         chartHtml += `
             <div class="rf-importance-row">
@@ -1015,8 +1016,8 @@ async function executePipelineStep7() {
 
         const targetCol = AppState.pipeline.targetCol;
         const isClassification = AppState.pipeline.columnConfigs[targetCol]?.type !== 'continuous';
-        // Model plan: Naive Bayes is classification-only, so regression runs 4 models, not 5
-        const plannedModels = isClassification ? ['knn', 'nb', 'rf', 'nn', 'glm', 'ensemble'] : ['knn', 'rf', 'nn', 'glm', 'ensemble'];
+        // Model plan: Naive Bayes is classification-only, so regression runs one model fewer
+        const plannedModels = isClassification ? ['knn', 'nb', 'rf', 'gbm', 'nn', 'glm', 'ensemble'] : ['knn', 'rf', 'gbm', 'nn', 'glm', 'ensemble'];
         const totalModels = plannedModels.length;
         const stepOf = id => plannedModels.indexOf(id) + 1;
         if (watchdog) watchdog.totalSteps = totalModels;
@@ -1069,6 +1070,7 @@ async function executePipelineStep7() {
             knn: { k: 5, metric: 'euclidean', weighting: 'distance', seed: evalSeed },
             nb: { varSmoothing: 1e-4, priorMode: 'empirical', seed: evalSeed },
             rf: { numTrees: 40, maxDepth: 6, minSamplesSplit: 2, featureRatio: 'sqrt', seed: evalSeed },
+            gbm: { nEstimators: 200, learningRate: 0.1, maxDepth: 3, minSamplesLeaf: 5, l2: 1, subsample: 0.8, seed: evalSeed },
             nn: { epochs: 25, learningRate: 0.005, hiddenLayers: [48, 24], dropoutRate: 0.15, l2Reg: 0.001, activation: 'relu', optimizer: 'adam', batchSize: 16, seed: evalSeed },
             glm: { lr: 0.05, epochs: 150, lambdaL2: 0.02, solver: 'momentum', seed: evalSeed }
         };
@@ -1102,7 +1104,7 @@ async function executePipelineStep7() {
                 const id = plan[t];
                 const reduced = id === 'knn' || id === 'nb';
                 const k = (id === 'nn' || id === 'ensemble') ? Math.min(pipeFolds, 3) : pipeFolds;
-                const label = { knn: 'k-NN', nb: 'Naive Bayes', rf: 'Random Forest', nn: 'Neural Network', glm: 'Logistic / Ridge Regression', ensemble: 'Ensemble' }[id];
+                const label = { knn: 'k-NN', nb: 'Naive Bayes', rf: 'Random Forest', gbm: 'Gradient-Boosted Trees', nn: 'Neural Network', glm: 'Logistic / Ridge Regression', ensemble: 'Ensemble' }[id];
                 const doTune = pipeTune && TUNABLE_MODELS.has(id);
                 // k-NN / Naive Bayes: the Step 6 top-70% selection is repeated inside every fold
                 const fdModel = await foldsFor(activeCols, k, label, id, reduced);
@@ -1155,7 +1157,19 @@ async function executePipelineStep7() {
         rfEval.constraintNote = `${pHp.rf.numTrees} trees, max depth ${pHp.rf.maxDepth}, min ${pHp.rf.minSamplesSplit} samples to split, √p features per split; probabilities are tree vote shares.` + tunedTag('rf');
         benchmarkList.push({ id: 'rf', name: 'Random Forest', model: rfFinal, prep: fullPrep, eval: rfEval });
 
-        // C. Deep Neural Network (Strict constraint: L2 Weight Decay + Dropout)
+        // B3. Gradient-boosted trees (all surviving features): shallow trees, shrinkage, row subsampling and
+        // early stopping on an internal validation split of the training rows (the test set is never used)
+        if (watchdog) watchdog.tick(stepOf('gbm'), `Training Model ${stepOf('gbm')}/${totalModels}: Gradient-Boosted Trees (all surviving features)...`);
+        await new Promise(r => setTimeout(r, 60));
+        const gbm = await fitModel('gbm', isClassification, numClasses, { ...pHp.gbm, seed: evalSeed }, fullPrep.X, fullPrep.y, {
+            isAborted, onProgress: () => { if (watchdog) watchdog.tick(stepOf('gbm'), `Training Model ${stepOf('gbm')}/${totalModels}: Gradient-Boosted Trees...`); }
+        });
+        const gbmEval = await ModelEngine.evaluateAsync(gbm, fullTestTrans.X, fullTestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
+        gbmEval.featuresUsed = `All Surviving (${activeCols.length} features)`;
+        gbmEval.constraintNote = `Up to ${pHp.gbm.nEstimators} rounds of depth-${pHp.gbm.maxDepth} trees, learning rate ${pHp.gbm.learningRate}, at least ${pHp.gbm.minSamplesLeaf} patients per leaf, ${Math.round(pHp.gbm.subsample * 100)}% row subsampling and early stopping on an internal validation split.` + (gbm.trainingInfo && gbm.trainingInfo.bestRounds ? ` ${gbm.trainingInfo.bestRounds} rounds kept.` : '') + tunedTag('gbm');
+        benchmarkList.push({ id: 'gbm', name: 'Gradient-Boosted Trees', model: gbm, prep: fullPrep, eval: gbmEval });
+
+        // C. Neural network (multilayer perceptron; strict constraint: L2 Weight Decay + Dropout)
         if (watchdog) watchdog.tick(stepOf('nn'), `Training Model ${stepOf('nn')}/${totalModels}: Neural Network (MLP; L2 + dropout + early stopping)...`);
         await new Promise(r => setTimeout(r, 60));
         const dnnParams = { ...pHp.nn };
@@ -1311,7 +1325,7 @@ function renderPipelineLeaderboardOnly() {
                             ✓ Active
                         </span>
                     ` : `
-                        <button class="btn btn-secondary btn-sm" onclick="window.deployPipelineModel('${item.id}')" title="Deploy this model for live patient inference">
+                        <button class="btn btn-secondary btn-sm" ${actionAttrs('deployPipelineModel', item.id)} title="Deploy this model for live patient inference">
                             🚀 Deploy
                         </button>
                     `}
@@ -1320,7 +1334,7 @@ function renderPipelineLeaderboardOnly() {
         `;
     });
 
-    tableHtml += `</tbody></table>`;
+    tableHtml += `</tbody></table>${sorted.some(it => it.eval && it.eval.ci) ? ciScopeNote() : ''}`;
     const caveats = new Set();
     sorted.forEach(item => {
         summariseHeldOutSet(item.eval).forEach(n => caveats.add(n));
@@ -1360,6 +1374,7 @@ function renderPipelineLeaderboardOnly() {
     DOM.pipelineLeaderboardContainer.innerHTML = tableHtml;
     renderCalibrationPanel('pipeline-calibration-container', sorted.map(it => ({ name: it.name, ev: it.eval })), isClassification);
     renderExplainPanel('pipeline-explain-container', sorted.map(it => ({ name: it.name, model: it.model, prep: it.prep, inSample: false })), AppState.pipeline.testRows, isClassification);
+    renderSubgroupPanel('pipeline-subgroup-container', sorted.map(it => ({ name: it.name, model: it.model, prep: it.prep, threshold: it.eval && it.eval.decisionThreshold })), AppState.pipeline.testRows, isClassification);
     syncRankingSelectors(isClassification);
 }
 

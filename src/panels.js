@@ -1,5 +1,6 @@
 // panels.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { AppState, escapeHtml } from './core.js';
+import { AppState, escapeHtml, actionAttrs } from './core.js';
+import { plus632 } from './validation-core.js';
 
 
 
@@ -193,8 +194,8 @@ function renderCalibrationPanel(containerId, items, isClassification) {
     if (!box) return;
     const all = (items || []).filter(it => it.ev);
     if (!all.length) { box.innerHTML = ''; return; }
-    const select = (handler) => `<label class="autotune-folds-label">Model:
-                    <select class="control-select" style="width: auto; display: inline-block;" onchange="${handler}">
+    const select = () => `<label class="autotune-folds-label">Model:
+                    <select class="control-select" style="width: auto; display: inline-block;" aria-label="Model to show" data-event="change" ${actionAttrs('renderCalibrationChoice', containerId)}>
                         ${all.map((it, i) => `<option${i === 0 ? ' selected' : ''}>${escapeHtml(it.name)}</option>`).join('')}
                     </select></label>`;
     if (!isClassification) {
@@ -202,7 +203,7 @@ function renderCalibrationPanel(containerId, items, isClassification) {
         calibrationItems[containerId] = { items: all, regression: true, target };
         box.innerHTML = `
             <div class="cal-panel">
-                <div class="cal-head"><div class="tune-title">📈 Prediction errors (Testing set)</div>${select(`window.renderCalibrationChoice('${containerId}', this.selectedIndex)`)}</div>
+                <div class="cal-head"><div class="tune-title">📈 Prediction errors (Testing set)</div>${select()}</div>
                 <div id="${containerId}-body">${residualSection(all[0].ev, target)}</div>
             </div>`;
         return;
@@ -217,7 +218,7 @@ function renderCalibrationPanel(containerId, items, isClassification) {
             ${discriminationSection(usable, positiveLabel)}
             <div class="cal-head" style="margin-top: 14px;">
                 <div class="cmp-guide-title" style="font-size: 13px;">Calibration, thresholds and decision curve for one model</div>
-                ${select(`window.renderCalibrationChoice('${containerId}', this.selectedIndex)`).replace('<option', '<option')}
+                ${select()}
             </div>
             <p class="tune-muted">Calibration asks whether the predicted percentages can be taken at face value: if the model says "30% chance", do about 30 in 100 such patients have the outcome? A model can rank patients well (good AUC) and still give percentages that are too high or too low.</p>
             <div id="${containerId}-body">${calibrationBody(usable[0], positiveLabel)}</div>
@@ -277,23 +278,74 @@ function explainPatient(model, x, prep) {
     return { f0, classIdx, binary, rows: rows.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)) };
 }
 
+// Shapley-value explanation against a background of up to 100 training patients: exact for tree models
+// (interventional TreeSHAP), estimated from random orderings of the predictors for other models.
+// Returns null when no training data are available (e.g. a model loaded from a file).
+function shapleyExplanation(model, x, prep, classIdx) {
+    if (!Array.isArray(prep.X) || prep.X.length < 5 || !prep.featureCols) return null;
+    const rng = DataEngine.createPRNG(20240611);
+    const idx = prep.X.map((_, i) => i);
+    for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
+    const background = idx.slice(0, 100).map(i => prep.X[i]);
+    const groups = [];
+    prep.featureCols.forEach((col, g) => { const m = prep.featureMetadata[col]; for (let j = 0; j < m.length; j++) groups[m.startIndex + j] = g; });
+    const P = prep.featureCols.length;
+    const calibrated = Boolean(model && model.calibrator);
+    let r = calibrated ? null : ModelEngine.treeShap(model, x, background, groups, P, classIdx);
+    if (r && r.scale === 'log-odds' && !r.multiclass) {
+        // Boosted trees: exact on the log-odds scale; shown in percentage points by sharing out the change in probability
+        const sig = v => 1 / (1 + Math.exp(-v));
+        const total = r.phi.reduce((a, b) => a + b, 0);
+        const dp = sig(r.value) - sig(r.base);
+        const f = Math.abs(total) > 1e-12 ? dp / total : 0;
+        r = { ...r, phi: r.phi.map(v => v * f), base: sig(r.base), value: sig(r.value), scale: 'probability', converted: true };
+    }
+    if (!r) {
+        const slow = model && (model.constructor && /Neural|Ensemble/i.test(model.constructor.name));
+        const outputs = rows => (typeof model.predictOutputs === 'function' ? model.predictOutputs(rows) : rows.map(z => model.predictSingle(z)));
+        const value = o => (!prep.isClassification ? Number(o.pred) : o.probabilities ? Number(o.probabilities[classIdx]) || 0 : (o.pred === classIdx ? 1 : 0));
+        r = ModelEngine.sampledShapley(rows => outputs(rows).map(value), x, background, groups, P, slow ? 64 : 200, 7);
+        r.scale = prep.isClassification ? 'probability' : 'outcome';
+    }
+    return { ...r, background: background.length, rows: prep.featureCols.map((col, g) => ({ col, meta: prep.featureMetadata[col], delta: r.phi[g] })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)) };
+}
+
 function renderPatientExplanation(model, x, prep, inputRow) {
     try {
         const ex = explainPatient(model, x, prep);
-        const minEffect = prep.isClassification ? 0.0005 : Math.max(1e-6, Math.abs(ex.f0) * 1e-3);
-        const top = ex.rows.filter(r => Math.abs(r.delta) >= minEffect).slice(0, 6);
-        if (!top.length) return '<div class="explain-box"><strong>🔍 Why this prediction?</strong> No single predictor changes the prediction when set to a typical value.</div>';
         const cls = prep.isClassification ? String((prep.targetIdxToClass || {})[ex.classIdx] ?? ex.classIdx) : null;
-        const unit = prep.isClassification ? 'percentage points' : 'units';
-        const fmt = d => (prep.isClassification ? (Math.abs(d) * 100).toFixed(1) : Math.abs(d).toFixed(2));
-        const items = top.map(r => {
-            const val = inputRow && inputRow[r.col] !== undefined && String(inputRow[r.col]).trim() !== '' ? String(inputRow[r.col]) : '(blank)';
-            return `<li><span class="${r.delta > 0 ? 'ex-up' : 'ex-down'}">${r.delta > 0 ? '▲' : '▼'}</span> <strong>${escapeHtml(r.col)} = ${escapeHtml(val)}</strong> ${r.delta > 0 ? 'raises' : 'lowers'} the ${prep.isClassification ? `probability of "${escapeHtml(cls)}"` : 'predicted value'} by <strong>${fmt(r.delta)} ${unit}</strong> compared with a typical value (${escapeHtml(typicalValueText(r.meta))}).</li>`;
-        }).join('');
+        const logOdds = sh => sh && sh.scale === 'log-odds';
+        const unitOf = sh => (logOdds(sh) ? 'log-odds units' : prep.isClassification ? 'percentage points' : 'units');
+        const fmtOf = sh => d => (logOdds(sh) ? Math.abs(d).toFixed(2) : prep.isClassification ? (Math.abs(d) * 100).toFixed(1) : Math.abs(d).toFixed(2));
+        const valueOf = r => (inputRow && inputRow[r.col] !== undefined && String(inputRow[r.col]).trim() !== '' ? String(inputRow[r.col]) : '(blank)');
+        const what = prep.isClassification ? `probability of "${escapeHtml(cls)}"` : 'predicted value';
+        // Quick view: each predictor changed on its own to a typical value
+        const minEffect = prep.isClassification ? 0.0005 : Math.max(1e-6, Math.abs(ex.f0) * 1e-3);
+        const quick = ex.rows.filter(r => Math.abs(r.delta) >= minEffect).slice(0, 6);
+        const fq = fmtOf(null);
+        const quickHtml = quick.length
+            ? `<ul>${quick.map(r => `<li><span class="${r.delta > 0 ? 'ex-up' : 'ex-down'}">${r.delta > 0 ? '▲' : '▼'}</span> <strong>${escapeHtml(r.col)} = ${escapeHtml(valueOf(r))}</strong> ${r.delta > 0 ? 'raises' : 'lowers'} the ${what} by <strong>${fq(r.delta)} ${unitOf(null)}</strong> compared with a typical value (${escapeHtml(typicalValueText(r.meta))}).</li>`).join('')}</ul>`
+            : '<p class="tune-muted">No single predictor changes the prediction when set to a typical value on its own.</p>';
+        const quickNote = '<div class="tune-muted">Each predictor is changed on its own to a typical training value (average, most common category or middle rank) while the others are kept as entered; interactions between predictors are not captured.</div>';
+        let sh = null;
+        try { sh = shapleyExplanation(model, x, prep, ex.classIdx); } catch (e) { sh = null; }
+        if (!sh) {
+            return `<div class="explain-box"><strong>🔍 Why this prediction?</strong> The predictors that moved this patient's result most (quick view):${quickHtml}${quickNote}
+                <div class="tune-muted">Shapley values need the training data, which are not available for a model loaded from a file. The explanation describes how the model behaves, not what causes the outcome.</div></div>`;
+        }
+        const fs = fmtOf(sh);
+        const minSh = logOdds(sh) ? 0.005 : prep.isClassification ? 0.0005 : Math.max(1e-6, Math.abs(sh.value) * 1e-3);
+        const top = sh.rows.filter(r => Math.abs(r.delta) >= minSh).slice(0, 6);
+        const level = v => (logOdds(sh) ? `${v.toFixed(2)} (log-odds)` : prep.isClassification ? `${(v * 100).toFixed(1)}%` : v.toFixed(2));
+        const items = top.length ? `<ul>${top.map(r => `<li><span class="${r.delta > 0 ? 'ex-up' : 'ex-down'}">${r.delta > 0 ? '▲' : '▼'}</span> <strong>${escapeHtml(r.col)} = ${escapeHtml(valueOf(r))}</strong> ${r.delta > 0 ? 'raises' : 'lowers'} it by <strong>${fs(r.delta)} ${unitOf(sh)}</strong></li>`).join('')}</ul>` : '<p class="tune-muted">No predictor moves this prediction noticeably away from the average.</p>';
+        const method = sh.exact
+            ? `Exact Shapley values for the trees (interventional TreeSHAP)${sh.converted ? ', calculated on the model\'s log-odds scale and shown in percentage points' : ''}`
+            : `Shapley values estimated from ${sh.orderings} random orderings of the predictors (small random error)`;
         return `<div class="explain-box">
-            <strong>🔍 Why this prediction?</strong> The predictors that moved this patient's result most:
-            <ul>${items}</ul>
-            <div class="tune-muted">Approximate explanation: each predictor is changed on its own to a typical training value (average, most common category or middle rank) while the others are kept as entered; interactions between predictors are not captured. It describes how the model behaves, not what causes the outcome.</div>
+            <strong>🔍 Why this prediction?</strong> Starting from the average ${what} for ${sh.background} training patients (<strong>${level(sh.base)}</strong>), these predictors moved this patient to <strong>${level(sh.value)}</strong>:
+            ${items}
+            <div class="tune-muted">${method}. The contributions of all predictors add up to the difference between this patient and the average, and interactions are shared fairly between the predictors involved. Each predictor's effect is judged by replacing it with values from real training patients, which can create unlikely combinations when predictors are strongly correlated. It describes how the model behaves, not what causes the outcome.</div>
+            <details class="explain-quick"><summary>Quick view: one predictor at a time</summary>${quickHtml}${quickNote}</details>
         </div>`;
     } catch (e) {
         return '';
@@ -356,7 +408,7 @@ function renderOddsRatioPanel(containerId, prep) {
             const nMissing = raw.filter(r => prep.featureCols.some(c => DataEngine.isMissing(r[c]))).length;
             body = `<table class="data-table thr-table"><thead><tr><th>Predictor</th><th>Odds ratio (95% CI)</th><th>Scale</th><th>p-value</th></tr></thead><tbody>${oddsRatioRows(cols, est, false)}</tbody></table>
                 <p class="tune-muted">Odds ratios for "${escapeHtml(posLabel)}" from an <strong>unpenalised logistic regression fitted to convergence</strong> on the ${fit.n} training patients (${fit.events} with the outcome), each adjusted for all the other predictors. An odds ratio above 1 means higher odds of "${escapeHtml(posLabel)}"; a confidence interval that includes 1 is compatible with no association. Categorical predictors are compared with their most common category. This table explains associations in the training data; it is separate from the ridge-penalised model used for prediction and does not show causation.${epv < 10 ? ` <strong>Caution:</strong> only ${epv.toFixed(1)} patients in the smaller outcome group per predictor, so these estimates are unstable.` : ''}</p>
-                ${nMissing > 0 ? `<div class="explain-box"><strong>Missing data:</strong> ${nMissing} of ${raw.length} training patients had at least one missing predictor value, filled once (single imputation), which makes the confidence intervals too narrow. <button type="button" class="btn btn-outline btn-sm" id="${containerId}-mice-btn" onclick="window.runMiceOddsRatios('${containerId}')">Re-estimate with multiple imputation (MICE)</button><div id="${containerId}-mice"></div></div>` : ''}`;
+                ${nMissing > 0 ? `<div class="explain-box"><strong>Missing data:</strong> ${nMissing} of ${raw.length} training patients had at least one missing predictor value, filled once (single imputation), which makes the confidence intervals too narrow. <button type="button" class="btn btn-outline btn-sm" id="${containerId}-mice-btn" ${actionAttrs('runMiceOddsRatios', containerId)}>Re-estimate with multiple imputation (MICE)</button><div id="${containerId}-mice"></div></div>` : ''}`;
         }
     }
     box.innerHTML = `<div class="cal-panel"><div class="tune-title">📋 Odds ratios (logistic regression, training data)</div>${body}</div>`;
@@ -470,7 +522,7 @@ function renderExplainPanel(containerId, items, rows, isClassification) {
                 <div class="tune-title">🔍 Which predictors matter? (permutation importance, Testing set)</div>
                 <span>
                     <select id="${containerId}-select" class="control-select" aria-label="Model for permutation importance" style="width: auto; display: inline-block;">${usable.map((it, i) => `<option${i === 0 ? ' selected' : ''}>${escapeHtml(it.name)}</option>`).join('')}</select>
-                    <button type="button" id="${containerId}-btn" class="btn btn-outline btn-sm" onclick="window.runPermutationImportance('${containerId}')">Compute</button>
+                    <button type="button" id="${containerId}-btn" class="btn btn-outline btn-sm" ${actionAttrs('runPermutationImportance', containerId)}>Compute</button>
                 </span>
             </div>
             <p class="tune-muted">Model-agnostic importance: each predictor's values are shuffled between test patients, breaking its link with the outcome, and the drop in performance is measured. A large drop means the model relies on that predictor; around zero means it does not; a negative value means shuffling did not hurt (noise). Predictors that carry the same information share their importance. This shows what the model uses, not what causes the outcome.</p>
@@ -478,7 +530,7 @@ function renderExplainPanel(containerId, items, rows, isClassification) {
         </div>`;
 }
 
-export { calibrationItems, calibrationSvg, thresholdTable, calibrationBody, CURVE_COLOURS, lineChartSvg, chartLegend, discriminationSection, decisionCurveSection, residualSection, renderCalibrationPanel, explainItems, referenceEncoding, typicalValueText, explainOutput, explainPatient, renderPatientExplanation, renderOddsRatioPanel, permutationImportance, renderExplainPanel };
+export { calibrationItems, calibrationSvg, thresholdTable, calibrationBody, CURVE_COLOURS, lineChartSvg, chartLegend, discriminationSection, decisionCurveSection, residualSection, renderCalibrationPanel, explainItems, referenceEncoding, typicalValueText, explainOutput, explainPatient, shapleyExplanation, renderPatientExplanation, renderOddsRatioPanel, permutationImportance, renderExplainPanel };
 
 // =========================================================================
 // MINIMUM SAMPLE SIZE (Riley et al. criteria, as in pmsampsize) for the current outcome and predictors
@@ -533,19 +585,59 @@ function renderOptimismPanel(containerId, results) {
     const labels = { accuracy: 'Accuracy', balancedAccuracy: 'Balanced accuracy', macroF1: 'Macro F1', rocAuc: 'ROC-AUC', brierScore: 'Brier ↓', r2: 'R²', rmse: 'RMSE ↓', mae: 'MAE ↓' };
     const pctKeys = new Set(['accuracy', 'balancedAccuracy', 'macroF1']);
     const fmt = (k, v) => (typeof v !== 'number' ? '—' : pctKeys.has(k) ? `${(v * 100).toFixed(1)}%` : v.toFixed(3));
+    const fmtOpt = (k, v) => (typeof v !== 'number' ? '—' : pctKeys.has(k) ? `${(v * 100).toFixed(1)} pts` : v.toFixed(3));
+    const nameOf = r => (r.info && r.info.name) || r.modelId;
+    const tuningNote = oc => {
+        if (oc.tuning === 'repeated') {
+            const share = typeof oc.sameSettingsShare === 'number' ? ` The resamples chose the same settings as the full data in ${Math.round(oc.sameSettingsShare * 100)}% of cases${oc.sameSettingsShare < 0.5 ? ', so the tuned settings are not very stable' : ''}.` : '';
+            return `<p class="tune-muted">✓ The automatic tuning was repeated inside every resample (${oc.innerFolds}-fold cross-validation), so the corrected figures include the optimism that tuning adds.${share}</p>`;
+        }
+        if (oc.tuning === 'once') return `<p class="tune-muted">⚠️ The settings were tuned once on all patients and not again inside each resample (too slow for this model), so the corrected figures leave out the optimism that tuning adds and are somewhat too high.</p>`;
+        return '';
+    };
     const blocks = items.map(r => {
         const oc = r.evalRes.optimismCorrection;
         const keys = Object.keys(oc.apparent);
-        const name = (r.info && r.info.name) || r.modelId;
-        return `<div class="tune-model"><div class="tune-model-head"><strong>${escapeHtml(name)}</strong><span class="tune-sd">${oc.B} resamples</span></div>
-            <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (trained and scored on all patients)</th><th>Average optimism</th><th>Optimism-corrected</th></tr></thead>
-            <tbody>${keys.map(k => `<tr><td>${labels[k] || k}</td><td>${fmt(k, oc.apparent[k])}</td><td>${typeof oc.optimism[k] === 'number' ? (pctKeys.has(k) ? `${(oc.optimism[k] * 100).toFixed(1)} pts` : oc.optimism[k].toFixed(3)) : '—'}</td><td><strong>${fmt(k, oc.corrected[k])}</strong></td></tr>`).join('')}
-            ${oc.calibrationSlope !== null && oc.calibrationSlope !== undefined ? `<tr><td>Calibration slope (ideal 1)</td><td>1.000 (by construction)</td><td>—</td><td><strong>${oc.calibrationSlope.toFixed(3)}</strong></td></tr>` : ''}</tbody></table></div>`;
+        const appSlope = typeof oc.apparentSlope === 'number' ? oc.apparentSlope.toFixed(3) : '—';
+        const h = oc.harrell || oc.corrected, e = oc.est632 || {};
+        const is632 = oc.method === '632plus';
+        const b = (on, v) => (on ? `<strong>${v}</strong>` : v);
+        return `<div class="tune-model"><div class="tune-model-head"><strong>${escapeHtml(nameOf(r))}</strong><span class="tune-sd">${oc.B} resamples</span></div>
+            ${tuningNote(oc)}
+            <p class="tune-muted">${is632
+                ? 'Reported: the <strong>.632+</strong> estimate. This model can memorise its training patients, so Harrell\'s correction (scored partly on patients the bootstrap model was trained on) would be too small.'
+                : 'Reported: <strong>Harrell\'s</strong> optimism-corrected estimate, the standard for regression-type models; the .632+ estimate is shown for comparison.'}</p>
+            <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (trained and scored on all patients)</th><th>Average optimism</th><th>Harrell corrected</th><th>.632+ estimate</th></tr></thead>
+            <tbody>${keys.map(k => `<tr><td>${labels[k] || k}</td><td>${fmt(k, oc.apparent[k])}</td><td>${fmtOpt(k, oc.optimism[k])}</td><td>${b(!is632, fmt(k, h[k]))}</td><td>${b(is632, fmt(k, e[k]))}</td></tr>`).join('')}
+            ${oc.calibrationSlope !== null && oc.calibrationSlope !== undefined ? `<tr><td>Calibration slope (ideal 1)</td><td>${appSlope}</td><td>—</td><td colspan="2"><strong>${oc.calibrationSlope.toFixed(3)}</strong> <span class="tune-muted">(${is632 ? 'bootstrap models on their out-of-bag patients' : 'bootstrap models on the original patients'})</span></td></tr>` : ''}</tbody></table></div>`;
     }).join('');
+    // Choosing the best model: the winner's curse
+    const sel = items[0].evalRes.optimismCorrection.selection;
+    let selBlock = '';
+    if (sel && sel.repeated && sel.B > 0) {
+        const top = items[0];
+        const oc = top.evalRes.optimismCorrection;
+        const keys = Object.keys(oc.apparent);
+        const share = Object.keys(sel.chosenShare || {}).sort((a, b) => sel.chosenShare[b] - sel.chosenShare[a])
+            .map(id => { const m = items.find(x => x.modelId === id); return `${escapeHtml(m ? nameOf(m) : id)} ${Math.round(sel.chosenShare[id] * 100)}%`; }).join(', ');
+        selBlock = `<div class="tune-model"><div class="tune-model-head"><strong>Choosing the best of ${sel.nModels} models</strong><span class="tune-sd">${sel.B} resamples</span></div>
+            <p class="tune-muted">Picking the model with the best cross-validated score makes the winner look a little better than it is (the winner's curse). Inside each resample the same choice was made again, and the performance of whichever model won there was recorded. Applying this to the apparent performance of the top-ranked model (${escapeHtml(nameOf(top))}) gives an estimate for the whole choose-then-fit process. Models chosen across the resamples: ${share}.</p>
+            <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (${escapeHtml(nameOf(top))})</th><th>${oc.method === '632plus' ? 'Chosen models on out-of-bag patients' : 'Optimism of choosing and fitting'}</th><th>Corrected for the choice (${oc.method === '632plus' ? '.632+' : 'Harrell'})</th></tr></thead>
+            <tbody>${keys.map(k => {
+                const o = sel.optimism[k];
+                let v = typeof oc.apparent[k] === 'number' && typeof o === 'number' ? oc.apparent[k] - o : null;
+                if (oc.method === '632plus') { const e = plus632(k, oc.apparent[k], sel.oobMean && sel.oobMean[k], oc.noInfo && oc.noInfo[k]); v = e ? e.value : null; }
+                return `<tr><td>${labels[k] || k}</td><td>${fmt(k, oc.apparent[k])}</td><td>${oc.method === '632plus' ? `out-of-bag ${fmt(k, sel.oobMean && sel.oobMean[k])}` : fmtOpt(k, o)}</td><td><strong>${fmt(k, v)}</strong></td></tr>`;
+            }).join('')}</tbody></table></div>`;
+    } else if (sel && !sel.repeated) {
+        selBlock = `<p class="tune-muted">⚠️ ${sel.nModels} models were compared. Choosing the best one adds a small optimistic bias (the winner's curse) that is not corrected here${sel.reason === 'slow' ? ', because the neural network and the ensemble are too slow to cross-validate inside every resample' : ', because the choice is not made by cross-validation (choose "Cross-validation" for model selection to correct it)'}. Treat small differences between models as ties.</p>`;
+    }
+    const anyRepeated = items.some(r => r.evalRes.optimismCorrection.tuning === 'repeated');
     box.innerHTML = `<div class="cal-panel">
         <div class="tune-title">🔁 Bootstrap internal validation (Option C)</div>
-        <p class="tune-muted"><strong>Apparent</strong> performance is measured on the same patients the model learned from, so it is too optimistic. Each bootstrap resample repeats the whole modelling process on patients drawn with replacement; the model is scored on its resample and on the original patients, and the average difference is the <strong>optimism</strong>. Subtracting it gives the <strong>optimism-corrected</strong> estimate of how the model would perform on new patients from the same population. The corrected calibration slope estimates how much the predictions should be shrunk (values below 1 mean overfitting).</p>
+        <p class="tune-muted"><strong>Apparent</strong> performance is measured on the same patients the model learned from, so it is too optimistic. Each bootstrap resample draws patients with replacement and repeats the modelling steps on them: imputation, encoding and scaling are refitted${anyRepeated ? ', and the automatic tuning is run again' : ''}. The refitted model is scored on its resample and on the original patients, and the average difference is the <strong>optimism</strong>. Subtracting it gives the <strong>optimism-corrected</strong> estimate of how the model would perform on new patients from the same population. Models that can memorise their training patients (Random Forest, boosted trees, k-NN, neural networks) are instead reported with the <strong>.632+</strong> estimate, which scores each bootstrap model only on the patients it did not see (Efron &amp; Tibshirani, 1997); Harrell's correction is too small for them. Choices you made by hand (which predictors to include, how to encode them) are not repeated. The corrected calibration slope estimates how much the predictions should be shrunk (values below 1 mean overfitting).</p>
         ${blocks}
+        ${selBlock}
     </div>`;
 }
 

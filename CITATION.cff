@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software in research, please cite it as below."
+title: "Universal Medical ML/NeuralNet Predictor"
+abstract: "A browser-based tool for developing and validating clinical prediction models (machine learning, neural networks and survival models) without patient data leaving the user's computer."
+type: software
+authors:
+  - family-names: "Narenthiran"
+    given-names: "Ganesalingam"
+version: "2.0 (2026.10.16)"
+date-released: "2026-10-16"
+repository-code: "https://github.com/Rasan17/ml"
+url: "https://rasan17.github.io/ml/"
+keywords:
+  - clinical prediction model
+  - machine learning
+  - TRIPOD+AI
+  - neurosurgery

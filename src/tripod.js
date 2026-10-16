@@ -30,7 +30,8 @@ function collect(source) {
     }
     const res = AppState.allTestedResults || [];
     const top = res[0] ? res[0].evalRes : AppState.evalResults;
-    const protocol = top && top.protocol === 'option-c' ? `internal validation by bootstrap optimism correction (${(top.optimismCorrection || {}).B || '?'} resamples; all patients used for training)`
+    const oc = top && top.optimismCorrection;
+    const protocol = top && top.protocol === 'option-c' ? `bootstrap internal validation (${(oc || {}).B || '?'} resamples; all patients used for training; imputation, encoding and scaling${oc && oc.tuning === 'repeated' ? ' and hyperparameter tuning' : ''} repeated in every resample; Harrell's optimism correction for regression-type models and the .632+ estimate for flexible models${oc && oc.selection && oc.selection.repeated ? '; the choice between models was also repeated in every resample' : ''})`
         : top && top.protocol === 'option-b' ? 'external validation on a separate testing dataset (Dataset ii)'
         : `single ${describeSplit(top && top.splitInfo)} (${top && top.trainPct ? top.trainPct : 80}/${top && top.testPct ? top.testPct : 20})`;
     return {
@@ -79,7 +80,7 @@ function buildChecklist(source) {
         ['Analytical methods: validation', 'Internal validation approach and how performance was estimated.', `Validation: ${esc(d.validation)}. Model selection: ${esc(d.selection)}.${d.seed !== null && d.seed !== undefined ? ` Random seed ${d.seed}.` : ''}`, 'auto'],
         ['Analytical methods: performance measures', 'Measures of discrimination, calibration and clinical utility, with uncertainty.', `Discrimination (ROC-AUC / C-index, DeLong comparison), calibration (plot, slope, intercept, Brier score), decision curve analysis; percentile bootstrap 95% CIs over test patients${d.source === 'standard' && d.threshold ? `; decision threshold ${d.threshold}` : ''}.`, 'auto'],
         ['Class imbalance', 'Methods used to handle class imbalance and their effect on calibration.', esc(d.imbalance) + (d.recalibration && d.recalibration !== 'none' ? `; recalibration: ${esc(d.recalibration)}` : ''), 'auto'],
-        ['Fairness', 'Approaches to assess and address model fairness across groups.', `Not assessed automatically. ${AUTHOR} (e.g. performance by sex, age group, ethnicity, site)`, 'author'],
+        ['Fairness', 'Approaches to assess and address model fairness across groups.', `The app's subgroup panel reports, for a chosen column on the Testing set, the number of patients and events, AUC, observed and mean predicted risk (O:E), Brier score, sensitivity, specificity and net benefit in each group; results are not copied here automatically. ${AUTHOR} (state the groups examined, e.g. sex, age group, ethnicity, site, and what was found)`, 'partly'],
         ['Model output', 'What the model outputs (probabilities, classes) and how thresholds were chosen.', `Probabilities for each outcome class (or a numerical prediction); class assignment at a decision threshold of ${d.threshold ?? 0.5} chosen a priori, not tuned on the test set.`, 'auto'],
         ['Ethics, funding, conflicts, protocol, registration', 'Ethical approval, funding, competing interests, protocol and registration.', AUTHOR, 'author'],
         ['Open science', 'Availability of data, code and the model.', `Analysis performed in-browser with Universal Medical ML/NeuralNet Predictor v${APP_VERSION}; the trained model and settings can be exported as JSON files for sharing. ${AUTHOR} (data and code availability statements)`, 'partly'],

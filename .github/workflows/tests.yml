@@ -55,7 +55,7 @@ jobs:
           node-version: '20'
       - name: Install Playwright
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
       - name: Run browser smoke tests
         run: npx playwright test

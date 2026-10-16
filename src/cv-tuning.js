@@ -1,6 +1,7 @@
 // cv-tuning.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { fitAndScore, fitModel } from './compute.js';
-import { AppState, MODEL_INFO, RANKING_METRICS, escapeHtml, parseSeed, rankingMetricKey, trainingMedian } from './core.js';
+import { TUNE_MAX_ROWS, TUNABLE_MODELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildRowFolds, runTuningCore } from './validation-core.js';
+import { AppState, MODEL_INFO, RANKING_METRICS, escapeHtml, parseSeed, rankingMetricKey } from './core.js';
 import { disposeModels, evalAbortOpts, fitWithYields } from './standard-training.js';
 
 
@@ -10,175 +11,35 @@ import { disposeModels, evalAbortOpts, fitWithYields } from './standard-training
 // For each selected model a small grid of its key settings is compared by stratified k-fold
 // cross-validation on the Training data only; the user's own settings are always one of the
 // candidates, so tuning only changes them when another combination does better. The Testing set
-// is never used. Encoding/scaling were fitted on the whole Training set before the folds are made
-// (a common simplification with negligible effect on the comparison).
-const TUNE_MAX_ROWS = 2000;        // larger training sets are tuned on a stratified sample of this size
-const TUNABLE_MODELS = new Set(['knn', 'rf', 'glm', 'nb', 'nn', 'gbm']);
+// is never used. Imputation, encoding and scaling are refitted inside every fold.
 const TUNE_LABELS = {
     k: 'k (neighbours)', weighting: 'Neighbour weighting', maxDepth: 'Max tree depth', minSamplesSplit: 'Min samples to split',
     lambdaL2: 'Ridge penalty (λ)', varSmoothing: 'Variance smoothing', dropoutRate: 'Dropout', l2Reg: 'L2 weight decay',
     learningRate: 'Learning rate', minSamplesLeaf: 'Min patients per leaf'
 };
 
-function tuningGrid(mId, base, minFoldTrain) {
-    const combos = [];
-    if (mId === 'knn') {
-        [3, 5, 7, 9, 11, 15, 21, 25].filter(k => k < minFoldTrain).forEach(k =>
-            ['uniform', 'distance'].forEach(w => combos.push({ k, weighting: w })));
-    } else if (mId === 'rf') {
-        [4, 6, 10].forEach(d => [2, 8].forEach(m => combos.push({ maxDepth: d, minSamplesSplit: m })));
-    } else if (mId === 'glm') {
-        [0, 0.001, 0.01, 0.05, 0.1, 0.5].forEach(l => combos.push({ lambdaL2: l }));
-    } else if (mId === 'nb') {
-        [1e-9, 1e-4, 0.01, 0.1].forEach(v => combos.push({ varSmoothing: v }));
-    } else if (mId === 'nn') {
-        [0.1, 0.3].forEach(d => [0.0001, 0.001].forEach(l => combos.push({ dropoutRate: d, l2Reg: l })));
-    } else if (mId === 'gbm') {
-        [0.05, 0.1].forEach(lr => [2, 3, 4].forEach(d => combos.push({ learningRate: lr, maxDepth: d })));
-    }
-    const keys = combos.length ? Object.keys(combos[0]) : [];
-    const own = {};
-    keys.forEach(k => { own[k] = base[k]; });
-    const seen = new Set();
-    const out = [];
-    [own, ...combos].forEach((c, idx) => {
-        const sig = JSON.stringify(keys.map(k => c[k]));
-        if (seen.has(sig)) return;
-        seen.add(sig);
-        out.push({ params: c, isOwn: idx === 0 });
-    });
-    return { keys, candidates: out };
-}
-
-// Stratified (classification) or shuffled (regression) fold assignment, reproducible from the seed
-function makeFolds(y, k, isClassification, seed) {
-    const rng = DataEngine.createPRNG(seed);
-    const shuffle = arr => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
-    const fold = new Array(y.length);
-    if (isClassification) {
-        const groups = {};
-        y.forEach((v, i) => { (groups[String(v)] = groups[String(v)] || []).push(i); });
-        let offset = 0;
-        Object.keys(groups).sort().forEach(g => {
-            shuffle(groups[g]).forEach((idx, j) => { fold[idx] = (j + offset) % k; });
-            offset += groups[g].length;
-        });
-    } else {
-        shuffle(y.map((_, i) => i)).forEach((idx, j) => { fold[idx] = j % k; });
-    }
-    return fold;
-}
-
-
-// Fold assignment for rows. With a grouping function (e.g. patient ID), every record of a group goes to
-// the same fold, so one patient never appears on both sides of a fold
-function assignRowFolds(rows, k, isClassification, targetCol, seed, groupOf) {
-    if (!groupOf) {
-        return makeFolds(rows.map(r => (isClassification ? String(r[targetCol]).trim() : Number(r[targetCol]))), k, isClassification, seed);
-    }
-    const rng = DataEngine.createPRNG(seed);
-    const keys = [...new Set(rows.map(groupOf))].sort();
-    for (let i = keys.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [keys[i], keys[j]] = [keys[j], keys[i]]; }
-    const foldOfGroup = new Map(keys.map((g, i) => [g, i % k]));
-    return rows.map(r => foldOfGroup.get(groupOf(r)));
-}
-
-// Cap very large training sets (stratified, or by whole groups when grouping is used)
-function capRows(rows, isClassification, targetCol, seed, groupOf) {
-    if (rows.length <= TUNE_MAX_ROWS) return { rows, sampled: false };
-    const pick = assignRowFolds(rows, Math.ceil(rows.length / TUNE_MAX_ROWS), isClassification, targetCol, seed, groupOf);
-    return { rows: rows.filter((_, i) => pick[i] === 0), sampled: true };
-}
-
 // Leak-free folds for the standard workflow: imputation, encoding and scaling are fitted on each fold's
 // learning rows only and then applied to that fold's validation rows (as for the final Testing set)
 async function buildStandardRowFolds(rawTrainRows, k, isClassification, seed, onFold) {
     const targetCol = Object.keys(AppState.columnConfigs).find(c => AppState.columnConfigs[c].role === 'target');
-    const groupOf = splitGroupFunction();
-    const cap = capRows(rawTrainRows, isClassification, targetCol, seed, groupOf);
-    const fold = assignRowFolds(cap.rows, k, isClassification, targetCol, seed, groupOf);
-    const sets = [];
-    for (let f = 0; f < k; f++) {
-        const tr = cap.rows.filter((_, i) => fold[i] !== f);
-        const va = cap.rows.filter((_, i) => fold[i] === f);
-        const trImp = DataEngine.imputeDataset(tr, AppState.columnConfigs, AppState.columnAnalysis);
-        const vaImp = DataEngine.imputeDataset(va, AppState.columnConfigs, AppState.columnAnalysis, trImp.plan);
-        const prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, AppState.columnConfigs);
-        const te = DataEngine.prepareTestingDataset(vaImp.imputedRows, prep);
-        sets.push({ Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses });
-        if (onFold) onFold(f + 1, k);
-        await ModelEngine.yieldToBrowser();
-    }
-    return { sets, rowsUsed: cap.rows.length, rowsTotal: rawTrainRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), decisionThreshold: readDecisionThreshold('decision-threshold') };
+    return buildRowFolds(rawTrainRows, k, {
+        configs: AppState.columnConfigs, analysis: AppState.columnAnalysis, isClassification, targetCol, seed,
+        groupOf: splitGroupFunction(), decisionThreshold: readDecisionThreshold('decision-threshold')
+    }, onFold);
 }
 
-// Core: compare the grid by mean cross-validated ranking metric over pre-built folds
+// Compare the grid by mean cross-validated ranking metric over pre-built folds (see validation-core.js)
 async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, watchdog, progress, ownOnly = false) {
-    const metricKey = rankingMetricKey(isClassification);
-    const metricDefs = isClassification ? RANKING_METRICS.classification : RANKING_METRICS.regression;
-    const metricDef = metricDefs[metricKey];
-    const k = fd.sets.length;
-    const grid = (ownOnly || !TUNABLE_MODELS.has(mId))
-        ? { keys: [], candidates: [{ params: {}, isOwn: true }] }
-        : tuningGrid(mId, baseHp, Math.min(...fd.sets.map(f => f.Xtr.length)));
-    const { keys, candidates } = grid;
-    const results = [];
-    const totalFits = candidates.length * k;
-    const t0 = Date.now();
-    let fitsDone = 0;
-    // Remaining-time estimate for this model, from the average time of the trial fits so far
-    const eta = () => {
-        if (fitsDone === 0) return '';
-        const sec = ((Date.now() - t0) / fitsDone) * (totalFits - fitsDone) / 1000;
-        return sec < 60 ? ` (about ${Math.max(5, Math.round(sec / 5) * 5)} s left)` : ` (about ${Math.round(sec / 60)} min left)`;
-    };
-
-    for (let c = 0; c < candidates.length; c++) {
-        const hp = { ...baseHp, ...candidates[c].params };
-        const scores = [];
-        const oof = { p: [], y: [] }; // out-of-fold predictions (binary outcomes), used to fit recalibration
-        const all = {}; // every ranking metric, so the selection can follow a later change of ranking metric
-        Object.keys(metricDefs).forEach(key => { all[key] = []; });
-        for (let f = 0; f < k; f++) {
-            if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
-            const { Xtr, ytr, Xva, yva, targetClasses } = fd.sets[f];
-            if (!Xtr.length || !Xva.length) continue;
-            if (progress) progress(c + 1, candidates.length, f + 1, k, eta());
-            // Fit on the fold's learning rows and score its validation rows (in the background worker when available)
-            const ev = await fitAndScore(mId, isClassification, numClasses, hp, fd.sets[f],
-                isClassification ? { decisionThreshold: fd.decisionThreshold } : { regressionThreshold: trainingMedian(ytr), thresholdSource: 'median of the fold training outcomes' },
-                {
-                    isAborted: () => Boolean(watchdog && watchdog.aborted),
-                    // Heartbeat every few epochs so the monitor never mistakes a long fold for a stall
-                    onProgress: (ep, tot) => { if (progress && (mId === 'nn' || mId === 'ensemble') && (ep % 3 === 0 || ep === tot)) progress(c + 1, candidates.length, f + 1, k, `${eta()} &middot; ${mId === 'nn' ? 'epoch' : 'base model'} ${ep}/${tot}`); }
-                });
-            const v = ev ? ev[metricKey] : null;
-            if (typeof v === 'number' && isFinite(v)) scores.push(v);
-            if (ev) Object.keys(all).forEach(key => { if (typeof ev[key] === 'number' && isFinite(ev[key])) all[key].push(ev[key]); });
-            if (ev && Array.isArray(ev.probPositive) && Array.isArray(ev.actuals)) { oof.p.push(...ev.probPositive); oof.y.push(...ev.actuals.map(v => (v === 1 ? 1 : 0))); }
-            fitsDone++;
-            await ModelEngine.yieldToBrowser(); // background-tab safe (plain timers are throttled in hidden tabs)
-        }
-        const mean = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-        const sd = scores.length > 1 ? Math.sqrt(scores.reduce((a, b) => a + (b - mean) ** 2, 0) / (scores.length - 1)) : null;
-        const allMeans = {};
-        Object.keys(all).forEach(key => { allMeans[key] = all[key].length ? all[key].reduce((a, b) => a + b, 0) / all[key].length : null; });
-        results.push({ params: candidates[c].params, isOwn: candidates[c].isOwn, mean, sd, nFolds: scores.length, allMeans, oof: oof.p.length ? oof : null });
-    }
-
-    // Best mean CV score; ties keep the user's own (or the protocol's) settings, listed first
-    let best = results.find(r => r.isOwn) || results[0];
-    results.forEach(r => {
-        if (r.mean === null) return;
-        if (best.mean === null) { best = r; return; }
-        const better = metricDef.higherIsBetter ? r.mean > best.mean + 1e-12 : r.mean < best.mean - 1e-12;
-        if (better) best = r;
+    return runTuningCore(mId, baseHp, fd, isClassification, numClasses, {
+        metricKey: rankingMetricKey(isClassification),
+        metricDefs: isClassification ? RANKING_METRICS.classification : RANKING_METRICS.regression,
+        fitAndScore, isAborted: () => Boolean(watchdog && watchdog.aborted), progress, ownOnly
     });
-    return {
-        modelId: mId, keys, results, best, own: results.find(r => r.isOwn),
-        bestHp: { ...baseHp, ...best.params }, folds: k, rowsUsed: fd.rowsUsed, rowsTotal: fd.rowsTotal,
-        sampled: fd.sampled, grouped: Boolean(fd.grouped), metricKey, metricLabel: metricDef.label, higherIsBetter: metricDef.higherIsBetter
-    };
+}
+
+// What the confidence intervals under the leaderboard do and do not cover
+function ciScopeNote() {
+    return `<p class="tune-muted" style="margin-top: 6px;">The 95% confidence intervals come from resampling the Testing patients (bootstrap: 1,000 resamples, fewer for very large test sets) with each model held fixed: they show how precise this test estimate is, not how much the result would change if the model were refitted on other patients. For a headline result in a small cohort, prefer bootstrap internal validation (Option C) or an independent validation cohort (Option B).</p>`;
 }
 
 // Raw training rows for Option B (all of Dataset i with a usable outcome)
@@ -477,4 +338,4 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
         </div>`;
 }
 
-export { readRecalibration, fitRecalibrator, recalibrateAndEvaluate, TUNE_MAX_ROWS, TUNABLE_MODELS, TUNE_LABELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildStandardRowFolds, runTuningOnFolds, optionBTrainRawRows, splitSeedForCV, splitSpec, splitGroupFunction, pipelineGroupFunction, splitRowsForWorkflow, describeSplit, populateSplitColumnSelects, updateSplitMethodVisibility, bootstrapFor, ciSpan, readDecisionThreshold, thresholdedOutput, formatCvScore, cvSummaryFrom, selectTop70InFold, buildPipelineFolds, applyHyperparamsToForm, fmtTuneValue, renderTuningReport };
+export { ciScopeNote, readRecalibration, fitRecalibrator, recalibrateAndEvaluate, TUNE_MAX_ROWS, TUNABLE_MODELS, TUNE_LABELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildStandardRowFolds, runTuningOnFolds, optionBTrainRawRows, splitSeedForCV, splitSpec, splitGroupFunction, pipelineGroupFunction, splitRowsForWorkflow, describeSplit, populateSplitColumnSelects, updateSplitMethodVisibility, bootstrapFor, ciSpan, readDecisionThreshold, thresholdedOutput, formatCvScore, cvSummaryFrom, selectTop70InFold, buildPipelineFolds, applyHyperparamsToForm, fmtTuneValue, renderTuningReport };

@@ -1,13 +1,15 @@
 // standard-training.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { fitAndScoreMulti, fitModel } from './compute.js';
-import { AppState, MODEL_INFO, compareEvalResults, describeNNTraining, displayModelName, escapeHtml, fmtR2, parseSeed, rankingMetricKey, rankingMetricLabel, renderExploratoryCutoffTable, summariseHeldOutSet, trainingMedian } from './core.js';
-import { fitRecalibrator, readRecalibration, recalibrateAndEvaluate, TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, ciSpan, cvSummaryFrom, describeSplit, formatCvScore, optionBTrainRawRows, readDecisionThreshold, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV } from './cv-tuning.js';
+import { fitAndScore, fitAndScoreMulti, fitModel } from './compute.js';
+import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapOptimism, bootstrapResamples, noInformationRates, plus632, selectionOptimism } from './validation-core.js';
+import { AppState, MODEL_INFO, RANKING_METRICS, compareEvalResults, describeNNTraining, displayModelName, escapeHtml, fmtR2, parseSeed, rankingMetricKey, rankingMetricLabel, renderExploratoryCutoffTable, summariseHeldOutSet, trainingMedian, actionAttrs } from './core.js';
+import { ciScopeNote, fitRecalibrator, readRecalibration, recalibrateAndEvaluate, TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, ciSpan, cvSummaryFrom, describeSplit, formatCvScore, optionBTrainRawRows, readDecisionThreshold, renderTuningReport, runTuningOnFolds, splitGroupFunction, splitRowsForWorkflow, splitSeedForCV } from './cv-tuning.js';
 import { renderCalibrationPanel, renderExplainPanel, renderOddsRatioPanel, renderOptimismPanel } from './panels.js';
 import { renderPipelineLeaderboardOnly } from './pipeline.js';
 import { updatePipelineActiveDeploymentStatus, updatePredictionProvenanceBar } from './pipeline-results.js';
 import { saveSettingsToBrowser } from './settings.js';
 import { DOM } from './shell.js';
 import { renderSinglePredictionForm } from './single-prediction.js';
+import { renderSubgroupPanel } from './subgroups.js';
 import { getHyperparamsForModel } from './training-setup.js';
 
 
@@ -104,63 +106,87 @@ async function startModelTraining() {
             // =============================================================
             // OPTION C: BOOTSTRAP OPTIMISM-CORRECTED INTERNAL VALIDATION (Harrell)
             // =============================================================
+            // Every data-driven step is repeated inside each resample (validation-core.js): imputation,
+            // encoding and scaling; the automatic tuning, when switched on; and the cross-validation used to
+            // choose between models, so that picking the best of several models is corrected as well.
             const targetCol = prep.targetCol;
             const allRaw = AppState.parsedData.rows.filter(r => !DataEngine.isMissing(r[targetCol]) &&
                 (prep.isClassification || !isNaN(Number(r[targetCol]))));
             const B = parseInt(document.getElementById('bootstrap-reps')?.value, 10) || 100;
             const seedC = splitSeedForCV();
             // The same resamples for every model (fair comparison), reproducible from the seed
-            const rngC = DataEngine.createPRNG(seedC);
-            const boots = Array.from({ length: B }, () => allRaw.map(() => Math.floor(rngC() * allRaw.length)));
+            const boots = bootstrapResamples(allRaw.length, B, seedC);
             const evalOptsC = {
                 regressionThreshold: prep.isClassification ? null : trainingMedian(prep.y),
                 decisionThreshold: readDecisionThreshold('decision-threshold'),
                 thresholdSource: 'median of all outcomes'
             };
             const keys = prep.isClassification ? ['accuracy', 'balancedAccuracy', 'macroF1', 'rocAuc', 'brierScore'] : ['r2', 'rmse', 'mae'];
+            const metricKey = rankingMetricKey(prep.isClassification);
+            const metricDefs = prep.isClassification ? RANKING_METRICS.classification : RANKING_METRICS.regression;
+            const slowModel = id => id === 'nn' || id === 'ensemble';
+            // The choice between models is repeated inside the resamples when it is made by cross-validation
+            // and every model is fast enough to be cross-validated there
+            const repeatSelection = selectByCV && modelsToTest.length > 1 && !modelsToTest.some(slowModel);
+            const innerK = Math.min(tuneFolds, INNER_TUNE_MAX_FOLDS);
+            const runs = [];
             for (let i = 0; i < modelsToTest.length; i++) {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
                 const mId = modelsToTest[i];
                 const mInfo = MODEL_INFO[mId] || { name: mId.toUpperCase(), icon: '⚙️' };
-                const tuned = await tuneIfRequested(mId, getHyperparamsForModel(mId, prep), allRaw, prep.targetClasses.length || 2, i);
+                const baseHp = getHyperparamsForModel(mId, prep); // the user's own settings, before any tuning
+                const tuned = await tuneIfRequested(mId, baseHp, allRaw, prep.targetClasses.length || 2, i);
                 const hp = tuned.hp;
                 const isAborted = () => Boolean(watchdog && watchdog.aborted);
                 const heartbeat = (a, b) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training on all ${prep.X.length} patients...`); };
                 DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">🚀 [${i + 1}/${modelsToTest.length}] Training ${mInfo.name} on all ${prep.X.length} patients...</span>`;
                 const model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, prep.X, prep.y, { isAborted, onProgress: heartbeat });
                 const evalRes = await ModelEngine.evaluateAsync(model, prep.X, prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
-                const Bm = (mId === 'nn' || mId === 'ensemble') ? Math.min(B, 50) : B;
-                const opt = {}; keys.forEach(k => { opt[k] = []; });
-                const slopes = [];
-                const t0 = Date.now();
-                for (let b = 0; b < Bm; b++) {
-                    if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
-                    const rowsB = boots[b].map(ix => allRaw[ix]);
-                    const impB = DataEngine.imputeDataset(rowsB, AppState.columnConfigs, AppState.columnAnalysis);
-                    const prepB = DataEngine.prepareFeaturesAndTarget(impB.imputedRows, AppState.columnConfigs);
-                    if (!prepB.X.length || (prep.isClassification && prepB.targetClasses.length !== prep.targetClasses.length)) continue; // a class missing from this resample
-                    prepB.imputation = { configs: AppState.columnConfigs, plan: impB.plan };
-                    const origB = DataEngine.prepareTestingDataset(allRaw, prepB);
-                    const [onBoot, onOrig] = await fitAndScoreMulti(mId, prep.isClassification, prepB.targetClasses.length || 2, hp, prepB.X, prepB.y,
-                        [{ X: prepB.X, y: prepB.y, targetClasses: prepB.targetClasses }, { X: origB.X, y: origB.y, targetClasses: prepB.targetClasses }], evalOptsC, { isAborted });
-                    keys.forEach(k => { if (typeof onBoot[k] === 'number' && typeof onOrig[k] === 'number') opt[k].push(onBoot[k] - onOrig[k]); });
-                    if (typeof onOrig.calibrationSlope === 'number') slopes.push(onOrig.calibrationSlope);
-                    const left = ((Date.now() - t0) / (b + 1)) * (Bm - b - 1) / 1000;
-                    const msg = `🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample ${b + 1}/${Bm} (about ${left < 60 ? Math.max(5, Math.round(left / 5) * 5) + ' s' : Math.round(left / 60) + ' min'} left)...`;
-                    DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">${msg}</span>`;
-                    if (watchdog) watchdog.tick(i + 1, msg);
-                    await ModelEngine.yieldToBrowser();
-                }
-                const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
-                const apparent = {}, optimism = {}, corrected = {};
+                const wasTuned = autoTune && TUNABLE_MODELS.has(mId);
+                const tuneInside = wasTuned && !slowModel(mId);
+                const inner = (tuneInside || repeatSelection)
+                    ? { k: innerK, seed: seedC, groupOf: splitGroupFunction(), metricKey, metricDefs, doTune: tuneInside, fitAndScore }
+                    : null;
+                const Bm = slowModel(mId) ? Math.min(B, 50) : B;
+                const what = tuneInside ? ' (tuning repeated inside each resample)' : (inner ? ' (cross-validation repeated inside each resample)' : '');
+                const say = msg => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">${msg}</span>`; if (watchdog) watchdog.tick(i + 1, msg); };
+                say(`🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample 1/${Bm}${what}...`);
+                const run = await bootstrapOptimism({
+                    rows: allRaw, boots, maxResamples: Bm, configs: AppState.columnConfigs, analysis: AppState.columnAnalysis,
+                    isClassification: prep.isClassification, modelId: mId, hp: tuneInside ? baseHp : hp, evalOptions: evalOptsC, keys,
+                    fitAndScoreMulti, tune: inner, isAborted,
+                    onInnerProgress: (b, n, c, nc, f, nf) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: resample ${b}/${n}, ${tuneInside ? `combination ${c}/${nc}, ` : ''}fold ${f}/${nf}`); },
+                    onResample: (b, n, t0) => {
+                        const left = ((Date.now() - t0) / b) * (n - b) / 1000;
+                        say(`🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample ${Math.min(b + 1, n)}/${n}${what} (about ${left < 60 ? Math.max(5, Math.round(left / 5) * 5) + ' s' : Math.round(left / 60) + ' min'} left)...`);
+                    }
+                });
+                const apparent = {}, corrected = {}, harrell = {}, est632 = {};
+                const apparentSlope = evalRes.calibration && typeof evalRes.calibration.slope === 'number' ? evalRes.calibration.slope : null;
+                // Flexible models can memorise their training patients, which defeats Harrell's correction;
+                // for them the .632+ estimate (out-of-bag patients only) is the headline figure
+                const method = FLEXIBLE_MODELS.has(mId) ? '632plus' : 'harrell';
+                const noInfo = noInformationRates(evalRes, prep.isClassification);
                 keys.forEach(k => {
                     apparent[k] = typeof evalRes[k] === 'number' ? evalRes[k] : null;
-                    optimism[k] = mean(opt[k]);
-                    corrected[k] = apparent[k] !== null && optimism[k] !== null ? Number((apparent[k] - optimism[k]).toFixed(4)) : null;
-                    if (corrected[k] !== null) evalRes[k] = corrected[k]; // headline metrics are optimism-corrected
+                    harrell[k] = apparent[k] !== null && run.optimism[k] !== null ? Number((apparent[k] - run.optimism[k]).toFixed(4)) : null;
+                    const e = plus632(k, apparent[k], run.oobMean[k], noInfo[k]);
+                    est632[k] = e ? Number(e.value.toFixed(4)) : null;
+                    corrected[k] = method === '632plus' && est632[k] !== null ? est632[k] : harrell[k];
+                    if (corrected[k] !== null) evalRes[k] = corrected[k]; // headline metrics are corrected
                 });
-                const slopeMean = mean(slopes);
-                evalRes.optimismCorrection = { B: opt[keys[0]].length, apparent, optimism, corrected, calibrationSlope: slopeMean !== null ? Number(slopeMean.toFixed(3)) : null };
+                // How often the resamples chose the same settings as the full data (stability of the tuning)
+                let sameSettingsShare = null;
+                if (tuneInside) {
+                    const done = run.perResample.filter(Boolean);
+                    const sig = h => JSON.stringify(Object.keys(h).sort().map(k => [k, h[k]]));
+                    sameSettingsShare = done.length ? done.filter(p => sig(p.hp) === sig(hp)).length / done.length : null;
+                }
+                evalRes.optimismCorrection = {
+                    B: run.B, apparent, optimism: run.optimism, corrected, harrell, est632, oobMean: run.oobMean, noInfo, method,
+                    calibrationSlope: (() => { const v = method === '632plus' ? run.oobCalibrationSlope : run.calibrationSlope; return typeof v === 'number' ? Number(v.toFixed(3)) : null; })(), apparentSlope,
+                    tuning: !wasTuned ? 'none' : (tuneInside ? 'repeated' : 'once'), innerFolds: inner ? innerK : null, sameSettingsShare
+                };
                 evalRes.protocol = 'option-c';
                 evalRes.accuracyCI = null; // a CI of the apparent accuracy would be misleading
                 evalRes.ci = null;
@@ -174,7 +200,13 @@ async function startModelTraining() {
                 if (model.trainingInfo) evalRes.nnNote = describeNNTraining(model.trainingInfo);
                 if (model.usedFallback) evalRes.fallbackNote = `TensorFlow.js training failed (${model.fallbackReason}); a linear (logistic/ridge) fallback model was evaluated instead of a neural network.`;
                 testedResults.push({ modelId: mId, info: mInfo, evalRes, model, retrained: true, prep, hyperparams: hp, seed: hp.seed });
+                runs.push({ modelId: mId, perResample: run.perResample });
             }
+            // Choosing the best of several models (the winner's curse): optimism of the whole choose-then-fit process
+            const selection = modelsToTest.length < 2 ? null
+                : repeatSelection ? { repeated: true, nModels: modelsToTest.length, ...selectionOptimism(runs, keys, metricDefs[metricKey].higherIsBetter), noInfoByModel: Object.fromEntries(testedResults.map(r => [r.modelId, r.evalRes.optimismCorrection.noInfo])) }
+                    : { repeated: false, nModels: modelsToTest.length, reason: selectByCV ? 'slow' : 'not-cv' };
+            testedResults.forEach(r => { r.evalRes.optimismCorrection.selection = selection; });
             AppState.prepMeta = prep;
             AppState.lastTestRows = null; // no separate test set
             AppState.orRawRows = allRaw;  // raw rows matching the deployed encoding (odds ratios / MICE)
@@ -856,6 +888,12 @@ function renderEvaluationDashboard() {
         (allResults.length ? allResults : []).map(r => ({ name: (MODEL_INFO[r.modelId] || { name: r.modelId }).name, model: r.model, prep: r.prep, inSample: Boolean(r.retrained) })),
         AppState.lastTestRows, Boolean(evalRes && evalRes.isClassification));
 
+    // Subgroup (fairness) panel on the Testing set; the original values are used for grouping when available
+    renderSubgroupPanel('subgroup-panel-container', isOptionC ? [] :
+        (allResults.length ? allResults : []).map(r => ({ name: (MODEL_INFO[r.modelId] || { name: r.modelId }).name, model: r.model, prep: r.prep, threshold: r.evalRes && r.evalRes.decisionThreshold, inSample: Boolean(r.retrained) && !isOptionB })),
+        AppState.lastTestRows, Boolean(evalRes && evalRes.isClassification),
+        !isOptionB && AppState.baselineTestRawRows && AppState.lastTestRows && AppState.baselineTestRawRows.length === AppState.lastTestRows.length ? AppState.baselineTestRawRows : null);
+
     // Calibration and decision-threshold panel (binary outcomes)
     renderCalibrationPanel('calibration-panel-container', isOptionC ? [] :
         (allResults.length ? allResults : [{ modelId: AppState.selectedModelId, evalRes }]).map(r => ({
@@ -973,12 +1011,12 @@ function renderEvaluationDashboard() {
                     ? `${rEval.brierScore.toFixed(3)}${ciSpan(rEval, 'brierScore')}` : '-';
 
                 const seedDisplay = (rEval.seed !== null && rEval.seed !== undefined)
-                    ? `<span class="seed-pill" title="Click to copy reproducibility seed: ${rEval.seed}" onclick="window.copySeedToClipboard(${rEval.seed})">🌱 ${rEval.seed} <span class="copy-icon">📋</span></span>`
+                    ? `<span class="seed-pill" title="Click to copy reproducibility seed: ${rEval.seed}" ${actionAttrs('copySeedToClipboard', rEval.seed)}>🌱 ${rEval.seed} <span class="copy-icon">📋</span></span>`
                     : `<span style="font-size: 11px; color: var(--text-muted); font-family: monospace;">N/A</span>`;
 
                 const deployBtn = isDeployed
                     ? `<span class="pill pill-target" style="background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.4);">✓ Active Predictor</span>`
-                    : `<button class="btn-preset-action deploy-model-btn" onclick="window.deployTestedModel('${resItem.modelId}')" style="padding: 4px 10px; font-size: 11px; cursor: pointer;">Deploy Model</button>`;
+                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="padding: 4px 10px; font-size: 11px; cursor: pointer;">Deploy Model</button>`;
 
                 lbRows += `
                     <tr style="${isDeployed ? 'background: rgba(6, 182, 212, 0.05);' : ''}">
@@ -1048,6 +1086,7 @@ function renderEvaluationDashboard() {
                             </tbody>
                         </table>
                     </div>
+                    ${!isOptionC && allResults.some(r => r.evalRes && r.evalRes.ci) ? ciScopeNote() : ''}
                 </div>
             `;
         }
@@ -1102,7 +1141,7 @@ function renderEvaluationDashboard() {
 
                 const deployBtn = isDeployed
                     ? `<button class="btn-preset-action" disabled style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: var(--accent-emerald); font-weight: 700; width: 100%;">✓ Active Predictor (Steps 5 &amp; 6)</button>`
-                    : `<button class="btn-preset-action deploy-model-btn" onclick="window.deployTestedModel('${resItem.modelId}')" style="width: 100%; font-weight: 600; cursor: pointer;">⭐ Set as Active Predictor</button>`;
+                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="width: 100%; font-weight: 600; cursor: pointer;">⭐ Set as Active Predictor</button>`;
 
                 cmCardsHtml += `
                     <div class="multi-cm-card ${isDeployed ? 'active-deployed' : ''}">
@@ -1136,7 +1175,7 @@ function renderEvaluationDashboard() {
                         </div>
 
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border-color);">
-                            <div class="cm-seed-card-badge" title="Click to copy reproducibility seed: ${rEval.seed}" onclick="window.copySeedToClipboard(${rEval.seed})">
+                            <div class="cm-seed-card-badge" title="Click to copy reproducibility seed: ${rEval.seed}" ${actionAttrs('copySeedToClipboard', rEval.seed)}>
                                 <span>🌱 Seed:</span> <strong>${rEval.seed !== null && rEval.seed !== undefined ? rEval.seed : 'N/A'}</strong> <span style="font-size: 10px; opacity: 0.8;">📋</span>
                             </div>
                             ${rEval.splitSeed ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: monospace;">Split: ${rEval.splitSeed}</span>` : ''}
@@ -1223,7 +1262,7 @@ function renderEvaluationDashboard() {
                         <span class="m-val">${(evalRes.rocAuc).toFixed(3)}</span>
                     </div>
                 ` : ''}
-                <div class="metric-pill-card" style="cursor: pointer;" onclick="window.copySeedToClipboard(${evalRes.seed})" title="Click to copy reproducibility seed: ${evalRes.seed}">
+                <div class="metric-pill-card" style="cursor: pointer;" ${actionAttrs('copySeedToClipboard', evalRes.seed)} title="Click to copy reproducibility seed: ${evalRes.seed}">
                     <span class="m-title">Reproducibility Seed</span>
                     <span class="m-val" style="color: var(--accent-purple); font-family: monospace;">🌱 ${evalRes.seed !== null && evalRes.seed !== undefined ? evalRes.seed : 'Auto'} 📋</span>
                 </div>
@@ -1279,7 +1318,7 @@ function renderEvaluationDashboard() {
                     <span class="m-title">MSE</span>
                     <span class="m-val">${evalRes.mse.toFixed(3)}</span>
                 </div>
-                <div class="metric-pill-card" style="cursor: pointer;" onclick="window.copySeedToClipboard(${evalRes.seed})" title="Click to copy reproducibility seed: ${evalRes.seed}">
+                <div class="metric-pill-card" style="cursor: pointer;" ${actionAttrs('copySeedToClipboard', evalRes.seed)} title="Click to copy reproducibility seed: ${evalRes.seed}">
                     <span class="m-title">Reproducibility Seed</span>
                     <span class="m-val" style="color: var(--accent-purple); font-family: monospace;">🌱 ${evalRes.seed !== null && evalRes.seed !== undefined ? evalRes.seed : 'Auto'} 📋</span>
                 </div>

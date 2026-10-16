@@ -1,5 +1,5 @@
 // pipeline-results.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { AppState, MODEL_INFO, compareEvalResults, escapeHtml, fmtR2 } from './core.js';
+import { AppState, MODEL_INFO, compareEvalResults, escapeHtml, fmtR2, actionAttrs } from './core.js';
 import { executeImputation } from './imputation.js';
 import { updateModelExportButton } from './model-io.js';
 import { goToStep } from './navigation.js';
@@ -376,8 +376,8 @@ function updatePredictionProvenanceBar() {
                 </div>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
-                ${hasBaseline ? `<button class="btn btn-secondary btn-sm" onclick="window.switchToBaselineModel()">🔄 Switch to Baseline Model</button>` : ''}
-                <button class="btn btn-secondary btn-sm" onclick="window.goToStep && window.goToStep('pipeline')">🔬 View 7-Step Pipeline</button>
+                ${hasBaseline ? `<button class="btn btn-secondary btn-sm" ${actionAttrs('switchToBaselineModel')}>🔄 Switch to Baseline Model</button>` : ''}
+                <button class="btn btn-secondary btn-sm" ${actionAttrs('goToStep', 'pipeline')}>🔬 View 7-Step Pipeline</button>
             </div>
         `;
         if (singleBar) {
@@ -406,7 +406,7 @@ function updatePredictionProvenanceBar() {
                 </div>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
-                ${hasPipeline ? `<button class="btn btn-emerald btn-sm" onclick="window.switchToPipelineModel()">🔬 Switch to 7-Step Pipeline Model</button>` : `<button class="btn btn-emerald btn-sm" onclick="window.goToStep && window.goToStep('pipeline')">🔬 Test 7-Step Pipeline to Compare</button>`}
+                ${hasPipeline ? `<button class="btn btn-emerald btn-sm" ${actionAttrs('switchToPipelineModel')}>🔬 Switch to 7-Step Pipeline Model</button>` : `<button class="btn btn-emerald btn-sm" ${actionAttrs('goToStep', 'pipeline')}>🔬 Test 7-Step Pipeline to Compare</button>`}
             </div>
         `;
         if (singleBar) {

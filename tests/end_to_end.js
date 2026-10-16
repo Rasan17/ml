@@ -104,6 +104,77 @@ async function trainEval(id, w, isClassification) {
     return { m, ev };
 }
 
+
+// The resampling engine (src/validation-core.js) is loaded as-is, with the app's local (no worker)
+// training functions, so the test runs the same code as Option C in the browser
+function loadValidationCore() {
+    const code = fs.readFileSync(path.join(dir, 'src', 'validation-core.js'), 'utf8').replace(/^export\s*\{[^}]*\};?\s*$/gm, '');
+    return new Function(`${code}\nreturn { bootstrapResamples, bootstrapOptimism, selectionOptimism, tuningGrid, noInformationRates, plus632 };`)();
+}
+async function fitLocal(id, isClf, nc, hp, X, y) {
+    const m = ME.createModel(id, isClf, nc, hp);
+    if (id === 'nn' || id === 'ensemble') await m.fit(X, y);
+    else if (m.fitAsync) await m.fitAsync(X, y);
+    else m.fit(X, y);
+    return m;
+}
+const KEEP = ['accuracy', 'balancedAccuracy', 'macroF1', 'rocAuc', 'brierScore', 'r2', 'rmse', 'mae'];
+async function localFitAndScore(id, isClf, nc, hp, fold, evalOptions) {
+    const m = await fitLocal(id, isClf, nc, hp, fold.Xtr, fold.ytr);
+    const ev = await ME.evaluateAsync(m, fold.Xva, fold.yva, isClf, fold.targetClasses, evalOptions);
+    if (m.dispose) m.dispose();
+    return ev;
+}
+async function localFitAndScoreMulti(id, isClf, nc, hp, X, y, sets, evalOptions) {
+    const m = await fitLocal(id, isClf, nc, hp, X, y);
+    const out = [];
+    for (const set of sets) {
+        const e = await ME.evaluateAsync(m, set.X, set.y, isClf, set.targetClasses, evalOptions);
+        const r = {};
+        KEEP.forEach(k => { if (e && e[k] !== undefined) r[k] = e[k]; });
+        if (e && e.calibration) r.calibrationSlope = e.calibration.slope;
+        out.push(r);
+    }
+    if (m.dispose) m.dispose();
+    return out;
+}
+// Pure-noise cohort: no predictor is related to the outcome, so any honest estimate of AUC is about 0.5
+function noiseCohort(n, p, seed) {
+    let s = seed;
+    const rnd = () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
+    const g = () => Math.sqrt(-2 * Math.log(rnd() || 1e-9)) * Math.cos(2 * Math.PI * rnd());
+    const rows = [];
+    for (let i = 0; i < n; i++) {
+        const r = { Outcome: rnd() < 0.5 ? 'Yes' : 'No' };
+        for (let j = 1; j <= p; j++) r[`N${j}`] = g().toFixed(3);
+        rows.push(r);
+    }
+    const cfg = { Outcome: { role: 'target', type: 'nominal' } };
+    for (let j = 1; j <= p; j++) cfg[`N${j}`] = { role: 'feature', type: 'continuous', imputationStrategy: 'median' };
+    return { rows, cfg };
+}
+async function optionC(VC, rows, cfg, modelId, hp, B, tune) {
+    const analysis = DE.analyzeColumns(Object.keys(rows[0]), rows);
+    const imp = DE.imputeDataset(rows, cfg, analysis);
+    const prep = DE.prepareFeaturesAndTarget(imp.imputedRows, cfg);
+    const metricDefs = { macroF1: { label: 'Macro F1', higherIsBetter: true }, rocAuc: { label: 'ROC-AUC', higherIsBetter: true }, brierScore: { label: 'Brier', higherIsBetter: false }, accuracy: { label: 'Accuracy', higherIsBetter: true }, balancedAccuracy: { label: 'Balanced accuracy', higherIsBetter: true } };
+    // Apparent performance: the whole process (tuning included) run once on all patients
+    let hpAll = hp;
+    if (tune) {
+        const one = await VC.bootstrapOptimism({ rows, boots: [rows.map((_, i) => i)], configs: cfg, analysis, isClassification: true, modelId, hp, evalOptions: {}, keys: ['rocAuc'],
+            fitAndScoreMulti: localFitAndScoreMulti, tune: { k: 3, seed: 5, metricKey: 'rocAuc', metricDefs, doTune: true, fitAndScore: localFitAndScore } });
+        hpAll = one.perResample[0].hp;
+    }
+    const m = await fitLocal(modelId, true, 2, hpAll, prep.X, prep.y);
+    const app = await ME.evaluateAsync(m, prep.X, prep.y, true, prep.targetClasses, {});
+    const run = await VC.bootstrapOptimism({ rows, boots: VC.bootstrapResamples(rows.length, B, 42), configs: cfg, analysis, isClassification: true, modelId,
+        hp: tune === 'inside' ? hp : hpAll, evalOptions: {}, keys: ['rocAuc', 'brierScore'], fitAndScoreMulti: localFitAndScoreMulti,
+        tune: tune === 'inside' ? { k: 3, seed: 42, metricKey: 'rocAuc', metricDefs, doTune: true, fitAndScore: localFitAndScore } : null });
+    const e = VC.plus632('rocAuc', app.rocAuc, run.oobMean.rocAuc, VC.noInformationRates(app, true).rocAuc);
+    if (m.dispose) m.dispose();
+    return { apparent: app.rocAuc, corrected: app.rocAuc - run.optimism.rocAuc, p632: e ? e.value : null, run, hpAll };
+}
+
 (async () => {
     await tf.setBackend('cpu');
     await tf.ready();
@@ -298,6 +369,142 @@ async function trainEval(id, w, isClassification) {
         assert(same && back.predictSingle(w.test.X[0]).probabilityType === 'recalibrated', 'recalibrated model changed after reload');
         done.push('recalibrated RF');
         return done.join(', ');
+    });
+
+    await check('Survival: time-dependent AUC and Brier score (IPCW) equal the ordinary measures without censoring and recover them under censoring', async () => {
+        const rng = DE.createPRNG(5);
+        const n = 3000, tau = 1;
+        const x = Array.from({ length: n }, () => rng() * 2 - 1);
+        const T = x.map(v => -Math.log(rng() || 1e-12) / Math.exp(1.2 * v)); // exponential, hazard exp(1.2x)
+        const S = x.map(v => Math.exp(-Math.exp(1.2 * v) * tau));           // true survival at tau
+        const yb = T.map(t => (t <= tau ? 1 : 0));
+        // No censoring: the IPCW versions reduce to the binary AUC and Brier score of "event by tau"
+        const none = ME.censoringKM(T, T.map(() => 1));
+        const aucNone = ME.timeDependentAUC(T, T.map(() => 1), x, tau, none);
+        const aucBin = ME._calculateBinaryAUC(yb, x);
+        const bsNone = ME.ipcwBrier(T, T.map(() => 1), S, tau, none);
+        const bsBin = yb.reduce((a, v, i) => a + (v - (1 - S[i])) ** 2, 0) / n;
+        assert(Math.abs(aucNone - aucBin) < 1e-4 && /* the binary AUC is rounded to 4 decimals */ Math.abs(bsNone - bsBin) < 1e-12, `no-censoring identity: AUC ${aucNone} vs ${aucBin}, Brier ${bsNone} vs ${bsBin}`);
+        // Independent censoring (~35%): the weighted estimates stay close to the uncensored truth
+        const C = x.map(() => -Math.log(rng() || 1e-12) / 0.45);
+        const obsT = T.map((t, i) => Math.min(t, C[i])), obsE = T.map((t, i) => (t <= C[i] ? 1 : 0));
+        const cens = ME.censoringKM(obsT, obsE);
+        const aucC = ME.timeDependentAUC(obsT, obsE, x, tau, cens), bsC = ME.ipcwBrier(obsT, obsE, S, tau, cens);
+        const censored = obsE.filter(e => e === 0).length / n;
+        assert(Math.abs(aucC - aucBin) < 0.02 && Math.abs(bsC - bsBin) < 0.01, `with censoring: AUC ${aucC.toFixed(3)} vs ${aucBin.toFixed(3)}, Brier ${bsC.toFixed(4)} vs ${bsBin.toFixed(4)}`);
+        return `no censoring exact; ${(censored * 100).toFixed(0)}% censored: AUC ${aucC.toFixed(3)} vs true ${aucBin.toFixed(3)}, Brier ${bsC.toFixed(4)} vs ${bsBin.toFixed(4)}`;
+    });
+
+    await check('Shapley explanations: exact TreeSHAP (RF, boosted trees) and sampled Shapley (logistic) match brute-force enumeration', async () => {
+        const rows = cohort(200, 31, 'binary', { missing: true });
+        const cfg = configs('binary');
+        const split = DE.trainTestSplit(rows, rows.map(r => r.Outcome), 0.8, true, 42);
+        const w = prepareWorkflow(rows, cfg, true, split);
+        const groups = [], names = w.prep.featureCols;
+        names.forEach((col, g) => { const m = w.prep.featureMetadata[col]; for (let j = 0; j < m.length; j++) groups[m.startIndex + j] = g; });
+        const P = names.length, bg = w.prep.X.slice(0, 25), x = w.test.X[3];
+        // Brute force: Shapley value from all 2^P subsets of predictors, v(S) = mean over the background
+        const brute = f => {
+            const hybrid = (S, z) => x.map((v, j) => ((S >> groups[j]) & 1 ? v : z[j]));
+            const v = new Array(1 << P).fill(0).map((_, S) => bg.reduce((a, z) => a + f(hybrid(S, z)), 0) / bg.length);
+            const phi = new Array(P).fill(0);
+            for (let S = 0; S < (1 << P); S++) for (let i = 0; i < P; i++) {
+                if ((S >> i) & 1) continue;
+                let k = 0; for (let t = S; t; t >>= 1) k += t & 1;
+                const fact = n => (n <= 1 ? 1 : n * fact(n - 1));
+                phi[i] += fact(k) * fact(P - k - 1) / fact(P) * (v[S | (1 << i)] - v[S]);
+            }
+            return phi;
+        };
+        const out = [];
+        const rf = ME.createModel('rf', true, 2, { numTrees: 15, maxDepth: 5, seed: 4 });
+        rf.fit(w.prep.X, w.prep.y);
+        const tsRf = ME.treeShap(rf, x, bg, groups, P, 1);
+        const bRf = brute(z => Number(rf.predictSingle(z).probabilities[1] || 0));
+        const dRf = Math.max(...bRf.map((v, i) => Math.abs(v - tsRf.phi[i])));
+        const sumRf = Math.abs(tsRf.phi.reduce((a, b) => a + b, 0) - (Number(rf.predictSingle(x).probabilities[1] || 0) - tsRf.base));
+        assert(dRf < 1e-12 && sumRf < 1e-12, `RF TreeSHAP differs from brute force by ${dRf} (sum error ${sumRf})`);
+        out.push(`RF max diff ${dRf.toExponential(1)}`);
+        const gb = ME.createModel('gbm', true, 2, { nEstimators: 40, maxDepth: 3, seed: 4 });
+        if (gb.fitAsync) await gb.fitAsync(w.prep.X, w.prep.y); else gb.fit(w.prep.X, w.prep.y);
+        const tsGb = ME.treeShap(gb, x, bg, groups, P, 1);
+        const bGb = brute(z => gb._raw(z)[0]);
+        const dGb = Math.max(...bGb.map((v, i) => Math.abs(v - tsGb.phi[i])));
+        assert(dGb < 1e-10 && Math.abs(tsGb.value - gb._raw(x)[0]) < 1e-10, `boosted-tree TreeSHAP differs from brute force by ${dGb}`);
+        out.push(`boosted trees max diff ${dGb.toExponential(1)}`);
+        const glm = ME.createModel('glm', true, 2, { seed: 4 });
+        if (glm.fitAsync) await glm.fitAsync(w.prep.X, w.prep.y); else glm.fit(w.prep.X, w.prep.y);
+        const f = z => Number(glm.predictSingle(z).probabilities[1] || 0);
+        const ss = ME.sampledShapley(rows2 => rows2.map(f), x, bg, groups, P, 4000, 7);
+        const bG = brute(f);
+        const dG = Math.max(...bG.map((v, i) => Math.abs(v - ss.phi[i])));
+        const sumG = Math.abs(ss.phi.reduce((a, b) => a + b, 0) - (f(x) - ss.base));
+        assert(dG < 0.01 && sumG < 1e-9, `sampled Shapley differs from brute force by ${dG}`);
+        out.push(`logistic (sampled) max diff ${dG.toFixed(4)}`);
+        return out.join('; ');
+    });
+
+    await check('Option C on pure noise with tuning repeated inside each resample: corrected AUC is about 0.5', async () => {
+        const VC = loadValidationCore();
+        const { rows, cfg } = noiseCohort(80, 8, 17);
+        const inside = await optionC(VC, rows, cfg, 'glm', { seed: 1 }, 40, 'inside');
+        const once = await optionC(VC, rows, cfg, 'glm', { seed: 1 }, 40, 'once');
+        const varied = new Set(inside.run.perResample.filter(Boolean).map(p => p.hp.lambdaL2)).size;
+        assert(Math.abs(inside.corrected - 0.5) < 0.08, `corrected AUC ${inside.corrected.toFixed(3)} is not close to 0.5`);
+        assert(varied > 1, 'the tuning was not repeated inside the resamples (the same setting every time)');
+        assert(inside.apparent > 0.6, `apparent AUC ${inside.apparent.toFixed(3)} should be optimistic on noise`);
+        return `apparent ${inside.apparent.toFixed(3)}; corrected ${inside.corrected.toFixed(3)} with tuning repeated vs ${once.corrected.toFixed(3)} with tuning done once; ${varied} different ridge penalties chosen`;
+    });
+
+    await check('.632+ bootstrap on pure noise: flexible models (RF, boosted trees, k-NN) are estimated at about AUC 0.5', async () => {
+        const VC = loadValidationCore();
+        const { rows, cfg } = noiseCohort(80, 8, 17);
+        const out = [];
+        for (const [id, hp] of [['rf', { numTrees: 50, seed: 1 }], ['gbm', { seed: 1 }], ['knn', { k: 5 }]]) {
+            const r = await optionC(VC, rows, cfg, id, hp, 30, 'inside');
+            assert(typeof r.p632 === 'number' && Math.abs(r.p632 - 0.5) < 0.08, `${id}: .632+ AUC ${r.p632} is not close to 0.5`);
+            out.push(`${id}: apparent ${r.apparent.toFixed(2)}, Harrell ${r.corrected.toFixed(2)}, .632+ ${r.p632.toFixed(2)}`);
+        }
+        return out.join('; ');
+    });
+
+    await check('.632+ no-information rates match brute-force pairing of every prediction with every outcome', async () => {
+        const VC = loadValidationCore();
+        let s = 99;
+        const rnd = () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
+        const n = 37;
+        const yb = Array.from({ length: n }, () => (rnd() < 0.4 ? 1 : 0)), pb = yb.map(() => rnd());
+        const evB = { actuals: yb, predictions: pb.map(p => (p >= 0.5 ? 1 : 0)), probPositive: pb, numClasses: 2 };
+        const ni = VC.noInformationRates(evB, true);
+        let acc = 0, brier = 0;
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { acc += yb[i] === evB.predictions[j] ? 1 : 0; brier += (pb[j] - yb[i]) ** 2; }
+        assert(Math.abs(ni.accuracy - acc / n / n) < 1e-12 && Math.abs(ni.brierScore - brier / n / n) < 1e-12 && ni.rocAuc === 0.5, 'binary no-information rates');
+        const yr = Array.from({ length: n }, () => 10 * rnd()), hr = yr.map(v => v + 3 * (rnd() - 0.5));
+        const nr = VC.noInformationRates({ actuals: yr, predictions: hr }, false);
+        let mse = 0, mae = 0;
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { mse += (yr[i] - hr[j]) ** 2; mae += Math.abs(yr[i] - hr[j]); }
+        assert(Math.abs(nr.rmse - Math.sqrt(mse / n / n)) < 1e-9 && Math.abs(nr.mae - mae / n / n) < 1e-9, 'regression no-information rates');
+        // .632+ limits: no overfitting gives the .632 weighting; complete overfitting gives the out-of-bag value
+        const a = VC.plus632('rocAuc', 0.8, 0.8, 0.5), b = VC.plus632('rocAuc', 1.0, 0.5, 0.5);
+        assert(Math.abs(a.value - 0.8) < 1e-12 && Math.abs(b.value - 0.5) < 1e-12 && Math.abs(b.weight - 1) < 1e-12, '.632+ limits');
+        return 'accuracy, Brier, RMSE and MAE exact; weights 0.632 to 1';
+    });
+
+    await check('Option C model-selection correction: choosing the best of several models on noise is not rewarded', async () => {
+        const VC = loadValidationCore();
+        const { rows, cfg } = noiseCohort(80, 8, 23);
+        const analysis = DE.analyzeColumns(Object.keys(rows[0]), rows);
+        const metricDefs = { rocAuc: { label: 'ROC-AUC', higherIsBetter: true } };
+        const boots = VC.bootstrapResamples(rows.length, 30, 42);
+        const runs = [];
+        for (const id of ['glm', 'nb', 'knn']) {
+            const r = await VC.bootstrapOptimism({ rows, boots, configs: cfg, analysis, isClassification: true, modelId: id, hp: { seed: 1, k: 15 }, evalOptions: {}, keys: ['rocAuc'],
+                fitAndScoreMulti: localFitAndScoreMulti, tune: { k: 3, seed: 42, metricKey: 'rocAuc', metricDefs, doTune: false, fitAndScore: localFitAndScore } });
+            runs.push({ modelId: id, perResample: r.perResample });
+        }
+        const sel = VC.selectionOptimism(runs, ['rocAuc'], true);
+        assert(sel.B >= 25 && typeof sel.optimism.rocAuc === 'number' && sel.optimism.rocAuc > 0, `selection optimism ${sel.optimism.rocAuc}`);
+        return `${sel.B} resamples; optimism of choose-then-fit ${sel.optimism.rocAuc.toFixed(3)}; chosen ${Object.entries(sel.chosenShare).map(([k, v]) => `${k} ${Math.round(v * 100)}%`).join(', ')}`;
     });
 
     console.log = realLog;

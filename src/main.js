@@ -3,6 +3,7 @@
 import { AppState } from './core.js';
 import './watchdog.js';
 import './compute.js';
+import './validation-core.js';
 import { initDOM, setupEventListeners } from './shell.js';
 import './navigation.js';
 import { createEmptyPipelineState } from './ingest.js';
@@ -10,6 +11,7 @@ import './variables.js';
 import './imputation.js';
 import './training-setup.js';
 import { renderSampleSizePanel } from './panels.js';
+import './subgroups.js';
 import './cv-tuning.js';
 import './standard-training.js';
 import './single-prediction.js';
@@ -27,7 +29,24 @@ AppState.pipeline = createEmptyPipelineState(42);
 window.addEventListener('error', (e) => handleUnexpectedError(e.error || e.message));
 window.addEventListener('unhandledrejection', (e) => handleUnexpectedError(e.reason));
 
+// Delegated handling of controls marked with data-action (see actionAttrs in core.js): window[fn] is called
+// with the stored arguments, then the selected index (for a change) and the event. No inline handlers.
+function runAction(e, kind) {
+    const el = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
+    if (!el || (el.dataset.event || 'click') !== kind) return;
+    const fn = window[el.dataset.action];
+    if (typeof fn !== 'function') return;
+    let args = [];
+    try { args = JSON.parse(el.dataset.args || '[]'); } catch (err) { args = []; }
+    if (kind === 'change') args.push(el.selectedIndex);
+    fn(...args, e);
+}
+document.addEventListener('click', e => runAction(e, 'click'));
+document.addEventListener('change', e => runAction(e, 'change'));
+
 function start() {
+    // Seed boxes inside the model cards: a click there must not also select the card
+    document.querySelectorAll('[data-stop-click]').forEach(el => el.addEventListener('click', e => e.stopPropagation()));
     initDOM();
     setupEventListeners();
     document.getElementById('standard-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('standard'));

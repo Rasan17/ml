@@ -54,7 +54,7 @@ Every model includes fine-tuning controls specifically designed to maximize pred
   - **Fine-Tuning Controls:**
     - Combination Strategy: *Soft Voting* (probability blending), *Performance-Weighted* (dynamic validation weighting), or *Hard Majority Voting*.
     - Validation Weighting Power ($\gamma$): Linear, Quadratic ($\gamma=2$ sharply boosts best models), or Cubic.
-    - Capacity Presets: *Balanced*, *Fast*, or *High-Capacity Deep Ensemble*.
+    - Capacity Presets: *Balanced*, *Fast*, or *High-Capacity* (more trees and a larger neural network).
     - Dynamic constituent model inclusion checkboxes.
 - **Neural Network (Multilayer Perceptron, TensorFlow.js):**
   - Early stopping on an internal validation split carved from the training data (the test set is never used in training). If TensorFlow.js fails, a linear fallback model is used and flagged in every results view, the batch CSV and the JSON report.
@@ -164,16 +164,19 @@ Reproducibility is a fundamental prerequisite in scientific and clinical researc
 
 - **Architecture:** the application controller is split into ES modules (`src/`, entry `src/main.js`) with no build step needed to run; `tools/build.js` generates a single-file fallback (`dist/app.bundle.js`, used when `index.html` is opened directly from disk) and a content-hash import map so browsers never run stale code after an update.
 - **Background computation:** training, cross-validation and bootstrap fits run in a Web Worker (`compute-worker.js`; TensorFlow.js on WebGL via OffscreenCanvas where available), keeping the page responsive; Force Stop terminates the worker immediately. Falls back to the page when workers are unavailable.
-- **Gradient-boosted trees:** histogram gradient boosting (binary, multiclass, regression) with early stopping; benchmarked as equivalent to scikit-learn's HistGradientBoosting.
-- **Survival analysis tab:** Cox proportional-hazards model (Efron ties) with hazard ratios, Harrell's C-index (bootstrap CI), calibration at a chosen horizon against Kaplan-Meier, Kaplan-Meier curves by risk group and single-patient survival predictions; validated against statsmodels.
-- **Option C – bootstrap internal validation:** Harrell's optimism correction using all patients (recommended by TRIPOD for small cohorts), with apparent, optimism and corrected performance and the corrected calibration slope.
+- **Gradient-boosted trees:** histogram gradient boosting (binary, multiclass, regression) with early stopping, in both the standard workflow and the 7-step pipeline; benchmarked as equivalent to scikit-learn's HistGradientBoosting.
+- **Survival analysis tab:** Cox proportional-hazards model (Efron ties) with hazard ratios, Harrell's C-index (bootstrap CI), time-dependent AUC (Uno, with bootstrap CI) and Brier score (Graf) at the horizon with inverse-probability-of-censoring weights, scaled Brier score, calibration at a chosen horizon against Kaplan-Meier, Kaplan-Meier curves by risk group and single-patient survival predictions; validated against statsmodels.
+- **Option C – bootstrap internal validation:** uses all patients (recommended by TRIPOD for small cohorts). Every data-driven step is repeated inside each resample: imputation, encoding and scaling, the automatic tuning (3-fold, when switched on; not for the neural network and ensemble, which is stated) and, when models are compared by cross-validation, the choice of the best model (correcting the winner's curse). Regression-type models (logistic/ridge, naive Bayes) are reported with Harrell's optimism correction; flexible models (Random Forest, boosted trees, k-NN, neural network, ensemble) with Efron's .632+ estimate, because Harrell's correction is far too small for models that can memorise their training patients (on pure-noise data it left a Random Forest at AUC 0.89; .632+ gives 0.50). Both estimates are shown.
+- **Shapley-value explanations:** "Why this prediction?" shows each predictor's contribution against the average prediction for 100 training patients: exact interventional TreeSHAP for the Random Forest and boosted trees, sampled Shapley values for the other models (both checked against brute-force enumeration). The one-at-a-time view remains as a quick view, and for models loaded from a file.
+- **Subgroup (fairness) analysis:** AUC, observed vs predicted risk (O:E), Brier score, sensitivity, specificity and net benefit by sex, age band, site or any other column, on the Testing set, in both workflows.
 - **Recalibration:** Platt scaling or isotonic regression fitted on out-of-fold cross-validation predictions from the training set, carried through to predictions and model export.
 - **Multiple imputation:** MICE with predictive mean matching and Rubin's rules for the odds-ratio analysis; optional "was missing" indicator predictors.
 - **Minimum sample size:** Riley et al. criteria (as in pmsampsize) for binary and continuous outcomes.
 - **Exact Random Forest splits** (default below 5,000 patients).
 - **Reporting:** a pre-filled checklist aligned with TRIPOD+AI and a draft Methods paragraph.
 - **Accessibility:** labelled controls, skip link, visible keyboard focus, WCAG AA contrast in both themes.
-- **Browser tests:** Playwright smoke tests of the main user journeys run in CI.
+- **Browser tests:** Playwright smoke tests of the main user journeys (including Option C, recalibration, subgroups and explanations) run in CI.
+- **Security:** no inline event handlers; the Content-Security-Policy allows inline scripts only by hash and lets the page contact nothing but its own files.
 
 ## 📁 Pre-Loaded Sample Medical Cohorts
 
@@ -191,7 +194,9 @@ The suite includes built-in clinical datasets for instant experimentation:
 
 - **Single train/test split.** Final performance is estimated on one held-out split. With cross-validated model selection (default) the winner's test score is not selection-biased, but it is still imprecise for small test sets; if selection by Testing-set results is chosen, the winner's score is optimistic. Confirm the chosen model on an independent cohort (Option B) before reporting.
 - **Splitting design.** Random, patient-grouped and date-based splits are built in; multicentre (site-based) validation needs a separate cohort (Option B). With a date-based split, cross-validation inside the training period uses folds that are not time-ordered.
-- **Remaining gaps:** multiple imputation is used for the explanatory odds ratios, while the predictive models use single imputation; random survival forests and time-dependent ROC curves are not included; fairness across patient subgroups is not assessed automatically; the 7-step pipeline keeps its six fixed models (gradient boosting is in the standard workflow).
+- **Remaining gaps:** multiple imputation is used for the explanatory odds ratios, while the predictive models use single imputation (refitted inside every cross-validation fold and bootstrap resample); random survival forests are not included; subgroup results have no confidence intervals and are not copied into the TRIPOD checklist automatically; in Option C, choices made by hand (which predictors to include, how to encode them) and the tuning of the neural network and ensemble are not repeated inside the resamples.
+- **Bootstrap confidence intervals** on the leaderboard resample the Testing patients with each model held fixed: they describe the precision of that test estimate, not the variation from refitting the model. For a headline result in a small cohort, use Option C or an external cohort (Option B).
+- **Shapley values** compare each predictor with values from real training patients, which can create unlikely combinations when predictors are strongly correlated; boosted-tree contributions are exact on the log-odds scale and shared out in percentage points.
 - **Probabilities:** Random Forest and hard voting give vote shares, k-NN gives neighbour shares. Calibration is assessed (plot, slope, intercept, Brier score) and optional Platt/isotonic recalibration is available; calibration estimates are imprecise with fewer than about 100 patients with and without the outcome.
 - **Survival model:** assumes proportional hazards (check that Kaplan-Meier curves do not cross); calibration is assessed at one horizon by grouped Kaplan-Meier estimates.
 - **Exploratory 2×2 for continuous outcomes.** Cut at the training-data median, not a clinical threshold; these are not diagnostic accuracy measures.
@@ -200,7 +205,7 @@ The suite includes built-in clinical datasets for instant experimentation:
 - **Variance conventions.** Feature scaling and tree impurity use the population variance (÷ n, as in scikit-learn); classical statistics (skewness G₁, ANOVA, Pearson/χ² tests) use the standard sample formulas, and displayed SDs are sample SDs (÷ (n − 1)).
 - **Collinearity.** Multi-level categorical features use the Generalised VIF (Fox & Monette), shown as GVIF^(1/df) so the VIF > 5 rule applies.
 - **Univariate screening** (p < 0.05) is informational; selecting predictors by p-value can bias models and is left to the user's judgement.
-- **Scale.** Model training runs in a background worker; data preparation (imputation, SMOTENC, fold preparation) still runs on the page and can briefly pause it for very large cohorts (tens of thousands of rows, or nominal variables with many levels).
+- **Scale.** Model training runs in a background worker; Option C with automatic tuning re-tunes the model in every resample and can take several minutes per model; data preparation (imputation, SMOTENC, fold preparation) still runs on the page and can briefly pause it for very large cohorts (tens of thousands of rows, or nominal variables with many levels).
 - **Not a medical device.** For research and education only; not for individual clinical decisions without independent validation.
 
 ## ✅ Verification Tests
@@ -210,10 +215,10 @@ From the project folder (Node.js; the reference check also needs Python with Sci
 ```bash
 node tests/reference_check.js && python3 tests/reference_check.py   # 61 checks against SciPy / scikit-learn / statsmodels (incl. calibration, recalibration, DeLong, decision curve, IRLS odds ratios, Rubin's rules, t distribution, Cox model, C-index, Kaplan-Meier)
 node tests/edge_cases.js                                           # robustness: single class, all-missing, constant features, imbalance, zero-variance target
-node tests/end_to_end.js                                           # 13 end-to-end checks (incl. export/import of all six model types): binary/multiclass/regression, missing values, unseen categories, rare outcome, tiny cohort, patient/date splits, calibration, threshold, NN fallback, batch = evaluation preprocessing
+node tests/end_to_end.js                                           # 19 end-to-end checks: binary/multiclass/regression, missing values, unseen categories, rare outcome, tiny cohort, patient/date splits, calibration, threshold, NN fallback, batch = evaluation preprocessing, export/import of all model types; Option C on pure noise (tuning repeated, .632+ for flexible models, model-selection correction); .632+ no-information rates; TreeSHAP and sampled Shapley vs brute force; time-dependent AUC/Brier under censoring
 python3 tests/benchmark_vs_python.py                               # app vs scikit-learn / PyTorch / imbalanced-learn (~2 min)
 python3 tests/nn_forward_check.py                                  # exact forward pass of the trained TF.js network, recomputed in NumPy
-npm install && npx playwright install chromium && npx playwright test   # browser smoke tests of the user interface (also run in CI)
+npm ci && npx playwright install chromium && npx playwright test   # browser smoke tests of the user interface (also run in CI)
 node tools/build.js                                                # rebuild the file:// bundle and import-map versions after editing src/
 ```
 

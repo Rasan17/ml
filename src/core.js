@@ -57,9 +57,10 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
-// Encodes a value as a JS literal for use inside an inline onclick="..." attribute
-function jsArg(value) {
-    return escapeHtml(JSON.stringify(String(value)));
+// Attributes for a control handled by the page's delegated listener (main.js): the global function
+// window[fn] is called with these arguments (no inline event handlers, so the CSP can forbid them)
+function actionAttrs(fn, ...args) {
+    return `data-action="${escapeHtml(fn)}" data-args="${escapeHtml(JSON.stringify(args))}"`;
 }
 
 // Median of training outcomes: the exploratory 2×2 cutoff for continuous targets is fixed from
@@ -252,4 +253,4 @@ function summariseHeldOutSet(ev) {
     return notes;
 }
 
-export { AppState, MODEL_INFO, ALL_MODEL_IDS, escapeHtml, jsArg, trainingMedian, renderExploratoryCutoffTable, PROBABILITY_LABELS, probabilityLabel, displayModelName, parseSeed, fmtValue, fmtR2, describeNNTraining, describeNNTrainingCore, cssEscape, APP_VERSION, RANKING_METRICS, rankingMetricKey, rankingMetricLabel, compareEvalResults, summariseHeldOutSet };
+export { AppState, MODEL_INFO, ALL_MODEL_IDS, escapeHtml, actionAttrs, trainingMedian, renderExploratoryCutoffTable, PROBABILITY_LABELS, probabilityLabel, displayModelName, parseSeed, fmtValue, fmtR2, describeNNTraining, describeNNTrainingCore, cssEscape, APP_VERSION, RANKING_METRICS, rankingMetricKey, rankingMetricLabel, compareEvalResults, summariseHeldOutSet };

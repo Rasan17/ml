@@ -79,6 +79,43 @@ test('settings and trained model can be saved and loaded again', async ({ page }
     expect(errors).toEqual([]);
 });
 
+test('Option C bootstrap validation reports Harrell and .632+ estimates', async ({ page }) => {
+    const errors = watch(page);
+    await loadShuntAndImpute(page);
+    await page.check('input[name="validation-mode"][value="bootstrap"]', { force: true });
+    await page.selectOption('#bootstrap-reps', '50');
+    await selectModels(page, ['glm', 'rf']);
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText('Tournament Complete', { timeout: 170000 });
+    const panel = page.locator('#optimism-container');
+    await expect(panel).toContainText('Bootstrap internal validation (Option C)');
+    await expect(panel).toContainText('.632+ estimate');
+    await expect(panel).toContainText('Choosing the best of 2 models');
+    await expect(page.locator('#multi-model-leaderboard-container')).toContainText('Corrected Accuracy');
+    expect(errors).toEqual([]);
+});
+
+test('recalibration, subgroup analysis and Shapley explanation in the standard workflow', async ({ page }) => {
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await page.click('#sample-breast-btn');
+    await expect(page.locator('#data-preview-container table')).toBeVisible();
+    await page.click('button.step-tab[data-step="3"]');
+    await page.click('#apply-imputation-btn');
+    await page.click('button.step-tab[data-step="4"]');
+    await page.selectOption('#recalibration-select', 'platt');
+    await selectModels(page, ['glm', 'rf']);
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText('Tournament Complete', { timeout: 150000 });
+    await expect(page.locator('#calibration-panel-container')).toContainText('Recalibrated');
+    await page.click('#subgroup-panel-container-btn');
+    await expect(page.locator('#subgroup-panel-container-out table')).toContainText('All Testing patients');
+    await page.click('button.step-tab[data-step="5"]');
+    await page.click('#run-single-predict-btn');
+    await expect(page.locator('#single-result-banner')).toContainText('Shapley');
+    expect(errors).toEqual([]);
+});
+
 test('7-step pipeline runs to the benchmark', async ({ page }) => {
     const errors = watch(page);
     await page.goto('/index.html');
@@ -91,7 +128,7 @@ test('7-step pipeline runs to the benchmark', async ({ page }) => {
     await page.click('#subpill-7');
     await page.click('#pipeline-train-models-btn');
     await expect(page.locator('#pipeline-train-status-text')).toContainText('Evaluated Successfully', { timeout: 170000 });
-    await expect(page.locator('#pipeline-leaderboard-container tbody tr')).toHaveCount(6);
+    await expect(page.locator('#pipeline-leaderboard-container tbody tr')).toHaveCount(7);
     expect(errors).toEqual([]);
 });
 

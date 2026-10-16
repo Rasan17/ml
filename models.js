@@ -1,6 +1,6 @@
 /**
- * NPH ML/Neuralnet Predictor - Machine Learning & Deep Learning Engine
- * Provides Deep Neural Networks (TensorFlow.js + Pure JS Fallback), Random Forests,
+ * Universal Medical ML/NeuralNet Predictor - machine learning and neural network (MLP) engine
+ * Provides neural networks (multilayer perceptrons, TensorFlow.js + pure JS fallback), Random Forests,
  * Logistic/Softmax Regression, Ridge Regression, k-NN,
  * and Gaussian Naive Bayes with comprehensive evaluation metrics.
  * 
@@ -923,7 +923,7 @@
     }
 
     // ==========================================
-    // 5. TENSORFLOW.JS / NATIVE DEEP NEURAL NETWORK
+    // 5. TENSORFLOW.JS NEURAL NETWORK (MULTILAYER PERCEPTRON)
     // ==========================================
     class DeepNeuralNetwork {
         constructor(isClassification = true, numClasses = 2, config = {}) {
@@ -1246,7 +1246,7 @@
 
             // Fallback: native (single-layer) logistic / softmax / ridge model.
             // This is NOT a neural network; callers can detect it via `usedFallback`.
-            console.warn(`Deep Neural Network unavailable (${this.fallbackReason}); trained a linear fallback model instead.`);
+            console.warn(`Neural network unavailable (${this.fallbackReason}); trained a linear fallback model instead.`);
             this.usedFallback = true;
             this.fallbackGLM = new GeneralizedLinearModel(
                 this.isClassification,
@@ -2015,11 +2015,121 @@
         dispose() { if (this.base && this.base.dispose) this.base.dispose(); }
     }
 
+
+    // ==========================================
+    // SHAPLEY-VALUE EXPLANATIONS (interventional, against a background of training patients)
+    // ==========================================
+    // The players are the original predictors (`groups[j]` = predictor of encoded column j), so a
+    // categorical predictor's one-hot columns move together. v(S) = mean over background patients z of
+    // f(x on the predictors in S, z elsewhere). The contributions add up exactly to
+    // f(x) − mean f(z): the prediction minus the average prediction for the background patients.
+
+    // Uniform view of one tree: RF nodes {isLeaf, value, featureIdx, threshold} or boosted {leaf, v, f, t}
+    function treeView(node, leafValue) {
+        if (node.isLeaf !== undefined) return node.isLeaf ? { leaf: true, v: leafValue(node.value) } : { leaf: false, f: node.featureIdx, t: node.threshold, l: treeView(node.left, leafValue), r: treeView(node.right, leafValue) };
+        return node.leaf ? { leaf: true, v: leafValue(node.v) } : { leaf: false, f: node.f, t: node.t, l: treeView(node.l, leafValue), r: treeView(node.r, leafValue) };
+    }
+
+    const factorial = (() => { const f = [1]; for (let i = 1; i <= 170; i++) f[i] = f[i - 1] * i; return n => f[n]; })();
+
+    // Exact Shapley values of one tree for patient x against one background patient z. A leaf is reached by
+    // the hybrid patient exactly when the predictors on which the path follows x (where x and z differ) are
+    // in S and those on which it follows z are not; that game has a closed-form Shapley value.
+    function treeShapPair(tree, x, z, groups, phi) {
+        const walk = (node, A, B) => {
+            if (node.leaf) {
+                const a = A.length, b = B.length;
+                if (a + b === 0 || node.v === 0) return;
+                const d = factorial(a + b);
+                if (a) { const w = node.v * factorial(a - 1) * factorial(b) / d; A.forEach(g => { phi[g] += w; }); }
+                if (b) { const w = node.v * factorial(a) * factorial(b - 1) / d; B.forEach(g => { phi[g] -= w; }); }
+                return;
+            }
+            const g = groups[node.f];
+            const nx = x[node.f] <= node.t ? node.l : node.r;
+            const nz = z[node.f] <= node.t ? node.l : node.r;
+            if (nx === nz) return walk(nx, A, B);
+            if (A.includes(g)) return walk(nx, A, B);
+            if (B.includes(g)) return walk(nz, A, B);
+            walk(nx, [...A, g], B);
+            walk(nz, A, [...B, g]);
+        };
+        walk(tree, [], []);
+    }
+
+    // Tree models: the trees of the output being explained, with their leaf values on that output's scale
+    function explainableTrees(model, classIdx) {
+        const m = model && model.base && model.calibrator ? model.base : model; // a recalibrated model: explain its base
+        if (m instanceof RandomForest) {
+            const T = m.trees.length;
+            const leaf = m.isClassification ? (v => (Number(v) === classIdx ? 1 / T : 0)) : (v => v / T);
+            return { trees: m.trees.map(t => treeView(t.root, leaf)), scale: m.isClassification ? 'probability' : 'outcome', offset: 0, recalibrated: m !== model };
+        }
+        if (m instanceof GradientBoostingModel) {
+            const k = m.K === 1 ? 0 : classIdx;
+            return {
+                trees: m.trees.map(round => treeView(round[k], v => m.learningRate * v)),
+                scale: m.isClassification ? 'log-odds' : 'outcome', offset: m.init[k], recalibrated: m !== model, multiclass: m.K > 1
+            };
+        }
+        return null;
+    }
+
+    // Exact interventional TreeSHAP; returns null when the model is not a tree model
+    function treeShap(model, x, background, groups, nGroups, classIdx) {
+        const tv = explainableTrees(model, classIdx);
+        if (!tv || !background.length) return null;
+        const phi = new Array(nGroups).fill(0);
+        const tmp = new Array(nGroups).fill(0);
+        let baseSum = 0;
+        const value = tree => z => { let n = tree; while (!n.leaf) n = z[n.f] <= n.t ? n.l : n.r; return n.v; };
+        background.forEach(z => {
+            tmp.fill(0);
+            tv.trees.forEach(tree => { treeShapPair(tree, x, z, groups, tmp); baseSum += value(tree)(z); });
+            for (let g = 0; g < nGroups; g++) phi[g] += tmp[g] / background.length;
+        });
+        const fx = tv.offset + tv.trees.reduce((a, tree) => a + value(tree)(x), 0);
+        return { phi, base: tv.offset + baseSum / background.length, value: fx, scale: tv.scale, exact: true, recalibrated: tv.recalibrated, multiclass: Boolean(tv.multiclass) };
+    }
+
+    // Any model: Shapley values estimated by sampling orderings of the predictors (Strumbelj & Kononenko),
+    // each with a random background patient; antithetic pairs (an ordering and its reverse) reduce noise.
+    // output(rows) returns the explained output for a batch of encoded rows.
+    function sampledShapley(output, x, background, groups, nGroups, nOrderings = 200, seed = 1) {
+        const rng = createPRNG(seed);
+        const cols = Array.from({ length: nGroups }, () => []);
+        groups.forEach((g, j) => cols[g].push(j));
+        const rows = [], plan = [];
+        for (let m = 0; m < nOrderings; m += 2) {
+            const order = Array.from({ length: nGroups }, (_, i) => i);
+            for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+            const z = background[Math.floor(rng() * background.length)];
+            [order, order.slice().reverse()].forEach(ord => {
+                const h = z.slice();
+                const start = rows.length;
+                rows.push(h.slice());
+                ord.forEach(g => { cols[g].forEach(j => { h[j] = x[j]; }); rows.push(h.slice()); });
+                plan.push({ ord, start });
+            });
+        }
+        const out = output(rows);
+        const phi = new Array(nGroups).fill(0);
+        let base = 0;
+        plan.forEach(({ ord, start }) => {
+            base += out[start];
+            ord.forEach((g, i) => { phi[g] += out[start + i + 1] - out[start + i]; });
+        });
+        const n = plan.length;
+        return { phi: phi.map(v => v / n), base: base / n, value: out[plan[0].start + nGroups], exact: false, orderings: n };
+    }
+
     const ModelEngine = {
+        treeShap,
+        sampledShapley,
         SUPPORTED_MODELS: [
             { id: 'ensemble', name: 'Voting / Performance-Weighted Ensemble', type: 'both', desc: 'Combines the selected base models (neural network, random forest, logistic/ridge, k-NN, naive Bayes) by soft probability averaging, hard majority voting, or weights learned on an internal validation split of the training data. Not a cross-validated stacked Super Learner.' },
             { id: 'nn', name: 'Neural Network (Multilayer Perceptron, TF.js)', type: 'both', desc: 'Multilayer perceptron with dense hidden layers, dropout, L2 weight decay and early stopping on an internal validation split. Falls back to a linear model (and says so) if TensorFlow.js fails.' },
-            { id: 'rf', name: 'Random Forest (Ensemble Trees)', type: 'both', desc: 'Bootstrap-sampled decision trees with random feature subsets. Splits use Gini impurity (classification) or variance reduction (regression) over an approximate grid of about 10 candidate thresholds per feature. Feature importance is impurity-based (MDI): useful for ranking, not evidence of causal or clinical effect.' },
+            { id: 'rf', name: 'Random Forest (Ensemble Trees)', type: 'both', desc: 'Bootstrap-sampled decision trees with random feature subsets. Splits use Gini impurity (classification) or variance reduction (regression), scanning every threshold for cohorts under 5,000 patients (an approximate grid of about 10 thresholds per feature for larger ones). Feature importance is impurity-based (MDI): useful for ranking, not evidence of causal or clinical effect.' },
             { id: 'glm', name: 'Logistic / Ridge Regression', type: 'both', desc: 'L2-regularized linear (ridge) or logistic/softmax model fitted by gradient descent on standardised features.' },
             { id: 'knn', name: 'k-Nearest Neighbors (k-NN)', type: 'both', desc: 'Non-parametric distance-based model; "probabilities" are (weighted) neighbour vote shares.' },
             { id: 'nb', name: 'Naive Bayes (Gaussian + Bernoulli)', type: 'classification', desc: 'Naive Bayes with Gaussian likelihoods for continuous features and Laplace-smoothed Bernoulli likelihoods for 0/1 indicator features (one-hot categories, binary flags).' }
@@ -2680,6 +2790,52 @@
             return out;
         },
         kmAt(km, t) { let s = 1; for (const k of km) { if (k.time <= t) s = k.survival; else break; } return s; },
+        /** Kaplan-Meier value just before t (left limit), as needed for censoring weights */
+        kmBefore(km, t) { let s = 1; for (const k of km) { if (k.time < t) s = k.survival; else break; } return s; },
+
+        /**
+         * Censoring distribution G(t) = P(still uncensored at t): the Kaplan-Meier estimate with censoring as the
+         * "event" (from the training patients). Used to weight the time-dependent measures (IPCW).
+         */
+        censoringKM(time, event) { return this.kaplanMeier(time, event.map(e => (e === 1 ? 0 : 1))); },
+
+        /**
+         * Time-dependent AUC at horizon tau (cumulative cases / dynamic controls, Uno et al. 2007): of a
+         * patient with the event by tau and one still event-free after tau, how often the first had the
+         * higher risk. Cases are weighted by 1/G(T−) for censoring. Returns null if not estimable.
+         */
+        timeDependentAUC(time, event, risk, tau, censKM) {
+            let num = 0, den = 0;
+            const controls = [];
+            for (let j = 0; j < time.length; j++) if (time[j] > tau) controls.push(risk[j]);
+            if (!controls.length) return null;
+            for (let i = 0; i < time.length; i++) {
+                if (!(event[i] === 1 && time[i] <= tau)) continue;
+                const g = this.kmBefore(censKM, time[i]);
+                if (!(g > 0)) continue;
+                const w = 1 / g;
+                let c = 0;
+                controls.forEach(r => { if (risk[i] > r) c += 1; else if (risk[i] === r) c += 0.5; });
+                num += w * c;
+                den += w * controls.length;
+            }
+            return den > 0 ? num / den : null;
+        },
+
+        /**
+         * Brier score at horizon tau with censoring weights (Graf et al. 1999): squared error of the predicted
+         * survival probability S(tau | x) against the observed status. Patients censored before tau get weight 0
+         * and the others are up-weighted to represent them.
+         */
+        ipcwBrier(time, event, survAtTau, tau, censKM) {
+            const gTau = this.kmAt(censKM, tau);
+            let sum = 0;
+            for (let i = 0; i < time.length; i++) {
+                if (time[i] <= tau && event[i] === 1) { const g = this.kmBefore(censKM, time[i]); if (g > 0) sum += (survAtTau[i] ** 2) / g; }
+                else if (time[i] > tau && gTau > 0) sum += ((1 - survAtTau[i]) ** 2) / gTau;
+            }
+            return time.length ? sum / time.length : null;
+        },
         createCox(config) { return new CoxModel(config); },
 
         /** Platt scaling: logistic regression of the outcome on logit(p) (Newton-Raphson); null if not estimable */

@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Content-Security-Policy: the page may load and contact only its own files, so patient data cannot be sent anywhere
-         (connect-src 'self'). Inline handlers/styles are permitted because the interface uses them, and
-         'unsafe-eval' because TensorFlow.js evaluates one small built-in snippet at start-up. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
+         (connect-src 'self'). Inline scripts run only if their hash is listed (tools/build.js writes the hashes of the
+         import map and the file:// loader), so injected scripts and inline event handlers are blocked. Inline styles are
+         still permitted (the interface uses them). 'unsafe-eval' is needed because TensorFlow.js evaluates
+         Function("return this") at start-up; without it the neural network silently falls back to a linear model. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-wRbtgf5497PBcv+unVdlX4azFIgCA9AahXofjetrnAY=' 'sha256-dcvmDuIEkzY2iblgHOFlvrUw6d48JwHGLLgUp5A4PnA=' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
     <title>Universal Medical ML/NeuralNet Predictor | Clinical Machine Learning & Neural Networks</title>
     <meta name="description" content="Universal in-browser client-side Machine Learning and Neural Network Predictor for Clinical Medicine. Features automated variable typing, multi-strategy missing data imputation, neural networks, random forests, single & batch inference.">
     <meta name="author" content="Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)">
@@ -162,7 +164,7 @@
                         <button id="to-step-2-btn" class="btn btn-secondary">
                             Standard Workflow: Variable Roles (Step 2) &rarr;
                         </button>
-                        <button id="pipeline-direct-launch-btn" class="btn btn-emerald" onclick="window.launch7StepPipeline && window.launch7StepPipeline(event)">
+                        <button id="pipeline-direct-launch-btn" class="btn btn-emerald" data-action="launch7StepPipeline" data-args="[]">
                             🔬 Launch 7-Step Clinical Pipeline &rarr;
                         </button>
                     </div>
@@ -364,7 +366,7 @@
                                 Multilayer perceptron (2–3 dense hidden layers) with dropout, L2 weight decay, Adam optimizer and early stopping on an internal validation split of the training data. If TensorFlow.js fails, a linear fallback is used and clearly flagged.
                             </div>
                             <!-- Model Seed Control -->
-                            <div class="model-seed-box" data-model="nn" onclick="event.stopPropagation()">
+                            <div class="model-seed-box" data-model="nn" data-stop-click>
                                 <div class="model-seed-header">
                                     <span class="model-seed-title">🌱 Seed:</span>
                                     <div class="seed-mode-selector">
@@ -400,7 +402,7 @@
                                 Bootstrap decision trees with random feature subsets; Gini (classification) or variance-reduction (regression) splits searched exactly over every threshold (or, for 5,000+ patients, an approximate grid of ~10 thresholds per feature). Impurity-based (MDI) importance ranks features but is not evidence of causal or clinical effect.
                             </div>
                             <!-- Model Seed Control -->
-                            <div class="model-seed-box" data-model="rf" onclick="event.stopPropagation()">
+                            <div class="model-seed-box" data-model="rf" data-stop-click>
                                 <div class="model-seed-header">
                                     <span class="model-seed-title">🌱 Seed:</span>
                                     <div class="seed-mode-selector">
@@ -436,7 +438,7 @@
                                 L2-regularized linear (ridge) or logistic/softmax regression fitted by gradient descent on standardised features.
                             </div>
                             <!-- Model Seed Control -->
-                            <div class="model-seed-box" data-model="glm" onclick="event.stopPropagation()">
+                            <div class="model-seed-box" data-model="glm" data-stop-click>
                                 <div class="model-seed-header">
                                     <span class="model-seed-title">🌱 Seed:</span>
                                     <div class="seed-mode-selector">
@@ -472,7 +474,7 @@
                                 Non-parametric local distance classification using Euclidean metric in standardized feature space.
                             </div>
                             <!-- Model Seed Control -->
-                            <div class="model-seed-box" data-model="knn" onclick="event.stopPropagation()">
+                            <div class="model-seed-box" data-model="knn" data-stop-click>
                                 <div class="model-seed-header">
                                     <span class="model-seed-title">🌱 Seed:</span>
                                     <div class="seed-mode-selector">
@@ -508,7 +510,7 @@
                                 Probabilistic classifier assuming conditional independence of features: Gaussian likelihoods for continuous features, Laplace-smoothed Bernoulli likelihoods for 0/1 indicators (one-hot categories, binary flags).
                             </div>
                             <!-- Model Seed Control -->
-                            <div class="model-seed-box" data-model="nb" onclick="event.stopPropagation()">
+                            <div class="model-seed-box" data-model="nb" data-stop-click>
                                 <div class="model-seed-header">
                                     <span class="model-seed-title">🌱 Seed:</span>
                                     <div class="seed-mode-selector">
@@ -544,7 +546,7 @@
                                 Shallow decision trees added one after another, each correcting the errors of the previous ones (histogram gradient boosting, as in LightGBM / XGBoost). Often the strongest model for tabular data; early stopping on an internal validation slice of the training data limits overfitting.
                             </div>
                             <!-- Model Seed Control -->
-                            <div class="model-seed-box" data-model="gbm" onclick="event.stopPropagation()">
+                            <div class="model-seed-box" data-model="gbm" data-stop-click>
                                 <div class="model-seed-header">
                                     <span class="model-seed-title">🌱 Seed:</span>
                                     <div class="seed-mode-selector">
@@ -580,7 +582,7 @@
                                 Combines neural network, random forest, logistic/ridge, k-NN (and optionally naive Bayes) by soft probability averaging, hard majority voting, or balanced-accuracy weights learned on an internal validation split of the training data. This is a voting ensemble, not a cross-validated stacked Super Learner.
                             </div>
                             <!-- Model Seed Control -->
-                            <div class="model-seed-box" data-model="ensemble" onclick="event.stopPropagation()">
+                            <div class="model-seed-box" data-model="ensemble" data-stop-click>
                                 <div class="model-seed-header">
                                     <span class="model-seed-title">🌱 Master Seed:</span>
                                     <div class="seed-mode-selector">
@@ -670,7 +672,7 @@
                                             Option C: Internal Validation by Bootstrap (all patients)
                                         </div>
                                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.45;">
-                                            Uses every patient to train, and estimates performance by bootstrap optimism correction (Harrell): the whole modelling process is repeated on resampled cohorts to measure and subtract overfitting. Recommended (TRIPOD) for small cohorts, where a single split wastes patients and is unstable.
+                                            Uses every patient to train, and estimates performance by bootstrap internal validation (Harrell's optimism correction, or .632+ for flexible models): the modelling process is repeated on resampled cohorts to measure and subtract overfitting. Recommended (TRIPOD) for small cohorts, where a single split wastes patients and is unstable.
                                         </div>
                                     </div>
                                 </label>
@@ -686,7 +688,8 @@
                                             <option value="200">200 (Harrell's usual choice; slower)</option>
                                         </select>
                                     </label>
-                                    <p class="autotune-hint">Each resample repeats the whole process (missing-value filling, encoding, scaling and training) on patients drawn with replacement. The model is scored on its resample and on the original patients; the average difference (the <strong>optimism</strong>) is subtracted from the performance of the final model trained on all patients. Neural networks and the Ensemble use at most 50 resamples. There is no separate test set, so the results table shows <strong>optimism-corrected</strong> estimates; for external validity, test on an independent cohort (Option B).</p>
+                                    <p class="autotune-hint">Each resample repeats the process (missing-value filling, encoding, scaling, training and, if switched on, the automatic tuning) on patients drawn with replacement. The model is scored on its resample and on the original patients; the average difference (the <strong>optimism</strong>) is subtracted from the performance of the final model trained on all patients. Flexible models (Random Forest, boosted trees, k-NN, neural networks) are reported with the <strong>.632+</strong> estimate instead, which scores each resampled model on the patients it did not see. When several models are compared by cross-validation, the choice of the best model is repeated in every resample too. Neural networks and the Ensemble use at most 50 resamples, and their tuning is not repeated (too slow). There is no separate test set, so the results table shows <strong>corrected</strong> estimates; for external validity, test on an independent cohort (Option B).</p>
+                                    <p class="autotune-hint">⏱️ With automatic tuning switched on, every resample re-tunes the model, so a run can take several minutes per model (shown with a time estimate). Start with 50 resamples to see how long it takes.</p>
                                 </div>
                             </div>
 
@@ -1326,6 +1329,7 @@
                         <div id="optimism-container"></div>
                         <div id="calibration-panel-container"></div>
                         <div id="explain-panel-container"></div>
+                        <div id="subgroup-panel-container"></div>
                         <div id="odds-ratio-container"></div>
 
                         <!-- Single Model Summary Title & Metrics Row -->
@@ -1791,7 +1795,7 @@
                             <div style="font-size: 18px;">🌲</div>
                             <div>
                                 <strong>Step 6: Model-Driven Feature Ranking (Random Forest Scout)</strong><br>
-                                Ranks the predictors by how useful they are. A quick "scout" Random Forest is trained on the balanced Training set from Step 5 (it is used only for this ranking, not as one of the final models). Each predictor is scored by how much it helps the trees separate the outcome groups (Mean Decrease in Impurity). The weakest 30% of predictors are then left out for k-Nearest Neighbours and Naive Bayes in Step 7, because weak predictors add noise that easily misleads these two models. The other four models use all remaining predictors. The ranking uses the Training set only, and it is a practical filter rather than a definitive clinical ranking: it tends to favour continuous measurements over simple yes/no predictors.
+                                Ranks the predictors by how useful they are. A quick "scout" Random Forest is trained on the balanced Training set from Step 5 (it is used only for this ranking, not as one of the final models). Each predictor is scored by how much it helps the trees separate the outcome groups (Mean Decrease in Impurity). The weakest 30% of predictors are then left out for k-Nearest Neighbours and Naive Bayes in Step 7, because weak predictors add noise that easily misleads these two models. The other models use all remaining predictors. The ranking uses the Training set only, and it is a practical filter rather than a definitive clinical ranking: it tends to favour continuous measurements over simple yes/no predictors.
                             </div>
                         </div>
 
@@ -1832,11 +1836,12 @@
                                 <ul style="margin: 6px 0 0 20px; font-size: 12.5px;">
                                     <li><strong>k-NN & Naive Bayes:</strong> Use only the top 70% of features by Step 6 RF importance (fewer noisy inputs for distance- and likelihood-based models).</li>
                                     <li><strong>Random Forest:</strong> All surviving features (tree splits are scale-free and the forest selects features per split).</li>
+                                    <li><strong>Gradient-Boosted Trees:</strong> All surviving features; shallow trees, shrinkage, row subsampling and early stopping on an internal validation split of the training rows.</li>
                                     <li><strong>Neural Network (MLP):</strong> L2 weight decay + dropout, with early stopping on an internal validation split of the training rows (the test set is never used in training).</li>
                                     <li><strong>Logistic / Ridge Regression:</strong> Applies L2 penalization to stabilize any remaining minor collinearity.</li>
                                     <li><strong>Voting Ensemble:</strong> Equal-weight soft vote of its base models; scaling and one-hot encoding fitted on the Training set only (as for every model).</li>
                                 </ul>
-                                All models are evaluated on the held-out Testing set (never resampled) and ranked by the selected primary metric (default: macro F1-Score; regression: R²). Because the top model is chosen on this same Testing set, its score is optimistically biased; confirm it on an independent cohort.
+                                All models are evaluated on the held-out Testing set (never resampled) and ranked by the selected primary metric (default: macro F1-Score; regression: R²). By default the ranking uses cross-validation inside the Training set, so the top model's test score is an honest estimate; if you choose to rank on the Testing set instead, the top score is optimistically biased. Either way, confirm the chosen model on an independent cohort.
                             </div>
                         </div>
 
@@ -1872,7 +1877,7 @@
                                 <label class="selection-option"><input type="radio" name="pipeline-selection-mode" id="pipeline-selection-mode-cv" value="cv" checked> Cross-validation within the Training set <span class="selection-tag">recommended</span></label>
                                 <label class="selection-option"><input type="radio" name="pipeline-selection-mode" id="pipeline-selection-mode-test" value="test"> Testing-set results <span class="selection-tag selection-tag-muted">faster, but optimistic</span></label>
                             </div>
-                            <p class="autotune-hint" style="margin-top: 4px;">With <strong>cross-validation</strong>, each of the six models is scored on parts of the real Training patients it did not learn from (SMOTENC and scaling are redone inside each part) and the best is picked on those scores; the Testing set is then used only once, as an honest final check. Picking the winner on the Testing set is quicker, but its test score is then too optimistic.</p>
+                            <p class="autotune-hint" style="margin-top: 4px;">With <strong>cross-validation</strong>, each of the models is scored on parts of the real Training patients it did not learn from (SMOTENC and scaling are redone inside each part) and the best is picked on those scores; the Testing set is then used only once, as an honest final check. Picking the winner on the Testing set is quicker, but its test score is then too optimistic.</p>
                             <div class="threshold-row">
                                 <label for="pipeline-decision-threshold" class="autotune-folds-label">🎚️ Decision threshold (two-outcome predictions):
                                     <input type="number" id="pipeline-decision-threshold" class="form-input" value="0.5" min="0.05" max="0.95" step="0.05" style="width: 80px; display: inline-block;">
@@ -1953,6 +1958,7 @@
                             </div>
                             <div id="pipeline-calibration-container"></div>
                             <div id="pipeline-explain-container"></div>
+                            <div id="pipeline-subgroup-container"></div>
 
                             <!-- 2x2 Confusion Matrices Grid -->
                             <div class="card" style="background: var(--bg-surface-elevated); padding: 20px;">
@@ -2024,13 +2030,13 @@
     <script src="chart.umd.min.js"></script>
     <script src="tf.min.js"></script>
     <script src="data-engine.js?h=c64ca266d5"></script>
-    <script src="models.js?h=e203942f41"></script>
+    <script src="models.js?h=380dc57b7e"></script>
     <!-- Application controller: ES modules (src/); when opened directly from disk (file://), where browsers
          block modules, the generated single-file bundle is used instead (node tools/build.js). -->
     <!-- IMPORTMAP:START (generated by tools/build.js) -->
-    <script type="importmap">{"imports":{"./src/batch-prediction.js":"./src/batch-prediction.js?h=23849bd4e2","./src/compute.js":"./src/compute.js?h=f39dd1fc2e","./src/core.js":"./src/core.js?h=a4a5aa70f1","./src/cv-tuning.js":"./src/cv-tuning.js?h=d173c363a9","./src/imputation.js":"./src/imputation.js?h=f6f3d2afe5","./src/ingest.js":"./src/ingest.js?h=49c018c231","./src/main.js":"./src/main.js?h=7c5480ea62","./src/model-io.js":"./src/model-io.js?h=b6013f41d0","./src/navigation.js":"./src/navigation.js?h=41821bacbf","./src/panels.js":"./src/panels.js?h=119e7e7187","./src/pipeline-results.js":"./src/pipeline-results.js?h=dcfce4d612","./src/pipeline.js":"./src/pipeline.js?h=ece98d6ff2","./src/reports.js":"./src/reports.js?h=13ab6d86fb","./src/settings.js":"./src/settings.js?h=e1a4f741f7","./src/shell.js":"./src/shell.js?h=be70b58fee","./src/single-prediction.js":"./src/single-prediction.js?h=75f6769b32","./src/standard-training.js":"./src/standard-training.js?h=94f356c27b","./src/survival.js":"./src/survival.js?h=0d3a83ae8e","./src/training-setup.js":"./src/training-setup.js?h=2263435747","./src/tripod.js":"./src/tripod.js?h=8584e83fb9","./src/variables.js":"./src/variables.js?h=bf4376fc58","./src/watchdog.js":"./src/watchdog.js?h=582f5a6b6e","./data-engine.js":"./data-engine.js?h=c64ca266d5","./models.js":"./models.js?h=e203942f41","./compute-worker.js":"./compute-worker.js?h=efe57bab28"}}</script>
+    <script type="importmap">{"imports":{"./src/batch-prediction.js":"./src/batch-prediction.js?h=23849bd4e2","./src/compute.js":"./src/compute.js?h=f39dd1fc2e","./src/core.js":"./src/core.js?h=51aff94b2d","./src/cv-tuning.js":"./src/cv-tuning.js?h=7cd2251151","./src/imputation.js":"./src/imputation.js?h=f6f3d2afe5","./src/ingest.js":"./src/ingest.js?h=49c018c231","./src/main.js":"./src/main.js?h=36244ec6da","./src/model-io.js":"./src/model-io.js?h=b6013f41d0","./src/navigation.js":"./src/navigation.js?h=41821bacbf","./src/panels.js":"./src/panels.js?h=717fd6ede5","./src/pipeline-results.js":"./src/pipeline-results.js?h=4ce7a6b802","./src/pipeline.js":"./src/pipeline.js?h=e10061271f","./src/reports.js":"./src/reports.js?h=1684f47715","./src/settings.js":"./src/settings.js?h=e1a4f741f7","./src/shell.js":"./src/shell.js?h=be70b58fee","./src/single-prediction.js":"./src/single-prediction.js?h=1a6c242659","./src/standard-training.js":"./src/standard-training.js?h=8a2ed5a5f7","./src/subgroups.js":"./src/subgroups.js?h=598c7153d8","./src/survival.js":"./src/survival.js?h=367028b238","./src/training-setup.js":"./src/training-setup.js?h=2263435747","./src/tripod.js":"./src/tripod.js?h=e866720739","./src/validation-core.js":"./src/validation-core.js?h=6a4062f1e5","./src/variables.js":"./src/variables.js?h=bf4376fc58","./src/watchdog.js":"./src/watchdog.js?h=582f5a6b6e","./data-engine.js":"./data-engine.js?h=c64ca266d5","./models.js":"./models.js?h=380dc57b7e","./compute-worker.js":"./compute-worker.js?h=efe57bab28"}}</script>
     <!-- IMPORTMAP:END -->
-    <script type="module" src="src/main.js?h=7c5480ea62"></script>
+    <script type="module" src="src/main.js?h=36244ec6da"></script>
     <script>if (location.protocol === 'file:') document.write('<script src="dist/app.bundle.js"><\/script>');</script>
 </body>
 </html>

@@ -60,9 +60,10 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
-// Encodes a value as a JS literal for use inside an inline onclick="..." attribute
-function jsArg(value) {
-    return escapeHtml(JSON.stringify(String(value)));
+// Attributes for a control handled by the page's delegated listener (main.js): the global function
+// window[fn] is called with these arguments (no inline event handlers, so the CSP can forbid them)
+function actionAttrs(fn, ...args) {
+    return `data-action="${escapeHtml(fn)}" data-args="${escapeHtml(JSON.stringify(args))}"`;
 }
 
 // Median of training outcomes: the exploratory 2×2 cutoff for continuous targets is fixed from
@@ -644,6 +645,382 @@ async function fitAndScoreMulti(modelId, isClassification, numClasses, hp, X, y,
     } finally {
         if (m.dispose) m.dispose();
     }
+}
+
+// ---- src/validation-core.js ----
+// validation-core.js: the resampling engine behind automatic tuning and bootstrap internal validation
+// (Option C). It has no imports and never touches the page, so the tests run exactly this code; the
+// functions that train models are passed in (the app passes its background-worker versions).
+/* global DataEngine, ModelEngine */
+
+const TUNE_MAX_ROWS = 2000;        // larger training sets are tuned on a stratified sample of this size
+const TUNABLE_MODELS = new Set(['knn', 'rf', 'glm', 'nb', 'nn', 'gbm']);
+// Models that can memorise their training patients: Option C reports the .632+ estimate for them
+const FLEXIBLE_MODELS = new Set(['rf', 'gbm', 'knn', 'nn', 'ensemble']);
+const INNER_TUNE_MAX_FOLDS = 3;    // folds of the tuning repeated inside each bootstrap resample (for speed)
+
+function medianOf(values) {
+    const v = values.filter(x => typeof x === 'number' && isFinite(x)).sort((a, b) => a - b);
+    if (v.length === 0) return null;
+    const mid = Math.floor(v.length / 2);
+    return v.length % 2 === 0 ? (v[mid - 1] + v[mid]) / 2 : v[mid];
+}
+
+function tuningGrid(mId, base, minFoldTrain) {
+    const combos = [];
+    if (mId === 'knn') {
+        [3, 5, 7, 9, 11, 15, 21, 25].filter(k => k < minFoldTrain).forEach(k =>
+            ['uniform', 'distance'].forEach(w => combos.push({ k, weighting: w })));
+    } else if (mId === 'rf') {
+        [4, 6, 10].forEach(d => [2, 8].forEach(m => combos.push({ maxDepth: d, minSamplesSplit: m })));
+    } else if (mId === 'glm') {
+        [0, 0.001, 0.01, 0.05, 0.1, 0.5].forEach(l => combos.push({ lambdaL2: l }));
+    } else if (mId === 'nb') {
+        [1e-9, 1e-4, 0.01, 0.1].forEach(v => combos.push({ varSmoothing: v }));
+    } else if (mId === 'nn') {
+        [0.1, 0.3].forEach(d => [0.0001, 0.001].forEach(l => combos.push({ dropoutRate: d, l2Reg: l })));
+    } else if (mId === 'gbm') {
+        [0.05, 0.1].forEach(lr => [2, 3, 4].forEach(d => combos.push({ learningRate: lr, maxDepth: d })));
+    }
+    const keys = combos.length ? Object.keys(combos[0]) : [];
+    const own = {};
+    keys.forEach(k => { own[k] = base[k]; });
+    const seen = new Set();
+    const out = [];
+    [own, ...combos].forEach((c, idx) => {
+        const sig = JSON.stringify(keys.map(k => c[k]));
+        if (seen.has(sig)) return;
+        seen.add(sig);
+        out.push({ params: c, isOwn: idx === 0 });
+    });
+    return { keys, candidates: out };
+}
+
+// Stratified (classification) or shuffled (regression) fold assignment, reproducible from the seed
+function makeFolds(y, k, isClassification, seed) {
+    const rng = DataEngine.createPRNG(seed);
+    const shuffle = arr => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
+    const fold = new Array(y.length);
+    if (isClassification) {
+        const groups = {};
+        y.forEach((v, i) => { (groups[String(v)] = groups[String(v)] || []).push(i); });
+        let offset = 0;
+        Object.keys(groups).sort().forEach(g => {
+            shuffle(groups[g]).forEach((idx, j) => { fold[idx] = (j + offset) % k; });
+            offset += groups[g].length;
+        });
+    } else {
+        shuffle(y.map((_, i) => i)).forEach((idx, j) => { fold[idx] = j % k; });
+    }
+    return fold;
+}
+
+// Fold assignment for rows. With a grouping function (e.g. patient ID), every record of a group goes to
+// the same fold, so one patient never appears on both sides of a fold. stratifyGroups (used inside
+// bootstrap resamples, where each group is one patient drawn several times) also balances the outcome.
+function assignRowFolds(rows, k, isClassification, targetCol, seed, groupOf, stratifyGroups = false) {
+    const label = r => (isClassification ? String(r[targetCol]).trim() : Number(r[targetCol]));
+    if (!groupOf) return makeFolds(rows.map(label), k, isClassification, seed);
+    if (stratifyGroups) {
+        const first = new Map();
+        rows.forEach(r => { const g = groupOf(r); if (!first.has(g)) first.set(g, label(r)); });
+        const keys = [...first.keys()];
+        const f = makeFolds(keys.map(g => first.get(g)), k, isClassification, seed);
+        const foldOfGroup = new Map(keys.map((g, i) => [g, f[i]]));
+        return rows.map(r => foldOfGroup.get(groupOf(r)));
+    }
+    const rng = DataEngine.createPRNG(seed);
+    const keys = [...new Set(rows.map(groupOf))].sort();
+    for (let i = keys.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [keys[i], keys[j]] = [keys[j], keys[i]]; }
+    const foldOfGroup = new Map(keys.map((g, i) => [g, i % k]));
+    return rows.map(r => foldOfGroup.get(groupOf(r)));
+}
+
+// Cap very large training sets (stratified, or by whole groups when grouping is used)
+function capRows(rows, isClassification, targetCol, seed, groupOf) {
+    if (rows.length <= TUNE_MAX_ROWS) return { rows, sampled: false };
+    const pick = assignRowFolds(rows, Math.ceil(rows.length / TUNE_MAX_ROWS), isClassification, targetCol, seed, groupOf);
+    return { rows: rows.filter((_, i) => pick[i] === 0), sampled: true };
+}
+
+// Leak-free folds from raw rows: imputation, encoding and scaling are fitted on each fold's learning
+// rows only and then applied to that fold's validation rows
+async function buildRowFolds(rawRows, k, o, onFold) {
+    const { configs, analysis, isClassification, targetCol, seed, groupOf = null, stratifyGroups = false, decisionThreshold = null } = o;
+    const cap = capRows(rawRows, isClassification, targetCol, seed, groupOf);
+    const fold = assignRowFolds(cap.rows, k, isClassification, targetCol, seed, groupOf, stratifyGroups);
+    const sets = [];
+    for (let f = 0; f < k; f++) {
+        const tr = cap.rows.filter((_, i) => fold[i] !== f);
+        const va = cap.rows.filter((_, i) => fold[i] === f);
+        const trImp = DataEngine.imputeDataset(tr, configs, analysis);
+        const vaImp = DataEngine.imputeDataset(va, configs, analysis, trImp.plan);
+        const prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, configs);
+        const te = DataEngine.prepareTestingDataset(vaImp.imputedRows, prep);
+        sets.push({ Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses });
+        if (onFold) onFold(f + 1, k);
+        await ModelEngine.yieldToBrowser();
+    }
+    return { sets, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), decisionThreshold };
+}
+
+// Compare the grid by mean cross-validated ranking metric over pre-built folds.
+// o: { metricKey, metricDefs, fitAndScore, isAborted, progress, ownOnly }
+async function runTuningCore(mId, baseHp, fd, isClassification, numClasses, o) {
+    const { metricKey, metricDefs, fitAndScore, isAborted = null, progress = null, ownOnly = false } = o;
+    const metricDef = metricDefs[metricKey];
+    const k = fd.sets.length;
+    const grid = (ownOnly || !TUNABLE_MODELS.has(mId))
+        ? { keys: [], candidates: [{ params: {}, isOwn: true }] }
+        : tuningGrid(mId, baseHp, Math.min(...fd.sets.map(f => f.Xtr.length)));
+    const { keys, candidates } = grid;
+    const results = [];
+    const totalFits = candidates.length * k;
+    const t0 = Date.now();
+    let fitsDone = 0;
+    // Remaining-time estimate for this model, from the average time of the trial fits so far
+    const eta = () => {
+        if (fitsDone === 0) return '';
+        const sec = ((Date.now() - t0) / fitsDone) * (totalFits - fitsDone) / 1000;
+        return sec < 60 ? ` (about ${Math.max(5, Math.round(sec / 5) * 5)} s left)` : ` (about ${Math.round(sec / 60)} min left)`;
+    };
+
+    for (let c = 0; c < candidates.length; c++) {
+        const hp = { ...baseHp, ...candidates[c].params };
+        const scores = [];
+        const oof = { p: [], y: [] }; // out-of-fold predictions (binary outcomes), used to fit recalibration
+        const all = {}; // every ranking metric, so the selection can follow a later change of ranking metric
+        Object.keys(metricDefs).forEach(key => { all[key] = []; });
+        for (let f = 0; f < k; f++) {
+            if (isAborted && isAborted()) throw new Error("Training aborted by user.");
+            const { Xtr, ytr, Xva } = fd.sets[f];
+            if (!Xtr.length || !Xva.length) continue;
+            if (progress) progress(c + 1, candidates.length, f + 1, k, eta());
+            // Fit on the fold's learning rows and score its validation rows
+            const ev = await fitAndScore(mId, isClassification, numClasses, hp, fd.sets[f],
+                isClassification ? { decisionThreshold: fd.decisionThreshold } : { regressionThreshold: medianOf(ytr), thresholdSource: 'median of the fold training outcomes' },
+                {
+                    isAborted,
+                    // Heartbeat every few epochs so the monitor never mistakes a long fold for a stall
+                    onProgress: (ep, tot) => { if (progress && (mId === 'nn' || mId === 'ensemble') && (ep % 3 === 0 || ep === tot)) progress(c + 1, candidates.length, f + 1, k, `${eta()} &middot; ${mId === 'nn' ? 'epoch' : 'base model'} ${ep}/${tot}`); }
+                });
+            const v = ev ? ev[metricKey] : null;
+            if (typeof v === 'number' && isFinite(v)) scores.push(v);
+            if (ev) Object.keys(all).forEach(key => { if (typeof ev[key] === 'number' && isFinite(ev[key])) all[key].push(ev[key]); });
+            if (ev && Array.isArray(ev.probPositive) && Array.isArray(ev.actuals)) { oof.p.push(...ev.probPositive); oof.y.push(...ev.actuals.map(v => (v === 1 ? 1 : 0))); }
+            fitsDone++;
+            await ModelEngine.yieldToBrowser(); // background-tab safe (plain timers are throttled in hidden tabs)
+        }
+        const mean = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+        const sd = scores.length > 1 ? Math.sqrt(scores.reduce((a, b) => a + (b - mean) ** 2, 0) / (scores.length - 1)) : null;
+        const allMeans = {};
+        Object.keys(all).forEach(key => { allMeans[key] = all[key].length ? all[key].reduce((a, b) => a + b, 0) / all[key].length : null; });
+        results.push({ params: candidates[c].params, isOwn: candidates[c].isOwn, mean, sd, nFolds: scores.length, allMeans, oof: oof.p.length ? oof : null });
+    }
+
+    // Best mean CV score; ties keep the user's own (or the protocol's) settings, listed first
+    let best = results.find(r => r.isOwn) || results[0];
+    results.forEach(r => {
+        if (r.mean === null) return;
+        if (best.mean === null) { best = r; return; }
+        const better = metricDef.higherIsBetter ? r.mean > best.mean + 1e-12 : r.mean < best.mean - 1e-12;
+        if (better) best = r;
+    });
+    return {
+        modelId: mId, keys, results, best, own: results.find(r => r.isOwn),
+        bestHp: { ...baseHp, ...best.params }, folds: k, rowsUsed: fd.rowsUsed, rowsTotal: fd.rowsTotal,
+        sampled: fd.sampled, grouped: Boolean(fd.grouped), metricKey, metricLabel: metricDef.label, higherIsBetter: metricDef.higherIsBetter
+    };
+}
+
+// =========================================================================
+// BOOTSTRAP OPTIMISM CORRECTION (Harrell): Option C
+// =========================================================================
+// Indices of B bootstrap resamples (drawn with replacement), reproducible from the seed; the same
+// resamples are used for every model so that models are compared fairly
+function bootstrapResamples(n, B, seed) {
+    const rng = DataEngine.createPRNG(seed);
+    return Array.from({ length: B }, () => Array.from({ length: n }, () => Math.floor(rng() * n)));
+}
+
+/**
+ * Optimism of one model's whole modelling process. Inside every resample the process is repeated from
+ * the raw rows: imputation, encoding and scaling are refitted and, when `tune` is given, the settings
+ * are chosen again by cross-validation inside the resample (with folds that keep each resampled patient's
+ * copies together). The refitted model is scored on its resample and on the original patients; the
+ * average difference is the optimism.
+ *
+ * o: { rows, boots, maxResamples, configs, analysis, isClassification, modelId, hp, evalOptions, keys,
+ *      fitAndScoreMulti, tune: null | { k, seed, groupOf, metricKey, metricDefs, doTune, fitAndScore },
+ *      isAborted, onResample(b, Bm, startedAt), onInnerProgress(b, Bm, candidate, nCandidates, fold, nFolds) }
+ * Returns per-resample scores (for model-selection correction) and the mean optimism per measure.
+ */
+async function bootstrapOptimism(o) {
+    const { rows, boots, configs, analysis, isClassification, modelId, hp, evalOptions, keys, fitAndScoreMulti, tune = null, isAborted = null, onResample = null } = o;
+    const Bm = Math.min(boots.length, o.maxResamples || boots.length);
+    const targetCol = Object.keys(configs).find(c => configs[c].role === 'target');
+    const nClassesAll = isClassification ? new Set(rows.map(r => String(r[targetCol]).trim())).size : 0;
+    const idOf = new Map(rows.map((r, i) => [r, i]));
+    const perResample = []; // index b -> { onBoot, onOrig, innerScore, hp } (undefined when skipped)
+    const opt = {}; keys.forEach(k => { opt[k] = []; });
+    const oob = {}; keys.forEach(k => { oob[k] = []; });
+    const slopes = [], oobSlopes = [];
+    const t0 = Date.now();
+    for (let b = 0; b < Bm; b++) {
+        if (isAborted && isAborted()) throw new Error("Training aborted by user.");
+        const rowsB = boots[b].map(ix => rows[ix]);
+        if (isClassification && new Set(rowsB.map(r => String(r[targetCol]).trim())).size !== nClassesAll) continue; // an outcome class missing
+        const impB = DataEngine.imputeDataset(rowsB, configs, analysis);
+        const prepB = DataEngine.prepareFeaturesAndTarget(impB.imputedRows, configs);
+        if (!prepB.X.length) continue;
+        prepB.imputation = { configs, plan: impB.plan };
+        const numClasses = prepB.targetClasses.length || 2;
+        let hpB = hp, innerScore;
+        if (tune) {
+            // Repeat the tuning (or the cross-validation used to choose between models) inside this resample
+            const userGroup = tune.groupOf || null;
+            const groupOf = userGroup || (r => idOf.get(r));
+            const fd = await buildRowFolds(rowsB, tune.k, {
+                configs, analysis, isClassification, targetCol, seed: (tune.seed + 7919 * (b + 1)) >>> 0,
+                groupOf, stratifyGroups: !userGroup, decisionThreshold: evalOptions.decisionThreshold ?? null
+            });
+            const t = await runTuningCore(modelId, hp, fd, isClassification, numClasses, {
+                metricKey: tune.metricKey, metricDefs: tune.metricDefs, fitAndScore: tune.fitAndScore, isAborted, ownOnly: !tune.doTune,
+                progress: o.onInnerProgress ? (c, nc, f, nf) => o.onInnerProgress(b + 1, Bm, c, nc, f, nf) : null
+            });
+            hpB = t.bestHp;
+            innerScore = t.best.mean;
+        }
+        const origB = DataEngine.prepareTestingDataset(rows, prepB);
+        // Out-of-bag patients (not drawn into this resample), for the .632+ estimate
+        const inB = new Set(boots[b]);
+        const oobRows = rows.filter((_, i) => !inB.has(i));
+        const oobB = oobRows.length ? DataEngine.prepareTestingDataset(oobRows, prepB) : null;
+        const sets = [{ X: prepB.X, y: prepB.y, targetClasses: prepB.targetClasses }, { X: origB.X, y: origB.y, targetClasses: prepB.targetClasses }];
+        if (oobB && oobB.X.length) sets.push({ X: oobB.X, y: oobB.y, targetClasses: prepB.targetClasses });
+        const [onBoot, onOrig, onOob = null] = await fitAndScoreMulti(modelId, isClassification, numClasses, hpB, prepB.X, prepB.y, sets, evalOptions, { isAborted });
+        keys.forEach(k => {
+            if (typeof onBoot[k] === 'number' && typeof onOrig[k] === 'number') opt[k].push(onBoot[k] - onOrig[k]);
+            if (onOob && typeof onOob[k] === 'number' && isFinite(onOob[k])) oob[k].push(onOob[k]);
+        });
+        if (typeof onOrig.calibrationSlope === 'number' && isFinite(onOrig.calibrationSlope)) slopes.push(onOrig.calibrationSlope);
+        if (onOob && typeof onOob.calibrationSlope === 'number' && isFinite(onOob.calibrationSlope)) oobSlopes.push(onOob.calibrationSlope);
+        perResample[b] = { onBoot, onOrig, onOob, innerScore, hp: hpB };
+        if (onResample) onResample(b + 1, Bm, t0);
+        await ModelEngine.yieldToBrowser();
+    }
+    const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+    const optimism = {}, oobMean = {};
+    keys.forEach(k => { optimism[k] = mean(opt[k]); oobMean[k] = mean(oob[k]); });
+    return { B: opt[keys[0]].length, optimism, oobMean, calibrationSlope: mean(slopes), oobCalibrationSlope: mean(oobSlopes), perResample, tuned: Boolean(tune && tune.doTune), innerFolds: tune ? tune.k : null };
+}
+
+/**
+ * Optimism of choosing the best model (the winner's curse). In each resample the model that the same
+ * rule would have chosen (best inner cross-validated score) is identified, and its optimism in that
+ * resample is used. Needs inner scores for every model in a resample; resamples without them are skipped.
+ * runs: [{ modelId, perResample }]; returns { B, optimism, oobMean (out-of-bag score of the chosen model), chosenShare }.
+ */
+function selectionOptimism(runs, keys, higherIsBetter) {
+    const n = Math.max(0, ...runs.map(r => r.perResample.length));
+    const opt = {}; keys.forEach(k => { opt[k] = []; });
+    const oob = {}; keys.forEach(k => { oob[k] = []; });
+    const chosen = {};
+    for (let b = 0; b < n; b++) {
+        const cands = runs.map(r => ({ id: r.modelId, p: r.perResample[b] }));
+        if (cands.some(c => !c.p || typeof c.p.innerScore !== 'number' || !isFinite(c.p.innerScore))) continue;
+        let best = cands[0];
+        cands.forEach(c => { if (higherIsBetter ? c.p.innerScore > best.p.innerScore + 1e-12 : c.p.innerScore < best.p.innerScore - 1e-12) best = c; });
+        chosen[best.id] = (chosen[best.id] || 0) + 1;
+        keys.forEach(k => {
+            if (typeof best.p.onBoot[k] === 'number' && typeof best.p.onOrig[k] === 'number') opt[k].push(best.p.onBoot[k] - best.p.onOrig[k]);
+            if (best.p.onOob && typeof best.p.onOob[k] === 'number' && isFinite(best.p.onOob[k])) oob[k].push(best.p.onOob[k]);
+        });
+    }
+    const B = opt[keys[0]].length;
+    const avg = a => (a.length ? a.reduce((x, c) => x + c, 0) / a.length : null);
+    const optimism = {}, oobMean = {};
+    keys.forEach(k => { optimism[k] = avg(opt[k]); oobMean[k] = avg(oob[k]); });
+    const chosenShare = {};
+    Object.keys(chosen).forEach(id => { chosenShare[id] = chosen[id] / (B || 1); });
+    return { B, optimism, oobMean, chosenShare };
+}
+
+// =========================================================================
+// THE .632+ BOOTSTRAP (Efron & Tibshirani 1997)
+// =========================================================================
+// Harrell's correction scores each bootstrap model on the original patients, about 63% of whom it was
+// trained on. Models that can memorise their training patients (random forests, boosted trees, k-NN,
+// neural networks) then still look good, so the correction is too small. The .632+ estimate uses the
+// out-of-bag patients (never seen by that bootstrap model) and the "no-information" performance (what
+// a model unrelated to the outcome would score), and stays honest for such models.
+
+// Performance of a model whose predictions are unrelated to the outcome, from the apparent predictions
+function noInformationRates(ev, isClassification) {
+    const out = {};
+    if (!ev || !Array.isArray(ev.actuals) || !ev.actuals.length) return out;
+    const y = ev.actuals, n = y.length;
+    if (isClassification) {
+        const K = ev.numClasses || Math.max(...y, ...(ev.predictions || [])) + 1;
+        const p = new Array(K).fill(0), q = new Array(K).fill(0);
+        y.forEach(v => { if (v >= 0 && v < K) p[v] += 1 / n; });
+        (ev.predictions || []).forEach(v => { if (v >= 0 && v < K) q[v] += 1 / n; });
+        out.accuracy = p.reduce((a, pk, k) => a + pk * q[k], 0);
+        const present = p.map((pk, k) => k).filter(k => p[k] > 0);
+        out.balancedAccuracy = present.length ? present.reduce((a, k) => a + q[k], 0) / present.length : null;
+        out.macroF1 = p.reduce((a, pk, k) => a + (pk + q[k] > 0 ? 2 * pk * q[k] / (pk + q[k]) : 0), 0) / K;
+        if (K === 2) out.rocAuc = 0.5;
+        // Brier: every predicted probability vector paired with every observed outcome
+        const probs = ev.probPositive ? ev.probPositive.map(v => [1 - v, v]) : ev.probMatrix;
+        if (probs && probs.length === n) {
+            let g = 0;
+            for (let c = 0; c < K; c++) {
+                const pc = probs.reduce((a, v) => a + (v[c] || 0), 0) / n;
+                const pc2 = probs.reduce((a, v) => a + (v[c] || 0) ** 2, 0) / n;
+                g += pc2 - 2 * p[c] * pc + p[c];
+            }
+            out.brierScore = K === 2 ? g / 2 : g; // binary Brier uses the positive class only
+        }
+    } else {
+        const yhat = ev.predictions || [];
+        if (yhat.length === n) {
+            const my = y.reduce((a, v) => a + v, 0) / n, mh = yhat.reduce((a, v) => a + v, 0) / n;
+            const vy = y.reduce((a, v) => a + (v - my) ** 2, 0) / n, vh = yhat.reduce((a, v) => a + (v - mh) ** 2, 0) / n;
+            const mse = vy + vh + (my - mh) ** 2;
+            out.rmse = Math.sqrt(mse);
+            out.r2 = vy > 0 ? 1 - mse / vy : null;
+            let s = 0;
+            const ys = y.slice().sort((a, b) => a - b), hs = yhat.slice().sort((a, b) => a - b);
+            // mean |y_i − ŷ_j| over all pairs, in O(n log n) with sorted merges
+            let j = 0, below = 0;
+            const total = hs.reduce((a, v) => a + v, 0);
+            for (const v of ys) {
+                while (j < n && hs[j] <= v) { below += hs[j]; j++; }
+                s += v * j - below + (total - below) - v * (n - j);
+            }
+            out.mae = s / (n * n);
+        }
+    }
+    return out;
+}
+
+// Loss scale for each measure (higher = worse), so that the .632+ weights apply to every measure
+const LOSS = {
+    accuracy: { to: v => 1 - v, from: l => 1 - l }, balancedAccuracy: { to: v => 1 - v, from: l => 1 - l },
+    macroF1: { to: v => 1 - v, from: l => 1 - l }, rocAuc: { to: v => 1 - v, from: l => 1 - l },
+    brierScore: { to: v => v, from: l => l }, mae: { to: v => v, from: l => l },
+    rmse: { to: v => v * v, from: l => Math.sqrt(Math.max(0, l)) }, r2: { to: v => 1 - v, from: l => 1 - l }
+};
+
+// The .632+ estimate for one measure from the apparent, mean out-of-bag and no-information values
+function plus632(key, apparent, oobValue, noInfo) {
+    const T = LOSS[key];
+    if (!T || ![apparent, oobValue, noInfo].every(v => typeof v === 'number' && isFinite(v))) return null;
+    const app = T.to(apparent), gamma = T.to(noInfo);
+    const err1 = Math.min(T.to(oobValue), Math.max(gamma, app)); // out-of-bag loss, capped at no-information
+    const R = err1 > app && gamma > app ? Math.min(1, (err1 - app) / (gamma - app)) : 0; // relative overfitting
+    const w = 0.632 / (1 - 0.368 * R);
+    return { value: T.from(app + w * (err1 - app)), weight: w, overfit: R };
 }
 
 // ---- src/shell.js ----
@@ -2604,6 +2981,7 @@ function getHyperparamsForModel(modelId, prep) {
 // ---- src/panels.js ----
 // panels.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 
+
 // =========================================================================
 // CALIBRATION & DECISION-THRESHOLD PANEL (binary outcomes, Testing set)
 // =========================================================================
@@ -2793,8 +3171,8 @@ function renderCalibrationPanel(containerId, items, isClassification) {
     if (!box) return;
     const all = (items || []).filter(it => it.ev);
     if (!all.length) { box.innerHTML = ''; return; }
-    const select = (handler) => `<label class="autotune-folds-label">Model:
-                    <select class="control-select" style="width: auto; display: inline-block;" onchange="${handler}">
+    const select = () => `<label class="autotune-folds-label">Model:
+                    <select class="control-select" style="width: auto; display: inline-block;" aria-label="Model to show" data-event="change" ${actionAttrs('renderCalibrationChoice', containerId)}>
                         ${all.map((it, i) => `<option${i === 0 ? ' selected' : ''}>${escapeHtml(it.name)}</option>`).join('')}
                     </select></label>`;
     if (!isClassification) {
@@ -2802,7 +3180,7 @@ function renderCalibrationPanel(containerId, items, isClassification) {
         calibrationItems[containerId] = { items: all, regression: true, target };
         box.innerHTML = `
             <div class="cal-panel">
-                <div class="cal-head"><div class="tune-title">📈 Prediction errors (Testing set)</div>${select(`window.renderCalibrationChoice('${containerId}', this.selectedIndex)`)}</div>
+                <div class="cal-head"><div class="tune-title">📈 Prediction errors (Testing set)</div>${select()}</div>
                 <div id="${containerId}-body">${residualSection(all[0].ev, target)}</div>
             </div>`;
         return;
@@ -2817,7 +3195,7 @@ function renderCalibrationPanel(containerId, items, isClassification) {
             ${discriminationSection(usable, positiveLabel)}
             <div class="cal-head" style="margin-top: 14px;">
                 <div class="cmp-guide-title" style="font-size: 13px;">Calibration, thresholds and decision curve for one model</div>
-                ${select(`window.renderCalibrationChoice('${containerId}', this.selectedIndex)`).replace('<option', '<option')}
+                ${select()}
             </div>
             <p class="tune-muted">Calibration asks whether the predicted percentages can be taken at face value: if the model says "30% chance", do about 30 in 100 such patients have the outcome? A model can rank patients well (good AUC) and still give percentages that are too high or too low.</p>
             <div id="${containerId}-body">${calibrationBody(usable[0], positiveLabel)}</div>
@@ -2877,23 +3255,74 @@ function explainPatient(model, x, prep) {
     return { f0, classIdx, binary, rows: rows.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)) };
 }
 
+// Shapley-value explanation against a background of up to 100 training patients: exact for tree models
+// (interventional TreeSHAP), estimated from random orderings of the predictors for other models.
+// Returns null when no training data are available (e.g. a model loaded from a file).
+function shapleyExplanation(model, x, prep, classIdx) {
+    if (!Array.isArray(prep.X) || prep.X.length < 5 || !prep.featureCols) return null;
+    const rng = DataEngine.createPRNG(20240611);
+    const idx = prep.X.map((_, i) => i);
+    for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
+    const background = idx.slice(0, 100).map(i => prep.X[i]);
+    const groups = [];
+    prep.featureCols.forEach((col, g) => { const m = prep.featureMetadata[col]; for (let j = 0; j < m.length; j++) groups[m.startIndex + j] = g; });
+    const P = prep.featureCols.length;
+    const calibrated = Boolean(model && model.calibrator);
+    let r = calibrated ? null : ModelEngine.treeShap(model, x, background, groups, P, classIdx);
+    if (r && r.scale === 'log-odds' && !r.multiclass) {
+        // Boosted trees: exact on the log-odds scale; shown in percentage points by sharing out the change in probability
+        const sig = v => 1 / (1 + Math.exp(-v));
+        const total = r.phi.reduce((a, b) => a + b, 0);
+        const dp = sig(r.value) - sig(r.base);
+        const f = Math.abs(total) > 1e-12 ? dp / total : 0;
+        r = { ...r, phi: r.phi.map(v => v * f), base: sig(r.base), value: sig(r.value), scale: 'probability', converted: true };
+    }
+    if (!r) {
+        const slow = model && (model.constructor && /Neural|Ensemble/i.test(model.constructor.name));
+        const outputs = rows => (typeof model.predictOutputs === 'function' ? model.predictOutputs(rows) : rows.map(z => model.predictSingle(z)));
+        const value = o => (!prep.isClassification ? Number(o.pred) : o.probabilities ? Number(o.probabilities[classIdx]) || 0 : (o.pred === classIdx ? 1 : 0));
+        r = ModelEngine.sampledShapley(rows => outputs(rows).map(value), x, background, groups, P, slow ? 64 : 200, 7);
+        r.scale = prep.isClassification ? 'probability' : 'outcome';
+    }
+    return { ...r, background: background.length, rows: prep.featureCols.map((col, g) => ({ col, meta: prep.featureMetadata[col], delta: r.phi[g] })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)) };
+}
+
 function renderPatientExplanation(model, x, prep, inputRow) {
     try {
         const ex = explainPatient(model, x, prep);
-        const minEffect = prep.isClassification ? 0.0005 : Math.max(1e-6, Math.abs(ex.f0) * 1e-3);
-        const top = ex.rows.filter(r => Math.abs(r.delta) >= minEffect).slice(0, 6);
-        if (!top.length) return '<div class="explain-box"><strong>🔍 Why this prediction?</strong> No single predictor changes the prediction when set to a typical value.</div>';
         const cls = prep.isClassification ? String((prep.targetIdxToClass || {})[ex.classIdx] ?? ex.classIdx) : null;
-        const unit = prep.isClassification ? 'percentage points' : 'units';
-        const fmt = d => (prep.isClassification ? (Math.abs(d) * 100).toFixed(1) : Math.abs(d).toFixed(2));
-        const items = top.map(r => {
-            const val = inputRow && inputRow[r.col] !== undefined && String(inputRow[r.col]).trim() !== '' ? String(inputRow[r.col]) : '(blank)';
-            return `<li><span class="${r.delta > 0 ? 'ex-up' : 'ex-down'}">${r.delta > 0 ? '▲' : '▼'}</span> <strong>${escapeHtml(r.col)} = ${escapeHtml(val)}</strong> ${r.delta > 0 ? 'raises' : 'lowers'} the ${prep.isClassification ? `probability of "${escapeHtml(cls)}"` : 'predicted value'} by <strong>${fmt(r.delta)} ${unit}</strong> compared with a typical value (${escapeHtml(typicalValueText(r.meta))}).</li>`;
-        }).join('');
+        const logOdds = sh => sh && sh.scale === 'log-odds';
+        const unitOf = sh => (logOdds(sh) ? 'log-odds units' : prep.isClassification ? 'percentage points' : 'units');
+        const fmtOf = sh => d => (logOdds(sh) ? Math.abs(d).toFixed(2) : prep.isClassification ? (Math.abs(d) * 100).toFixed(1) : Math.abs(d).toFixed(2));
+        const valueOf = r => (inputRow && inputRow[r.col] !== undefined && String(inputRow[r.col]).trim() !== '' ? String(inputRow[r.col]) : '(blank)');
+        const what = prep.isClassification ? `probability of "${escapeHtml(cls)}"` : 'predicted value';
+        // Quick view: each predictor changed on its own to a typical value
+        const minEffect = prep.isClassification ? 0.0005 : Math.max(1e-6, Math.abs(ex.f0) * 1e-3);
+        const quick = ex.rows.filter(r => Math.abs(r.delta) >= minEffect).slice(0, 6);
+        const fq = fmtOf(null);
+        const quickHtml = quick.length
+            ? `<ul>${quick.map(r => `<li><span class="${r.delta > 0 ? 'ex-up' : 'ex-down'}">${r.delta > 0 ? '▲' : '▼'}</span> <strong>${escapeHtml(r.col)} = ${escapeHtml(valueOf(r))}</strong> ${r.delta > 0 ? 'raises' : 'lowers'} the ${what} by <strong>${fq(r.delta)} ${unitOf(null)}</strong> compared with a typical value (${escapeHtml(typicalValueText(r.meta))}).</li>`).join('')}</ul>`
+            : '<p class="tune-muted">No single predictor changes the prediction when set to a typical value on its own.</p>';
+        const quickNote = '<div class="tune-muted">Each predictor is changed on its own to a typical training value (average, most common category or middle rank) while the others are kept as entered; interactions between predictors are not captured.</div>';
+        let sh = null;
+        try { sh = shapleyExplanation(model, x, prep, ex.classIdx); } catch (e) { sh = null; }
+        if (!sh) {
+            return `<div class="explain-box"><strong>🔍 Why this prediction?</strong> The predictors that moved this patient's result most (quick view):${quickHtml}${quickNote}
+                <div class="tune-muted">Shapley values need the training data, which are not available for a model loaded from a file. The explanation describes how the model behaves, not what causes the outcome.</div></div>`;
+        }
+        const fs = fmtOf(sh);
+        const minSh = logOdds(sh) ? 0.005 : prep.isClassification ? 0.0005 : Math.max(1e-6, Math.abs(sh.value) * 1e-3);
+        const top = sh.rows.filter(r => Math.abs(r.delta) >= minSh).slice(0, 6);
+        const level = v => (logOdds(sh) ? `${v.toFixed(2)} (log-odds)` : prep.isClassification ? `${(v * 100).toFixed(1)}%` : v.toFixed(2));
+        const items = top.length ? `<ul>${top.map(r => `<li><span class="${r.delta > 0 ? 'ex-up' : 'ex-down'}">${r.delta > 0 ? '▲' : '▼'}</span> <strong>${escapeHtml(r.col)} = ${escapeHtml(valueOf(r))}</strong> ${r.delta > 0 ? 'raises' : 'lowers'} it by <strong>${fs(r.delta)} ${unitOf(sh)}</strong></li>`).join('')}</ul>` : '<p class="tune-muted">No predictor moves this prediction noticeably away from the average.</p>';
+        const method = sh.exact
+            ? `Exact Shapley values for the trees (interventional TreeSHAP)${sh.converted ? ', calculated on the model\'s log-odds scale and shown in percentage points' : ''}`
+            : `Shapley values estimated from ${sh.orderings} random orderings of the predictors (small random error)`;
         return `<div class="explain-box">
-            <strong>🔍 Why this prediction?</strong> The predictors that moved this patient's result most:
-            <ul>${items}</ul>
-            <div class="tune-muted">Approximate explanation: each predictor is changed on its own to a typical training value (average, most common category or middle rank) while the others are kept as entered; interactions between predictors are not captured. It describes how the model behaves, not what causes the outcome.</div>
+            <strong>🔍 Why this prediction?</strong> Starting from the average ${what} for ${sh.background} training patients (<strong>${level(sh.base)}</strong>), these predictors moved this patient to <strong>${level(sh.value)}</strong>:
+            ${items}
+            <div class="tune-muted">${method}. The contributions of all predictors add up to the difference between this patient and the average, and interactions are shared fairly between the predictors involved. Each predictor's effect is judged by replacing it with values from real training patients, which can create unlikely combinations when predictors are strongly correlated. It describes how the model behaves, not what causes the outcome.</div>
+            <details class="explain-quick"><summary>Quick view: one predictor at a time</summary>${quickHtml}${quickNote}</details>
         </div>`;
     } catch (e) {
         return '';
@@ -2956,7 +3385,7 @@ function renderOddsRatioPanel(containerId, prep) {
             const nMissing = raw.filter(r => prep.featureCols.some(c => DataEngine.isMissing(r[c]))).length;
             body = `<table class="data-table thr-table"><thead><tr><th>Predictor</th><th>Odds ratio (95% CI)</th><th>Scale</th><th>p-value</th></tr></thead><tbody>${oddsRatioRows(cols, est, false)}</tbody></table>
                 <p class="tune-muted">Odds ratios for "${escapeHtml(posLabel)}" from an <strong>unpenalised logistic regression fitted to convergence</strong> on the ${fit.n} training patients (${fit.events} with the outcome), each adjusted for all the other predictors. An odds ratio above 1 means higher odds of "${escapeHtml(posLabel)}"; a confidence interval that includes 1 is compatible with no association. Categorical predictors are compared with their most common category. This table explains associations in the training data; it is separate from the ridge-penalised model used for prediction and does not show causation.${epv < 10 ? ` <strong>Caution:</strong> only ${epv.toFixed(1)} patients in the smaller outcome group per predictor, so these estimates are unstable.` : ''}</p>
-                ${nMissing > 0 ? `<div class="explain-box"><strong>Missing data:</strong> ${nMissing} of ${raw.length} training patients had at least one missing predictor value, filled once (single imputation), which makes the confidence intervals too narrow. <button type="button" class="btn btn-outline btn-sm" id="${containerId}-mice-btn" onclick="window.runMiceOddsRatios('${containerId}')">Re-estimate with multiple imputation (MICE)</button><div id="${containerId}-mice"></div></div>` : ''}`;
+                ${nMissing > 0 ? `<div class="explain-box"><strong>Missing data:</strong> ${nMissing} of ${raw.length} training patients had at least one missing predictor value, filled once (single imputation), which makes the confidence intervals too narrow. <button type="button" class="btn btn-outline btn-sm" id="${containerId}-mice-btn" ${actionAttrs('runMiceOddsRatios', containerId)}>Re-estimate with multiple imputation (MICE)</button><div id="${containerId}-mice"></div></div>` : ''}`;
         }
     }
     box.innerHTML = `<div class="cal-panel"><div class="tune-title">📋 Odds ratios (logistic regression, training data)</div>${body}</div>`;
@@ -3070,7 +3499,7 @@ function renderExplainPanel(containerId, items, rows, isClassification) {
                 <div class="tune-title">🔍 Which predictors matter? (permutation importance, Testing set)</div>
                 <span>
                     <select id="${containerId}-select" class="control-select" aria-label="Model for permutation importance" style="width: auto; display: inline-block;">${usable.map((it, i) => `<option${i === 0 ? ' selected' : ''}>${escapeHtml(it.name)}</option>`).join('')}</select>
-                    <button type="button" id="${containerId}-btn" class="btn btn-outline btn-sm" onclick="window.runPermutationImportance('${containerId}')">Compute</button>
+                    <button type="button" id="${containerId}-btn" class="btn btn-outline btn-sm" ${actionAttrs('runPermutationImportance', containerId)}>Compute</button>
                 </span>
             </div>
             <p class="tune-muted">Model-agnostic importance: each predictor's values are shuffled between test patients, breaking its link with the outcome, and the drop in performance is measured. A large drop means the model relies on that predictor; around zero means it does not; a negative value means shuffling did not hurt (noise). Predictors that carry the same information share their importance. This shows what the model uses, not what causes the outcome.</p>
@@ -3132,24 +3561,231 @@ function renderOptimismPanel(containerId, results) {
     const labels = { accuracy: 'Accuracy', balancedAccuracy: 'Balanced accuracy', macroF1: 'Macro F1', rocAuc: 'ROC-AUC', brierScore: 'Brier ↓', r2: 'R²', rmse: 'RMSE ↓', mae: 'MAE ↓' };
     const pctKeys = new Set(['accuracy', 'balancedAccuracy', 'macroF1']);
     const fmt = (k, v) => (typeof v !== 'number' ? '—' : pctKeys.has(k) ? `${(v * 100).toFixed(1)}%` : v.toFixed(3));
+    const fmtOpt = (k, v) => (typeof v !== 'number' ? '—' : pctKeys.has(k) ? `${(v * 100).toFixed(1)} pts` : v.toFixed(3));
+    const nameOf = r => (r.info && r.info.name) || r.modelId;
+    const tuningNote = oc => {
+        if (oc.tuning === 'repeated') {
+            const share = typeof oc.sameSettingsShare === 'number' ? ` The resamples chose the same settings as the full data in ${Math.round(oc.sameSettingsShare * 100)}% of cases${oc.sameSettingsShare < 0.5 ? ', so the tuned settings are not very stable' : ''}.` : '';
+            return `<p class="tune-muted">✓ The automatic tuning was repeated inside every resample (${oc.innerFolds}-fold cross-validation), so the corrected figures include the optimism that tuning adds.${share}</p>`;
+        }
+        if (oc.tuning === 'once') return `<p class="tune-muted">⚠️ The settings were tuned once on all patients and not again inside each resample (too slow for this model), so the corrected figures leave out the optimism that tuning adds and are somewhat too high.</p>`;
+        return '';
+    };
     const blocks = items.map(r => {
         const oc = r.evalRes.optimismCorrection;
         const keys = Object.keys(oc.apparent);
-        const name = (r.info && r.info.name) || r.modelId;
-        return `<div class="tune-model"><div class="tune-model-head"><strong>${escapeHtml(name)}</strong><span class="tune-sd">${oc.B} resamples</span></div>
-            <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (trained and scored on all patients)</th><th>Average optimism</th><th>Optimism-corrected</th></tr></thead>
-            <tbody>${keys.map(k => `<tr><td>${labels[k] || k}</td><td>${fmt(k, oc.apparent[k])}</td><td>${typeof oc.optimism[k] === 'number' ? (pctKeys.has(k) ? `${(oc.optimism[k] * 100).toFixed(1)} pts` : oc.optimism[k].toFixed(3)) : '—'}</td><td><strong>${fmt(k, oc.corrected[k])}</strong></td></tr>`).join('')}
-            ${oc.calibrationSlope !== null && oc.calibrationSlope !== undefined ? `<tr><td>Calibration slope (ideal 1)</td><td>1.000 (by construction)</td><td>—</td><td><strong>${oc.calibrationSlope.toFixed(3)}</strong></td></tr>` : ''}</tbody></table></div>`;
+        const appSlope = typeof oc.apparentSlope === 'number' ? oc.apparentSlope.toFixed(3) : '—';
+        const h = oc.harrell || oc.corrected, e = oc.est632 || {};
+        const is632 = oc.method === '632plus';
+        const b = (on, v) => (on ? `<strong>${v}</strong>` : v);
+        return `<div class="tune-model"><div class="tune-model-head"><strong>${escapeHtml(nameOf(r))}</strong><span class="tune-sd">${oc.B} resamples</span></div>
+            ${tuningNote(oc)}
+            <p class="tune-muted">${is632
+                ? 'Reported: the <strong>.632+</strong> estimate. This model can memorise its training patients, so Harrell\'s correction (scored partly on patients the bootstrap model was trained on) would be too small.'
+                : 'Reported: <strong>Harrell\'s</strong> optimism-corrected estimate, the standard for regression-type models; the .632+ estimate is shown for comparison.'}</p>
+            <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (trained and scored on all patients)</th><th>Average optimism</th><th>Harrell corrected</th><th>.632+ estimate</th></tr></thead>
+            <tbody>${keys.map(k => `<tr><td>${labels[k] || k}</td><td>${fmt(k, oc.apparent[k])}</td><td>${fmtOpt(k, oc.optimism[k])}</td><td>${b(!is632, fmt(k, h[k]))}</td><td>${b(is632, fmt(k, e[k]))}</td></tr>`).join('')}
+            ${oc.calibrationSlope !== null && oc.calibrationSlope !== undefined ? `<tr><td>Calibration slope (ideal 1)</td><td>${appSlope}</td><td>—</td><td colspan="2"><strong>${oc.calibrationSlope.toFixed(3)}</strong> <span class="tune-muted">(${is632 ? 'bootstrap models on their out-of-bag patients' : 'bootstrap models on the original patients'})</span></td></tr>` : ''}</tbody></table></div>`;
     }).join('');
+    // Choosing the best model: the winner's curse
+    const sel = items[0].evalRes.optimismCorrection.selection;
+    let selBlock = '';
+    if (sel && sel.repeated && sel.B > 0) {
+        const top = items[0];
+        const oc = top.evalRes.optimismCorrection;
+        const keys = Object.keys(oc.apparent);
+        const share = Object.keys(sel.chosenShare || {}).sort((a, b) => sel.chosenShare[b] - sel.chosenShare[a])
+            .map(id => { const m = items.find(x => x.modelId === id); return `${escapeHtml(m ? nameOf(m) : id)} ${Math.round(sel.chosenShare[id] * 100)}%`; }).join(', ');
+        selBlock = `<div class="tune-model"><div class="tune-model-head"><strong>Choosing the best of ${sel.nModels} models</strong><span class="tune-sd">${sel.B} resamples</span></div>
+            <p class="tune-muted">Picking the model with the best cross-validated score makes the winner look a little better than it is (the winner's curse). Inside each resample the same choice was made again, and the performance of whichever model won there was recorded. Applying this to the apparent performance of the top-ranked model (${escapeHtml(nameOf(top))}) gives an estimate for the whole choose-then-fit process. Models chosen across the resamples: ${share}.</p>
+            <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (${escapeHtml(nameOf(top))})</th><th>${oc.method === '632plus' ? 'Chosen models on out-of-bag patients' : 'Optimism of choosing and fitting'}</th><th>Corrected for the choice (${oc.method === '632plus' ? '.632+' : 'Harrell'})</th></tr></thead>
+            <tbody>${keys.map(k => {
+                const o = sel.optimism[k];
+                let v = typeof oc.apparent[k] === 'number' && typeof o === 'number' ? oc.apparent[k] - o : null;
+                if (oc.method === '632plus') { const e = plus632(k, oc.apparent[k], sel.oobMean && sel.oobMean[k], oc.noInfo && oc.noInfo[k]); v = e ? e.value : null; }
+                return `<tr><td>${labels[k] || k}</td><td>${fmt(k, oc.apparent[k])}</td><td>${oc.method === '632plus' ? `out-of-bag ${fmt(k, sel.oobMean && sel.oobMean[k])}` : fmtOpt(k, o)}</td><td><strong>${fmt(k, v)}</strong></td></tr>`;
+            }).join('')}</tbody></table></div>`;
+    } else if (sel && !sel.repeated) {
+        selBlock = `<p class="tune-muted">⚠️ ${sel.nModels} models were compared. Choosing the best one adds a small optimistic bias (the winner's curse) that is not corrected here${sel.reason === 'slow' ? ', because the neural network and the ensemble are too slow to cross-validate inside every resample' : ', because the choice is not made by cross-validation (choose "Cross-validation" for model selection to correct it)'}. Treat small differences between models as ties.</p>`;
+    }
+    const anyRepeated = items.some(r => r.evalRes.optimismCorrection.tuning === 'repeated');
     box.innerHTML = `<div class="cal-panel">
         <div class="tune-title">🔁 Bootstrap internal validation (Option C)</div>
-        <p class="tune-muted"><strong>Apparent</strong> performance is measured on the same patients the model learned from, so it is too optimistic. Each bootstrap resample repeats the whole modelling process on patients drawn with replacement; the model is scored on its resample and on the original patients, and the average difference is the <strong>optimism</strong>. Subtracting it gives the <strong>optimism-corrected</strong> estimate of how the model would perform on new patients from the same population. The corrected calibration slope estimates how much the predictions should be shrunk (values below 1 mean overfitting).</p>
+        <p class="tune-muted"><strong>Apparent</strong> performance is measured on the same patients the model learned from, so it is too optimistic. Each bootstrap resample draws patients with replacement and repeats the modelling steps on them: imputation, encoding and scaling are refitted${anyRepeated ? ', and the automatic tuning is run again' : ''}. The refitted model is scored on its resample and on the original patients, and the average difference is the <strong>optimism</strong>. Subtracting it gives the <strong>optimism-corrected</strong> estimate of how the model would perform on new patients from the same population. Models that can memorise their training patients (Random Forest, boosted trees, k-NN, neural networks) are instead reported with the <strong>.632+</strong> estimate, which scores each bootstrap model only on the patients it did not see (Efron &amp; Tibshirani, 1997); Harrell's correction is too small for them. Choices you made by hand (which predictors to include, how to encode them) are not repeated. The corrected calibration slope estimates how much the predictions should be shrunk (values below 1 mean overfitting).</p>
         ${blocks}
+        ${selBlock}
     </div>`;
+}
+
+// ---- src/subgroups.js ----
+// subgroups.js: performance of a trained model within subgroups of the Testing set (e.g. by sex, age band
+// or site), as TRIPOD+AI asks for an assessment of fairness: discrimination, calibration-in-the-large and
+// error rates at the decision threshold, group by group.
+/* global DataEngine, ModelEngine */
+
+const subgroupState = {};
+const SUBGROUP_MAX_LEVELS = 8;           // larger categorical columns: the 7 commonest categories and "Other"
+const SUBGROUP_MIN_N = 30;           // smaller groups are shown but flagged as too small to judge
+const SUBGROUP_MIN_EVENTS = 10;
+
+// Columns worth offering, most likely fairness variables first
+function subgroupColumns(rows, targetCol) {
+    const cols = Object.keys(rows[0] || {}).filter(c => c !== targetCol && !/ \(was missing\)$/.test(c));
+    const levels = c => new Set(rows.map(r => String(r[c] ?? '').trim()).filter(v => v !== '')).size;
+    const usable = cols.filter(c => levels(c) >= 2 && !(levels(c) === rows.length && !isNumericSubgroupColumn(rows, c))); // not a patient ID
+    const score = c => (/\b(sex|gender)\b/i.test(c) ? 0 : /age/i.test(c) ? 1 : /(site|centre|center|hospital|ethnic|race|region|country)/i.test(c) ? 2 : 3);
+    return usable.sort((a, b) => score(a) - score(b));
+}
+
+function isNumericSubgroupColumn(rows, c) {
+    const vals = rows.map(r => String(r[c] ?? '').trim()).filter(v => v !== '');
+    return vals.length > 0 && vals.every(v => !isNaN(Number(v))) && new Set(vals).size > 6;
+}
+
+// Group label for every row: categories as they are, numbers in thirds of the Testing set (tertiles)
+function groupLabels(rows, col) {
+    if (isNumericSubgroupColumn(rows, col)) {
+        const nums = rows.map(r => Number(String(r[col] ?? '').trim())).map(v => (String(v) === '' || isNaN(v) ? null : v));
+        const sorted = nums.filter(v => v !== null).sort((a, b) => a - b);
+        const q = p => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+        const c1 = q(1 / 3), c2 = q(2 / 3);
+        const f = v => (Math.abs(v) >= 100 ? v.toFixed(0) : Number(v.toPrecision(3)).toString());
+        return nums.map(v => (v === null ? '(missing)' : v <= c1 ? `≤ ${f(c1)}` : v <= c2 ? `${f(c1)} to ${f(c2)}` : `> ${f(c2)}`));
+    }
+    const raw = rows.map(r => { const v = String(r[col] ?? '').trim(); return v === '' ? '(missing)' : v; });
+    const counts = {};
+    raw.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+    const keep = new Set(Object.keys(counts).sort((a, b) => counts[b] - counts[a]).slice(0, SUBGROUP_MAX_LEVELS - 1));
+    return Object.keys(counts).length > SUBGROUP_MAX_LEVELS ? raw.map(v => (keep.has(v) ? v : 'Other')) : raw;
+}
+
+function subgroupAuc(y, p) {
+    if (!y.some(v => v === 1) || !y.some(v => v === 0)) return null;
+    try { return ModelEngine._calculateBinaryAUC(y, p); } catch (e) { return null; }
+}
+
+// Metrics for one set of patients
+function groupMetrics(y, out, isClassification, binary, threshold) {
+    const n = y.length;
+    if (!isClassification) {
+        const pred = out.map(o => Number(o.pred));
+        const my = y.reduce((a, v) => a + v, 0) / n;
+        const sse = y.reduce((a, v, i) => a + (v - pred[i]) ** 2, 0);
+        const sst = y.reduce((a, v) => a + (v - my) ** 2, 0);
+        return { n, meanObs: my, meanPred: pred.reduce((a, v) => a + v, 0) / n, rmse: Math.sqrt(sse / n), r2: sst > 0 ? 1 - sse / sst : null };
+    }
+    if (!binary) {
+        const correct = out.filter((o, i) => o.pred === y[i]).length;
+        return { n, accuracy: correct / n };
+    }
+    const p = out.map(o => (o.probabilities ? Number(o.probabilities[1]) || 0 : (o.pred === 1 ? 1 : 0)));
+    const yb = y.map(v => (v === 1 ? 1 : 0));
+    const events = yb.reduce((a, v) => a + v, 0);
+    let tp = 0, fp = 0, tn = 0, fn = 0;
+    p.forEach((v, i) => { const pos = v >= threshold; if (pos && yb[i]) tp++; else if (pos) fp++; else if (yb[i]) fn++; else tn++; });
+    const meanPred = p.reduce((a, v) => a + v, 0) / n;
+    return {
+        n, events, observed: events / n, meanPred, oe: meanPred > 0 ? (events / n) / meanPred : null,
+        auc: subgroupAuc(yb, p), brier: p.reduce((a, v, i) => a + (v - yb[i]) ** 2, 0) / n,
+        sens: tp + fn ? tp / (tp + fn) : null, spec: tn + fp ? tn / (tn + fp) : null,
+        netBenefit: tp / n - (fp / n) * (threshold / (1 - threshold))
+    };
+}
+
+/**
+ * items: [{ name, model, prep, threshold }]; rows: the Testing-set rows the models were scored on
+ * (any preprocessing state the prep accepts); labelRows: the same patients' original values for grouping
+ * (defaults to rows).
+ */
+function renderSubgroupPanel(containerId, items, rows, isClassification, labelRows = null) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    const usable = (items || []).filter(it => it.model && it.prep && typeof it.model.predictSingle === 'function');
+    if (!usable.length || !rows || !rows.length) { box.innerHTML = ''; return; }
+    if (rows.length < 20) {
+        box.innerHTML = `<div class="cal-panel"><div class="tune-title">⚖️ Does the model work equally well in subgroups?</div><p class="tune-muted">Only ${rows.length} Testing patients: too few to compare subgroups. Use a larger cohort or an external validation cohort (Option B).</p></div>`;
+        return;
+    }
+    const targetCol = usable[0].prep.targetCol;
+    const cols = subgroupColumns(labelRows && labelRows.length === rows.length ? labelRows : rows, targetCol);
+    if (!cols.length) { box.innerHTML = ''; return; }
+    subgroupState[containerId] = { items: usable, rows, labelRows: labelRows && labelRows.length === rows.length ? labelRows : rows, isClassification };
+    box.innerHTML = `
+        <div class="cal-panel">
+            <div class="cal-head">
+                <div class="tune-title">⚖️ Does the model work equally well in subgroups? (Testing set)</div>
+                <span>
+                    <select id="${containerId}-model" class="control-select" aria-label="Model for the subgroup analysis" style="width: auto; display: inline-block;">${usable.map((it, i) => `<option value="${i}"${i === 0 ? ' selected' : ''}>${escapeHtml(it.name)}</option>`).join('')}</select>
+                    <select id="${containerId}-col" class="control-select" aria-label="Column that defines the subgroups" style="width: auto; display: inline-block;">${cols.map((c, i) => `<option value="${escapeHtml(c)}"${i === 0 ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('')}</select>
+                    <button type="button" id="${containerId}-btn" class="btn btn-outline btn-sm">Compare subgroups</button>
+                </span>
+            </div>
+            <p class="tune-muted">A model can perform well overall and still serve some patients badly. Choose a column (for example sex, age or site; numbers are split into thirds) to see discrimination, calibration and errors in each group. The column does not need to be a predictor.</p>
+            <div id="${containerId}-out"></div>
+        </div>`;
+    document.getElementById(`${containerId}-btn`).addEventListener('click', () => runSubgroupAnalysis(containerId));
+}
+
+function runSubgroupAnalysis(containerId) {
+    const st = subgroupState[containerId];
+    const out = document.getElementById(`${containerId}-out`);
+    if (!st || !out) return;
+    try {
+        const it = st.items[Number(document.getElementById(`${containerId}-model`).value) || 0];
+        const col = document.getElementById(`${containerId}-col`).value;
+        const binary = st.isClassification && (it.prep.targetClasses || []).length === 2;
+        const threshold = typeof it.threshold === 'number' && it.threshold > 0 && it.threshold < 1 ? it.threshold : 0.5;
+        const test = DataEngine.prepareTestingDataset(st.rows, it.prep);
+        const pos = new Map(st.rows.map((r, i) => [r, i]));
+        const kept = (test.validRows || []).map(r => pos.get(r));
+        if (!test.X.length || kept.some(i => i === undefined)) { out.innerHTML = '<p class="tune-muted">The Testing set could not be matched to the model.</p>'; return; }
+        const labels = groupLabels(kept.map(i => st.labelRows[i]), col);
+        const outputs = typeof it.model.predictOutputs === 'function' ? it.model.predictOutputs(test.X) : test.X.map(x => it.model.predictSingle(x));
+        const groups = {};
+        labels.forEach((g, i) => { (groups[g] = groups[g] || []).push(i); });
+        // Thirds in order (lowest first); categories by size; missing values last
+        const numeric = isNumericSubgroupColumn(kept.map(i => st.labelRows[i]), col);
+        const rank = g => (g === '(missing)' ? 3 : !numeric ? 1 : g.startsWith('≤') ? 0 : g.startsWith('>') ? 2 : 1);
+        const order = Object.keys(groups).sort((a, b) => rank(a) - rank(b) || groups[b].length - groups[a].length);
+        const all = groupMetrics(test.y, outputs, st.isClassification, binary, threshold);
+        const res = order.map(g => ({ g, m: groupMetrics(groups[g].map(i => test.y[i]), groups[g].map(i => outputs[i]), st.isClassification, binary, threshold) }));
+        const pct = v => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—');
+        const num = (v, d = 3) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : '—');
+        const small = m => m.n < SUBGROUP_MIN_N || (binary && (m.events < SUBGROUP_MIN_EVENTS || m.n - m.events < SUBGROUP_MIN_EVENTS));
+        const flag = m => {
+            if (small(m) || !binary) return false;
+            return (typeof m.auc === 'number' && typeof all.auc === 'number' && Math.abs(m.auc - all.auc) > 0.1) || (typeof m.oe === 'number' && (m.oe < 0.8 || m.oe > 1.25));
+        };
+        let head, row;
+        if (binary) {
+            head = '<th>Group</th><th>Patients</th><th>Events</th><th>Observed rate</th><th>Mean predicted</th><th title="Observed ÷ expected: 1 = calibrated on average; above 1 = risk underestimated">O:E</th><th>AUC</th><th>Brier ↓</th><th>Sensitivity</th><th>Specificity</th><th title="Net benefit at the decision threshold">Net benefit</th>';
+            row = (g, m) => `<td>${escapeHtml(g)}</td><td>${m.n}</td><td>${m.events}</td><td>${pct(m.observed)}</td><td>${pct(m.meanPred)}</td><td>${num(m.oe, 2)}</td><td>${num(m.auc)}</td><td>${num(m.brier)}</td><td>${pct(m.sens)}</td><td>${pct(m.spec)}</td><td>${num(m.netBenefit)}</td>`;
+        } else if (st.isClassification) {
+            head = '<th>Group</th><th>Patients</th><th>Accuracy</th>';
+            row = (g, m) => `<td>${escapeHtml(g)}</td><td>${m.n}</td><td>${pct(m.accuracy)}</td>`;
+        } else {
+            head = '<th>Group</th><th>Patients</th><th>Mean observed</th><th>Mean predicted</th><th>RMSE ↓</th><th>R²</th>';
+            row = (g, m) => `<td>${escapeHtml(g)}</td><td>${m.n}</td><td>${num(m.meanObs, 2)}</td><td>${num(m.meanPred, 2)}</td><td>${num(m.rmse, 2)}</td><td>${num(m.r2)}</td>`;
+        }
+        const anyFlag = res.some(r => flag(r.m)), anySmall = res.some(r => small(r.m));
+        out.innerHTML = `
+            ${it.inSample ? '<div class="tune-warn">⚠️ This model was retrained on all patients, including these Testing patients, so its figures here are optimistic. Compare the groups with each other rather than reading the values at face value; for an honest check, train without retraining (Option A) or use an external cohort (Option B).</div>' : ''}
+            <div class="table-container"><table class="data-table thr-table">
+                <thead><tr>${head}</tr></thead>
+                <tbody>
+                    <tr style="font-weight: 600;">${row('All Testing patients', all)}</tr>
+                    ${res.map(r => `<tr${flag(r.m) ? ' class="subgroup-flag"' : small(r.m) ? ' class="subgroup-small"' : ''}>${row(r.g, r.m)}</tr>`).join('')}
+                </tbody>
+            </table></div>
+            <p class="tune-muted">${binary ? `Sensitivity, specificity and net benefit use the decision threshold of ${(threshold * 100).toFixed(0)}%. ` : ''}${anyFlag ? '⚠️ Highlighted groups differ noticeably from the whole Testing set (AUC by more than 0.10, or O:E outside 0.8–1.25). ' : ''}${anySmall ? `Greyed groups have fewer than ${SUBGROUP_MIN_N} patients${binary ? ` or fewer than ${SUBGROUP_MIN_EVENTS} patients with or without the outcome` : ''}: their figures are too uncertain to judge. ` : ''}Differences between subgroups can arise by chance, especially in small Testing sets; treat them as a prompt to look further (for example in an external cohort), not as proof of unfairness.</p>`;
+    } catch (e) {
+        out.innerHTML = `<p class="tune-muted">Subgroup analysis failed: ${escapeHtml(e.message || String(e))}</p>`;
+    }
 }
 
 // ---- src/cv-tuning.js ----
 // cv-tuning.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+
 
 
 
@@ -3159,175 +3795,35 @@ function renderOptimismPanel(containerId, results) {
 // For each selected model a small grid of its key settings is compared by stratified k-fold
 // cross-validation on the Training data only; the user's own settings are always one of the
 // candidates, so tuning only changes them when another combination does better. The Testing set
-// is never used. Encoding/scaling were fitted on the whole Training set before the folds are made
-// (a common simplification with negligible effect on the comparison).
-const TUNE_MAX_ROWS = 2000;        // larger training sets are tuned on a stratified sample of this size
-const TUNABLE_MODELS = new Set(['knn', 'rf', 'glm', 'nb', 'nn', 'gbm']);
+// is never used. Imputation, encoding and scaling are refitted inside every fold.
 const TUNE_LABELS = {
     k: 'k (neighbours)', weighting: 'Neighbour weighting', maxDepth: 'Max tree depth', minSamplesSplit: 'Min samples to split',
     lambdaL2: 'Ridge penalty (λ)', varSmoothing: 'Variance smoothing', dropoutRate: 'Dropout', l2Reg: 'L2 weight decay',
     learningRate: 'Learning rate', minSamplesLeaf: 'Min patients per leaf'
 };
 
-function tuningGrid(mId, base, minFoldTrain) {
-    const combos = [];
-    if (mId === 'knn') {
-        [3, 5, 7, 9, 11, 15, 21, 25].filter(k => k < minFoldTrain).forEach(k =>
-            ['uniform', 'distance'].forEach(w => combos.push({ k, weighting: w })));
-    } else if (mId === 'rf') {
-        [4, 6, 10].forEach(d => [2, 8].forEach(m => combos.push({ maxDepth: d, minSamplesSplit: m })));
-    } else if (mId === 'glm') {
-        [0, 0.001, 0.01, 0.05, 0.1, 0.5].forEach(l => combos.push({ lambdaL2: l }));
-    } else if (mId === 'nb') {
-        [1e-9, 1e-4, 0.01, 0.1].forEach(v => combos.push({ varSmoothing: v }));
-    } else if (mId === 'nn') {
-        [0.1, 0.3].forEach(d => [0.0001, 0.001].forEach(l => combos.push({ dropoutRate: d, l2Reg: l })));
-    } else if (mId === 'gbm') {
-        [0.05, 0.1].forEach(lr => [2, 3, 4].forEach(d => combos.push({ learningRate: lr, maxDepth: d })));
-    }
-    const keys = combos.length ? Object.keys(combos[0]) : [];
-    const own = {};
-    keys.forEach(k => { own[k] = base[k]; });
-    const seen = new Set();
-    const out = [];
-    [own, ...combos].forEach((c, idx) => {
-        const sig = JSON.stringify(keys.map(k => c[k]));
-        if (seen.has(sig)) return;
-        seen.add(sig);
-        out.push({ params: c, isOwn: idx === 0 });
-    });
-    return { keys, candidates: out };
-}
-
-// Stratified (classification) or shuffled (regression) fold assignment, reproducible from the seed
-function makeFolds(y, k, isClassification, seed) {
-    const rng = DataEngine.createPRNG(seed);
-    const shuffle = arr => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
-    const fold = new Array(y.length);
-    if (isClassification) {
-        const groups = {};
-        y.forEach((v, i) => { (groups[String(v)] = groups[String(v)] || []).push(i); });
-        let offset = 0;
-        Object.keys(groups).sort().forEach(g => {
-            shuffle(groups[g]).forEach((idx, j) => { fold[idx] = (j + offset) % k; });
-            offset += groups[g].length;
-        });
-    } else {
-        shuffle(y.map((_, i) => i)).forEach((idx, j) => { fold[idx] = j % k; });
-    }
-    return fold;
-}
-
-
-// Fold assignment for rows. With a grouping function (e.g. patient ID), every record of a group goes to
-// the same fold, so one patient never appears on both sides of a fold
-function assignRowFolds(rows, k, isClassification, targetCol, seed, groupOf) {
-    if (!groupOf) {
-        return makeFolds(rows.map(r => (isClassification ? String(r[targetCol]).trim() : Number(r[targetCol]))), k, isClassification, seed);
-    }
-    const rng = DataEngine.createPRNG(seed);
-    const keys = [...new Set(rows.map(groupOf))].sort();
-    for (let i = keys.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [keys[i], keys[j]] = [keys[j], keys[i]]; }
-    const foldOfGroup = new Map(keys.map((g, i) => [g, i % k]));
-    return rows.map(r => foldOfGroup.get(groupOf(r)));
-}
-
-// Cap very large training sets (stratified, or by whole groups when grouping is used)
-function capRows(rows, isClassification, targetCol, seed, groupOf) {
-    if (rows.length <= TUNE_MAX_ROWS) return { rows, sampled: false };
-    const pick = assignRowFolds(rows, Math.ceil(rows.length / TUNE_MAX_ROWS), isClassification, targetCol, seed, groupOf);
-    return { rows: rows.filter((_, i) => pick[i] === 0), sampled: true };
-}
-
 // Leak-free folds for the standard workflow: imputation, encoding and scaling are fitted on each fold's
 // learning rows only and then applied to that fold's validation rows (as for the final Testing set)
 async function buildStandardRowFolds(rawTrainRows, k, isClassification, seed, onFold) {
     const targetCol = Object.keys(AppState.columnConfigs).find(c => AppState.columnConfigs[c].role === 'target');
-    const groupOf = splitGroupFunction();
-    const cap = capRows(rawTrainRows, isClassification, targetCol, seed, groupOf);
-    const fold = assignRowFolds(cap.rows, k, isClassification, targetCol, seed, groupOf);
-    const sets = [];
-    for (let f = 0; f < k; f++) {
-        const tr = cap.rows.filter((_, i) => fold[i] !== f);
-        const va = cap.rows.filter((_, i) => fold[i] === f);
-        const trImp = DataEngine.imputeDataset(tr, AppState.columnConfigs, AppState.columnAnalysis);
-        const vaImp = DataEngine.imputeDataset(va, AppState.columnConfigs, AppState.columnAnalysis, trImp.plan);
-        const prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, AppState.columnConfigs);
-        const te = DataEngine.prepareTestingDataset(vaImp.imputedRows, prep);
-        sets.push({ Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses });
-        if (onFold) onFold(f + 1, k);
-        await ModelEngine.yieldToBrowser();
-    }
-    return { sets, rowsUsed: cap.rows.length, rowsTotal: rawTrainRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), decisionThreshold: readDecisionThreshold('decision-threshold') };
+    return buildRowFolds(rawTrainRows, k, {
+        configs: AppState.columnConfigs, analysis: AppState.columnAnalysis, isClassification, targetCol, seed,
+        groupOf: splitGroupFunction(), decisionThreshold: readDecisionThreshold('decision-threshold')
+    }, onFold);
 }
 
-// Core: compare the grid by mean cross-validated ranking metric over pre-built folds
+// Compare the grid by mean cross-validated ranking metric over pre-built folds (see validation-core.js)
 async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, watchdog, progress, ownOnly = false) {
-    const metricKey = rankingMetricKey(isClassification);
-    const metricDefs = isClassification ? RANKING_METRICS.classification : RANKING_METRICS.regression;
-    const metricDef = metricDefs[metricKey];
-    const k = fd.sets.length;
-    const grid = (ownOnly || !TUNABLE_MODELS.has(mId))
-        ? { keys: [], candidates: [{ params: {}, isOwn: true }] }
-        : tuningGrid(mId, baseHp, Math.min(...fd.sets.map(f => f.Xtr.length)));
-    const { keys, candidates } = grid;
-    const results = [];
-    const totalFits = candidates.length * k;
-    const t0 = Date.now();
-    let fitsDone = 0;
-    // Remaining-time estimate for this model, from the average time of the trial fits so far
-    const eta = () => {
-        if (fitsDone === 0) return '';
-        const sec = ((Date.now() - t0) / fitsDone) * (totalFits - fitsDone) / 1000;
-        return sec < 60 ? ` (about ${Math.max(5, Math.round(sec / 5) * 5)} s left)` : ` (about ${Math.round(sec / 60)} min left)`;
-    };
-
-    for (let c = 0; c < candidates.length; c++) {
-        const hp = { ...baseHp, ...candidates[c].params };
-        const scores = [];
-        const oof = { p: [], y: [] }; // out-of-fold predictions (binary outcomes), used to fit recalibration
-        const all = {}; // every ranking metric, so the selection can follow a later change of ranking metric
-        Object.keys(metricDefs).forEach(key => { all[key] = []; });
-        for (let f = 0; f < k; f++) {
-            if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
-            const { Xtr, ytr, Xva, yva, targetClasses } = fd.sets[f];
-            if (!Xtr.length || !Xva.length) continue;
-            if (progress) progress(c + 1, candidates.length, f + 1, k, eta());
-            // Fit on the fold's learning rows and score its validation rows (in the background worker when available)
-            const ev = await fitAndScore(mId, isClassification, numClasses, hp, fd.sets[f],
-                isClassification ? { decisionThreshold: fd.decisionThreshold } : { regressionThreshold: trainingMedian(ytr), thresholdSource: 'median of the fold training outcomes' },
-                {
-                    isAborted: () => Boolean(watchdog && watchdog.aborted),
-                    // Heartbeat every few epochs so the monitor never mistakes a long fold for a stall
-                    onProgress: (ep, tot) => { if (progress && (mId === 'nn' || mId === 'ensemble') && (ep % 3 === 0 || ep === tot)) progress(c + 1, candidates.length, f + 1, k, `${eta()} &middot; ${mId === 'nn' ? 'epoch' : 'base model'} ${ep}/${tot}`); }
-                });
-            const v = ev ? ev[metricKey] : null;
-            if (typeof v === 'number' && isFinite(v)) scores.push(v);
-            if (ev) Object.keys(all).forEach(key => { if (typeof ev[key] === 'number' && isFinite(ev[key])) all[key].push(ev[key]); });
-            if (ev && Array.isArray(ev.probPositive) && Array.isArray(ev.actuals)) { oof.p.push(...ev.probPositive); oof.y.push(...ev.actuals.map(v => (v === 1 ? 1 : 0))); }
-            fitsDone++;
-            await ModelEngine.yieldToBrowser(); // background-tab safe (plain timers are throttled in hidden tabs)
-        }
-        const mean = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-        const sd = scores.length > 1 ? Math.sqrt(scores.reduce((a, b) => a + (b - mean) ** 2, 0) / (scores.length - 1)) : null;
-        const allMeans = {};
-        Object.keys(all).forEach(key => { allMeans[key] = all[key].length ? all[key].reduce((a, b) => a + b, 0) / all[key].length : null; });
-        results.push({ params: candidates[c].params, isOwn: candidates[c].isOwn, mean, sd, nFolds: scores.length, allMeans, oof: oof.p.length ? oof : null });
-    }
-
-    // Best mean CV score; ties keep the user's own (or the protocol's) settings, listed first
-    let best = results.find(r => r.isOwn) || results[0];
-    results.forEach(r => {
-        if (r.mean === null) return;
-        if (best.mean === null) { best = r; return; }
-        const better = metricDef.higherIsBetter ? r.mean > best.mean + 1e-12 : r.mean < best.mean - 1e-12;
-        if (better) best = r;
+    return runTuningCore(mId, baseHp, fd, isClassification, numClasses, {
+        metricKey: rankingMetricKey(isClassification),
+        metricDefs: isClassification ? RANKING_METRICS.classification : RANKING_METRICS.regression,
+        fitAndScore, isAborted: () => Boolean(watchdog && watchdog.aborted), progress, ownOnly
     });
-    return {
-        modelId: mId, keys, results, best, own: results.find(r => r.isOwn),
-        bestHp: { ...baseHp, ...best.params }, folds: k, rowsUsed: fd.rowsUsed, rowsTotal: fd.rowsTotal,
-        sampled: fd.sampled, grouped: Boolean(fd.grouped), metricKey, metricLabel: metricDef.label, higherIsBetter: metricDef.higherIsBetter
-    };
+}
+
+// What the confidence intervals under the leaderboard do and do not cover
+function ciScopeNote() {
+    return `<p class="tune-muted" style="margin-top: 6px;">The 95% confidence intervals come from resampling the Testing patients (bootstrap: 1,000 resamples, fewer for very large test sets) with each model held fixed: they show how precise this test estimate is, not how much the result would change if the model were refitted on other patients. For a headline result in a small cohort, prefer bootstrap internal validation (Option C) or an independent validation cohort (Option B).</p>`;
 }
 
 // Raw training rows for Option B (all of Dataset i with a usable outcome)
@@ -3638,6 +4134,8 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
 
 
 
+
+
 async function startModelTraining() {
     if (!AppState.imputedData) {
         alert("Please execute Data Imputation first.");
@@ -3731,63 +4229,87 @@ async function startModelTraining() {
             // =============================================================
             // OPTION C: BOOTSTRAP OPTIMISM-CORRECTED INTERNAL VALIDATION (Harrell)
             // =============================================================
+            // Every data-driven step is repeated inside each resample (validation-core.js): imputation,
+            // encoding and scaling; the automatic tuning, when switched on; and the cross-validation used to
+            // choose between models, so that picking the best of several models is corrected as well.
             const targetCol = prep.targetCol;
             const allRaw = AppState.parsedData.rows.filter(r => !DataEngine.isMissing(r[targetCol]) &&
                 (prep.isClassification || !isNaN(Number(r[targetCol]))));
             const B = parseInt(document.getElementById('bootstrap-reps')?.value, 10) || 100;
             const seedC = splitSeedForCV();
             // The same resamples for every model (fair comparison), reproducible from the seed
-            const rngC = DataEngine.createPRNG(seedC);
-            const boots = Array.from({ length: B }, () => allRaw.map(() => Math.floor(rngC() * allRaw.length)));
+            const boots = bootstrapResamples(allRaw.length, B, seedC);
             const evalOptsC = {
                 regressionThreshold: prep.isClassification ? null : trainingMedian(prep.y),
                 decisionThreshold: readDecisionThreshold('decision-threshold'),
                 thresholdSource: 'median of all outcomes'
             };
             const keys = prep.isClassification ? ['accuracy', 'balancedAccuracy', 'macroF1', 'rocAuc', 'brierScore'] : ['r2', 'rmse', 'mae'];
+            const metricKey = rankingMetricKey(prep.isClassification);
+            const metricDefs = prep.isClassification ? RANKING_METRICS.classification : RANKING_METRICS.regression;
+            const slowModel = id => id === 'nn' || id === 'ensemble';
+            // The choice between models is repeated inside the resamples when it is made by cross-validation
+            // and every model is fast enough to be cross-validated there
+            const repeatSelection = selectByCV && modelsToTest.length > 1 && !modelsToTest.some(slowModel);
+            const innerK = Math.min(tuneFolds, INNER_TUNE_MAX_FOLDS);
+            const runs = [];
             for (let i = 0; i < modelsToTest.length; i++) {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
                 const mId = modelsToTest[i];
                 const mInfo = MODEL_INFO[mId] || { name: mId.toUpperCase(), icon: '⚙️' };
-                const tuned = await tuneIfRequested(mId, getHyperparamsForModel(mId, prep), allRaw, prep.targetClasses.length || 2, i);
+                const baseHp = getHyperparamsForModel(mId, prep); // the user's own settings, before any tuning
+                const tuned = await tuneIfRequested(mId, baseHp, allRaw, prep.targetClasses.length || 2, i);
                 const hp = tuned.hp;
                 const isAborted = () => Boolean(watchdog && watchdog.aborted);
                 const heartbeat = (a, b) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training on all ${prep.X.length} patients...`); };
                 DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">🚀 [${i + 1}/${modelsToTest.length}] Training ${mInfo.name} on all ${prep.X.length} patients...</span>`;
                 const model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, prep.X, prep.y, { isAborted, onProgress: heartbeat });
                 const evalRes = await ModelEngine.evaluateAsync(model, prep.X, prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
-                const Bm = (mId === 'nn' || mId === 'ensemble') ? Math.min(B, 50) : B;
-                const opt = {}; keys.forEach(k => { opt[k] = []; });
-                const slopes = [];
-                const t0 = Date.now();
-                for (let b = 0; b < Bm; b++) {
-                    if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
-                    const rowsB = boots[b].map(ix => allRaw[ix]);
-                    const impB = DataEngine.imputeDataset(rowsB, AppState.columnConfigs, AppState.columnAnalysis);
-                    const prepB = DataEngine.prepareFeaturesAndTarget(impB.imputedRows, AppState.columnConfigs);
-                    if (!prepB.X.length || (prep.isClassification && prepB.targetClasses.length !== prep.targetClasses.length)) continue; // a class missing from this resample
-                    prepB.imputation = { configs: AppState.columnConfigs, plan: impB.plan };
-                    const origB = DataEngine.prepareTestingDataset(allRaw, prepB);
-                    const [onBoot, onOrig] = await fitAndScoreMulti(mId, prep.isClassification, prepB.targetClasses.length || 2, hp, prepB.X, prepB.y,
-                        [{ X: prepB.X, y: prepB.y, targetClasses: prepB.targetClasses }, { X: origB.X, y: origB.y, targetClasses: prepB.targetClasses }], evalOptsC, { isAborted });
-                    keys.forEach(k => { if (typeof onBoot[k] === 'number' && typeof onOrig[k] === 'number') opt[k].push(onBoot[k] - onOrig[k]); });
-                    if (typeof onOrig.calibrationSlope === 'number') slopes.push(onOrig.calibrationSlope);
-                    const left = ((Date.now() - t0) / (b + 1)) * (Bm - b - 1) / 1000;
-                    const msg = `🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample ${b + 1}/${Bm} (about ${left < 60 ? Math.max(5, Math.round(left / 5) * 5) + ' s' : Math.round(left / 60) + ' min'} left)...`;
-                    DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">${msg}</span>`;
-                    if (watchdog) watchdog.tick(i + 1, msg);
-                    await ModelEngine.yieldToBrowser();
-                }
-                const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
-                const apparent = {}, optimism = {}, corrected = {};
+                const wasTuned = autoTune && TUNABLE_MODELS.has(mId);
+                const tuneInside = wasTuned && !slowModel(mId);
+                const inner = (tuneInside || repeatSelection)
+                    ? { k: innerK, seed: seedC, groupOf: splitGroupFunction(), metricKey, metricDefs, doTune: tuneInside, fitAndScore }
+                    : null;
+                const Bm = slowModel(mId) ? Math.min(B, 50) : B;
+                const what = tuneInside ? ' (tuning repeated inside each resample)' : (inner ? ' (cross-validation repeated inside each resample)' : '');
+                const say = msg => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">${msg}</span>`; if (watchdog) watchdog.tick(i + 1, msg); };
+                say(`🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample 1/${Bm}${what}...`);
+                const run = await bootstrapOptimism({
+                    rows: allRaw, boots, maxResamples: Bm, configs: AppState.columnConfigs, analysis: AppState.columnAnalysis,
+                    isClassification: prep.isClassification, modelId: mId, hp: tuneInside ? baseHp : hp, evalOptions: evalOptsC, keys,
+                    fitAndScoreMulti, tune: inner, isAborted,
+                    onInnerProgress: (b, n, c, nc, f, nf) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: resample ${b}/${n}, ${tuneInside ? `combination ${c}/${nc}, ` : ''}fold ${f}/${nf}`); },
+                    onResample: (b, n, t0) => {
+                        const left = ((Date.now() - t0) / b) * (n - b) / 1000;
+                        say(`🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample ${Math.min(b + 1, n)}/${n}${what} (about ${left < 60 ? Math.max(5, Math.round(left / 5) * 5) + ' s' : Math.round(left / 60) + ' min'} left)...`);
+                    }
+                });
+                const apparent = {}, corrected = {}, harrell = {}, est632 = {};
+                const apparentSlope = evalRes.calibration && typeof evalRes.calibration.slope === 'number' ? evalRes.calibration.slope : null;
+                // Flexible models can memorise their training patients, which defeats Harrell's correction;
+                // for them the .632+ estimate (out-of-bag patients only) is the headline figure
+                const method = FLEXIBLE_MODELS.has(mId) ? '632plus' : 'harrell';
+                const noInfo = noInformationRates(evalRes, prep.isClassification);
                 keys.forEach(k => {
                     apparent[k] = typeof evalRes[k] === 'number' ? evalRes[k] : null;
-                    optimism[k] = mean(opt[k]);
-                    corrected[k] = apparent[k] !== null && optimism[k] !== null ? Number((apparent[k] - optimism[k]).toFixed(4)) : null;
-                    if (corrected[k] !== null) evalRes[k] = corrected[k]; // headline metrics are optimism-corrected
+                    harrell[k] = apparent[k] !== null && run.optimism[k] !== null ? Number((apparent[k] - run.optimism[k]).toFixed(4)) : null;
+                    const e = plus632(k, apparent[k], run.oobMean[k], noInfo[k]);
+                    est632[k] = e ? Number(e.value.toFixed(4)) : null;
+                    corrected[k] = method === '632plus' && est632[k] !== null ? est632[k] : harrell[k];
+                    if (corrected[k] !== null) evalRes[k] = corrected[k]; // headline metrics are corrected
                 });
-                const slopeMean = mean(slopes);
-                evalRes.optimismCorrection = { B: opt[keys[0]].length, apparent, optimism, corrected, calibrationSlope: slopeMean !== null ? Number(slopeMean.toFixed(3)) : null };
+                // How often the resamples chose the same settings as the full data (stability of the tuning)
+                let sameSettingsShare = null;
+                if (tuneInside) {
+                    const done = run.perResample.filter(Boolean);
+                    const sig = h => JSON.stringify(Object.keys(h).sort().map(k => [k, h[k]]));
+                    sameSettingsShare = done.length ? done.filter(p => sig(p.hp) === sig(hp)).length / done.length : null;
+                }
+                evalRes.optimismCorrection = {
+                    B: run.B, apparent, optimism: run.optimism, corrected, harrell, est632, oobMean: run.oobMean, noInfo, method,
+                    calibrationSlope: (() => { const v = method === '632plus' ? run.oobCalibrationSlope : run.calibrationSlope; return typeof v === 'number' ? Number(v.toFixed(3)) : null; })(), apparentSlope,
+                    tuning: !wasTuned ? 'none' : (tuneInside ? 'repeated' : 'once'), innerFolds: inner ? innerK : null, sameSettingsShare
+                };
                 evalRes.protocol = 'option-c';
                 evalRes.accuracyCI = null; // a CI of the apparent accuracy would be misleading
                 evalRes.ci = null;
@@ -3801,7 +4323,13 @@ async function startModelTraining() {
                 if (model.trainingInfo) evalRes.nnNote = describeNNTraining(model.trainingInfo);
                 if (model.usedFallback) evalRes.fallbackNote = `TensorFlow.js training failed (${model.fallbackReason}); a linear (logistic/ridge) fallback model was evaluated instead of a neural network.`;
                 testedResults.push({ modelId: mId, info: mInfo, evalRes, model, retrained: true, prep, hyperparams: hp, seed: hp.seed });
+                runs.push({ modelId: mId, perResample: run.perResample });
             }
+            // Choosing the best of several models (the winner's curse): optimism of the whole choose-then-fit process
+            const selection = modelsToTest.length < 2 ? null
+                : repeatSelection ? { repeated: true, nModels: modelsToTest.length, ...selectionOptimism(runs, keys, metricDefs[metricKey].higherIsBetter), noInfoByModel: Object.fromEntries(testedResults.map(r => [r.modelId, r.evalRes.optimismCorrection.noInfo])) }
+                    : { repeated: false, nModels: modelsToTest.length, reason: selectByCV ? 'slow' : 'not-cv' };
+            testedResults.forEach(r => { r.evalRes.optimismCorrection.selection = selection; });
             AppState.prepMeta = prep;
             AppState.lastTestRows = null; // no separate test set
             AppState.orRawRows = allRaw;  // raw rows matching the deployed encoding (odds ratios / MICE)
@@ -4483,6 +5011,12 @@ function renderEvaluationDashboard() {
         (allResults.length ? allResults : []).map(r => ({ name: (MODEL_INFO[r.modelId] || { name: r.modelId }).name, model: r.model, prep: r.prep, inSample: Boolean(r.retrained) })),
         AppState.lastTestRows, Boolean(evalRes && evalRes.isClassification));
 
+    // Subgroup (fairness) panel on the Testing set; the original values are used for grouping when available
+    renderSubgroupPanel('subgroup-panel-container', isOptionC ? [] :
+        (allResults.length ? allResults : []).map(r => ({ name: (MODEL_INFO[r.modelId] || { name: r.modelId }).name, model: r.model, prep: r.prep, threshold: r.evalRes && r.evalRes.decisionThreshold, inSample: Boolean(r.retrained) && !isOptionB })),
+        AppState.lastTestRows, Boolean(evalRes && evalRes.isClassification),
+        !isOptionB && AppState.baselineTestRawRows && AppState.lastTestRows && AppState.baselineTestRawRows.length === AppState.lastTestRows.length ? AppState.baselineTestRawRows : null);
+
     // Calibration and decision-threshold panel (binary outcomes)
     renderCalibrationPanel('calibration-panel-container', isOptionC ? [] :
         (allResults.length ? allResults : [{ modelId: AppState.selectedModelId, evalRes }]).map(r => ({
@@ -4600,12 +5134,12 @@ function renderEvaluationDashboard() {
                     ? `${rEval.brierScore.toFixed(3)}${ciSpan(rEval, 'brierScore')}` : '-';
 
                 const seedDisplay = (rEval.seed !== null && rEval.seed !== undefined)
-                    ? `<span class="seed-pill" title="Click to copy reproducibility seed: ${rEval.seed}" onclick="window.copySeedToClipboard(${rEval.seed})">🌱 ${rEval.seed} <span class="copy-icon">📋</span></span>`
+                    ? `<span class="seed-pill" title="Click to copy reproducibility seed: ${rEval.seed}" ${actionAttrs('copySeedToClipboard', rEval.seed)}>🌱 ${rEval.seed} <span class="copy-icon">📋</span></span>`
                     : `<span style="font-size: 11px; color: var(--text-muted); font-family: monospace;">N/A</span>`;
 
                 const deployBtn = isDeployed
                     ? `<span class="pill pill-target" style="background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.4);">✓ Active Predictor</span>`
-                    : `<button class="btn-preset-action deploy-model-btn" onclick="window.deployTestedModel('${resItem.modelId}')" style="padding: 4px 10px; font-size: 11px; cursor: pointer;">Deploy Model</button>`;
+                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="padding: 4px 10px; font-size: 11px; cursor: pointer;">Deploy Model</button>`;
 
                 lbRows += `
                     <tr style="${isDeployed ? 'background: rgba(6, 182, 212, 0.05);' : ''}">
@@ -4675,6 +5209,7 @@ function renderEvaluationDashboard() {
                             </tbody>
                         </table>
                     </div>
+                    ${!isOptionC && allResults.some(r => r.evalRes && r.evalRes.ci) ? ciScopeNote() : ''}
                 </div>
             `;
         }
@@ -4729,7 +5264,7 @@ function renderEvaluationDashboard() {
 
                 const deployBtn = isDeployed
                     ? `<button class="btn-preset-action" disabled style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: var(--accent-emerald); font-weight: 700; width: 100%;">✓ Active Predictor (Steps 5 &amp; 6)</button>`
-                    : `<button class="btn-preset-action deploy-model-btn" onclick="window.deployTestedModel('${resItem.modelId}')" style="width: 100%; font-weight: 600; cursor: pointer;">⭐ Set as Active Predictor</button>`;
+                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="width: 100%; font-weight: 600; cursor: pointer;">⭐ Set as Active Predictor</button>`;
 
                 cmCardsHtml += `
                     <div class="multi-cm-card ${isDeployed ? 'active-deployed' : ''}">
@@ -4763,7 +5298,7 @@ function renderEvaluationDashboard() {
                         </div>
 
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border-color);">
-                            <div class="cm-seed-card-badge" title="Click to copy reproducibility seed: ${rEval.seed}" onclick="window.copySeedToClipboard(${rEval.seed})">
+                            <div class="cm-seed-card-badge" title="Click to copy reproducibility seed: ${rEval.seed}" ${actionAttrs('copySeedToClipboard', rEval.seed)}>
                                 <span>🌱 Seed:</span> <strong>${rEval.seed !== null && rEval.seed !== undefined ? rEval.seed : 'N/A'}</strong> <span style="font-size: 10px; opacity: 0.8;">📋</span>
                             </div>
                             ${rEval.splitSeed ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: monospace;">Split: ${rEval.splitSeed}</span>` : ''}
@@ -4850,7 +5385,7 @@ function renderEvaluationDashboard() {
                         <span class="m-val">${(evalRes.rocAuc).toFixed(3)}</span>
                     </div>
                 ` : ''}
-                <div class="metric-pill-card" style="cursor: pointer;" onclick="window.copySeedToClipboard(${evalRes.seed})" title="Click to copy reproducibility seed: ${evalRes.seed}">
+                <div class="metric-pill-card" style="cursor: pointer;" ${actionAttrs('copySeedToClipboard', evalRes.seed)} title="Click to copy reproducibility seed: ${evalRes.seed}">
                     <span class="m-title">Reproducibility Seed</span>
                     <span class="m-val" style="color: var(--accent-purple); font-family: monospace;">🌱 ${evalRes.seed !== null && evalRes.seed !== undefined ? evalRes.seed : 'Auto'} 📋</span>
                 </div>
@@ -4906,7 +5441,7 @@ function renderEvaluationDashboard() {
                     <span class="m-title">MSE</span>
                     <span class="m-val">${evalRes.mse.toFixed(3)}</span>
                 </div>
-                <div class="metric-pill-card" style="cursor: pointer;" onclick="window.copySeedToClipboard(${evalRes.seed})" title="Click to copy reproducibility seed: ${evalRes.seed}">
+                <div class="metric-pill-card" style="cursor: pointer;" ${actionAttrs('copySeedToClipboard', evalRes.seed)} title="Click to copy reproducibility seed: ${evalRes.seed}">
                     <span class="m-title">Reproducibility Seed</span>
                     <span class="m-val" style="color: var(--accent-purple); font-family: monospace;">🌱 ${evalRes.seed !== null && evalRes.seed !== undefined ? evalRes.seed : 'Auto'} 📋</span>
                 </div>
@@ -5029,7 +5564,7 @@ function runSinglePrediction() {
         : (AppState.evalResults?.seed !== null && AppState.evalResults?.seed !== undefined ? AppState.evalResults.seed : null);
 
     const seedSnippet = activeSeed !== null
-        ? ` &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px; cursor: pointer;" onclick="window.copySeedToClipboard(${activeSeed})" title="Click to copy reproducibility seed">🌱 ${activeSeed} 📋</code>`
+        ? ` &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px; cursor: pointer;" ${actionAttrs('copySeedToClipboard', activeSeed)} title="Click to copy reproducibility seed">🌱 ${activeSeed} 📋</code>`
         : '';
 
     if (prep.isClassification) {
@@ -5282,6 +5817,7 @@ function downloadBatchCSV() {
 
 // ---- src/pipeline.js ----
 // pipeline.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+
 
 
 
@@ -5696,13 +6232,13 @@ function renderPipelineStep2() {
                         </div>
                     </div>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                        <button class="btn btn-rose btn-sm" onclick="window.pipelineDropFeature(${jsArg(p.var1)})" ${var1Dropped ? 'disabled' : ''}>
+                        <button class="btn btn-rose btn-sm" ${actionAttrs('pipelineDropFeature', p.var1)} ${var1Dropped ? 'disabled' : ''}>
                             ${var1Dropped ? `✓ Dropped ${escapeHtml(p.var1)}` : `🗑️ Drop ${escapeHtml(p.var1)}`}
                         </button>
-                        <button class="btn btn-rose btn-sm" onclick="window.pipelineDropFeature(${jsArg(p.var2)})" ${var2Dropped ? 'disabled' : ''}>
+                        <button class="btn btn-rose btn-sm" ${actionAttrs('pipelineDropFeature', p.var2)} ${var2Dropped ? 'disabled' : ''}>
                             ${var2Dropped ? `✓ Dropped ${escapeHtml(p.var2)}` : `🗑️ Drop ${escapeHtml(p.var2)}`}
                         </button>
-                        <button class="btn btn-secondary btn-sm" onclick="window.pipelineKeepBothPairs(${jsArg(p.var1)}, ${jsArg(p.var2)})">
+                        <button class="btn btn-secondary btn-sm" ${actionAttrs('pipelineKeepBothPairs', p.var1, p.var2)}>
                             🤝 Keep Both
                         </button>
                     </div>
@@ -5875,11 +6411,11 @@ function renderPipelineStep4() {
                 <td><strong style="color: ${isSig ? 'var(--accent-emerald)' : 'var(--text-muted)'}; font-size: 13.5px;">${r.pValue < 0.0001 ? '< 0.0001' : r.pValue}</strong></td>
                 <td>
                     ${isDropped ? `
-                        <button class="btn btn-secondary btn-sm" onclick="window.pipelineRestoreFeatureStep4(${jsArg(r.feature)})" title="Restore variable into modeling pipeline">
+                        <button class="btn btn-secondary btn-sm" ${actionAttrs('pipelineRestoreFeatureStep4', r.feature)} title="Restore variable into modeling pipeline">
                             ↩️ Include
                         </button>
                     ` : `
-                        <button class="btn btn-rose btn-sm" onclick="window.pipelineDropFeatureStep4(${jsArg(r.feature)})" title="Exclude this variable from modeling">
+                        <button class="btn btn-rose btn-sm" ${actionAttrs('pipelineDropFeatureStep4', r.feature)} title="Exclude this variable from modeling">
                             🗑️ Exclude
                         </button>
                     `}
@@ -6213,8 +6749,8 @@ function renderRfImportanceChart() {
                         ${isPruned ? 'Bottom 30%' : 'Top 70%'}
                     </span>`;
         const action = !isBottomTier ? '' : (isReinstated
-            ? `<button type="button" class="btn btn-outline btn-sm" onclick="window.pipelineToggleReinstateFeature(${jsArg(r.name)})" title="Remove this feature again for k-NN and Naive Bayes">✂️ Remove again</button>`
-            : `<button type="button" class="btn btn-outline btn-sm" onclick="window.pipelineToggleReinstateFeature(${jsArg(r.name)})" title="Keep this feature for k-NN and Naive Bayes in Step 7">↩️ Reinstate</button>`);
+            ? `<button type="button" class="btn btn-outline btn-sm" ${actionAttrs('pipelineToggleReinstateFeature', r.name)} title="Remove this feature again for k-NN and Naive Bayes">✂️ Remove again</button>`
+            : `<button type="button" class="btn btn-outline btn-sm" ${actionAttrs('pipelineToggleReinstateFeature', r.name)} title="Keep this feature for k-NN and Naive Bayes in Step 7">↩️ Reinstate</button>`);
 
         chartHtml += `
             <div class="rf-importance-row">
@@ -6296,8 +6832,8 @@ async function executePipelineStep7() {
 
         const targetCol = AppState.pipeline.targetCol;
         const isClassification = AppState.pipeline.columnConfigs[targetCol]?.type !== 'continuous';
-        // Model plan: Naive Bayes is classification-only, so regression runs 4 models, not 5
-        const plannedModels = isClassification ? ['knn', 'nb', 'rf', 'nn', 'glm', 'ensemble'] : ['knn', 'rf', 'nn', 'glm', 'ensemble'];
+        // Model plan: Naive Bayes is classification-only, so regression runs one model fewer
+        const plannedModels = isClassification ? ['knn', 'nb', 'rf', 'gbm', 'nn', 'glm', 'ensemble'] : ['knn', 'rf', 'gbm', 'nn', 'glm', 'ensemble'];
         const totalModels = plannedModels.length;
         const stepOf = id => plannedModels.indexOf(id) + 1;
         if (watchdog) watchdog.totalSteps = totalModels;
@@ -6350,6 +6886,7 @@ async function executePipelineStep7() {
             knn: { k: 5, metric: 'euclidean', weighting: 'distance', seed: evalSeed },
             nb: { varSmoothing: 1e-4, priorMode: 'empirical', seed: evalSeed },
             rf: { numTrees: 40, maxDepth: 6, minSamplesSplit: 2, featureRatio: 'sqrt', seed: evalSeed },
+            gbm: { nEstimators: 200, learningRate: 0.1, maxDepth: 3, minSamplesLeaf: 5, l2: 1, subsample: 0.8, seed: evalSeed },
             nn: { epochs: 25, learningRate: 0.005, hiddenLayers: [48, 24], dropoutRate: 0.15, l2Reg: 0.001, activation: 'relu', optimizer: 'adam', batchSize: 16, seed: evalSeed },
             glm: { lr: 0.05, epochs: 150, lambdaL2: 0.02, solver: 'momentum', seed: evalSeed }
         };
@@ -6383,7 +6920,7 @@ async function executePipelineStep7() {
                 const id = plan[t];
                 const reduced = id === 'knn' || id === 'nb';
                 const k = (id === 'nn' || id === 'ensemble') ? Math.min(pipeFolds, 3) : pipeFolds;
-                const label = { knn: 'k-NN', nb: 'Naive Bayes', rf: 'Random Forest', nn: 'Neural Network', glm: 'Logistic / Ridge Regression', ensemble: 'Ensemble' }[id];
+                const label = { knn: 'k-NN', nb: 'Naive Bayes', rf: 'Random Forest', gbm: 'Gradient-Boosted Trees', nn: 'Neural Network', glm: 'Logistic / Ridge Regression', ensemble: 'Ensemble' }[id];
                 const doTune = pipeTune && TUNABLE_MODELS.has(id);
                 // k-NN / Naive Bayes: the Step 6 top-70% selection is repeated inside every fold
                 const fdModel = await foldsFor(activeCols, k, label, id, reduced);
@@ -6436,7 +6973,19 @@ async function executePipelineStep7() {
         rfEval.constraintNote = `${pHp.rf.numTrees} trees, max depth ${pHp.rf.maxDepth}, min ${pHp.rf.minSamplesSplit} samples to split, √p features per split; probabilities are tree vote shares.` + tunedTag('rf');
         benchmarkList.push({ id: 'rf', name: 'Random Forest', model: rfFinal, prep: fullPrep, eval: rfEval });
 
-        // C. Deep Neural Network (Strict constraint: L2 Weight Decay + Dropout)
+        // B3. Gradient-boosted trees (all surviving features): shallow trees, shrinkage, row subsampling and
+        // early stopping on an internal validation split of the training rows (the test set is never used)
+        if (watchdog) watchdog.tick(stepOf('gbm'), `Training Model ${stepOf('gbm')}/${totalModels}: Gradient-Boosted Trees (all surviving features)...`);
+        await new Promise(r => setTimeout(r, 60));
+        const gbm = await fitModel('gbm', isClassification, numClasses, { ...pHp.gbm, seed: evalSeed }, fullPrep.X, fullPrep.y, {
+            isAborted, onProgress: () => { if (watchdog) watchdog.tick(stepOf('gbm'), `Training Model ${stepOf('gbm')}/${totalModels}: Gradient-Boosted Trees...`); }
+        });
+        const gbmEval = await ModelEngine.evaluateAsync(gbm, fullTestTrans.X, fullTestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
+        gbmEval.featuresUsed = `All Surviving (${activeCols.length} features)`;
+        gbmEval.constraintNote = `Up to ${pHp.gbm.nEstimators} rounds of depth-${pHp.gbm.maxDepth} trees, learning rate ${pHp.gbm.learningRate}, at least ${pHp.gbm.minSamplesLeaf} patients per leaf, ${Math.round(pHp.gbm.subsample * 100)}% row subsampling and early stopping on an internal validation split.` + (gbm.trainingInfo && gbm.trainingInfo.bestRounds ? ` ${gbm.trainingInfo.bestRounds} rounds kept.` : '') + tunedTag('gbm');
+        benchmarkList.push({ id: 'gbm', name: 'Gradient-Boosted Trees', model: gbm, prep: fullPrep, eval: gbmEval });
+
+        // C. Neural network (multilayer perceptron; strict constraint: L2 Weight Decay + Dropout)
         if (watchdog) watchdog.tick(stepOf('nn'), `Training Model ${stepOf('nn')}/${totalModels}: Neural Network (MLP; L2 + dropout + early stopping)...`);
         await new Promise(r => setTimeout(r, 60));
         const dnnParams = { ...pHp.nn };
@@ -6592,7 +7141,7 @@ function renderPipelineLeaderboardOnly() {
                             ✓ Active
                         </span>
                     ` : `
-                        <button class="btn btn-secondary btn-sm" onclick="window.deployPipelineModel('${item.id}')" title="Deploy this model for live patient inference">
+                        <button class="btn btn-secondary btn-sm" ${actionAttrs('deployPipelineModel', item.id)} title="Deploy this model for live patient inference">
                             🚀 Deploy
                         </button>
                     `}
@@ -6601,7 +7150,7 @@ function renderPipelineLeaderboardOnly() {
         `;
     });
 
-    tableHtml += `</tbody></table>`;
+    tableHtml += `</tbody></table>${sorted.some(it => it.eval && it.eval.ci) ? ciScopeNote() : ''}`;
     const caveats = new Set();
     sorted.forEach(item => {
         summariseHeldOutSet(item.eval).forEach(n => caveats.add(n));
@@ -6641,6 +7190,7 @@ function renderPipelineLeaderboardOnly() {
     DOM.pipelineLeaderboardContainer.innerHTML = tableHtml;
     renderCalibrationPanel('pipeline-calibration-container', sorted.map(it => ({ name: it.name, ev: it.eval })), isClassification);
     renderExplainPanel('pipeline-explain-container', sorted.map(it => ({ name: it.name, model: it.model, prep: it.prep, inSample: false })), AppState.pipeline.testRows, isClassification);
+    renderSubgroupPanel('pipeline-subgroup-container', sorted.map(it => ({ name: it.name, model: it.model, prep: it.prep, threshold: it.eval && it.eval.decisionThreshold })), AppState.pipeline.testRows, isClassification);
     syncRankingSelectors(isClassification);
 }
 
@@ -7021,8 +7571,8 @@ function updatePredictionProvenanceBar() {
                 </div>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
-                ${hasBaseline ? `<button class="btn btn-secondary btn-sm" onclick="window.switchToBaselineModel()">🔄 Switch to Baseline Model</button>` : ''}
-                <button class="btn btn-secondary btn-sm" onclick="window.goToStep && window.goToStep('pipeline')">🔬 View 7-Step Pipeline</button>
+                ${hasBaseline ? `<button class="btn btn-secondary btn-sm" ${actionAttrs('switchToBaselineModel')}>🔄 Switch to Baseline Model</button>` : ''}
+                <button class="btn btn-secondary btn-sm" ${actionAttrs('goToStep', 'pipeline')}>🔬 View 7-Step Pipeline</button>
             </div>
         `;
         if (singleBar) {
@@ -7051,7 +7601,7 @@ function updatePredictionProvenanceBar() {
                 </div>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
-                ${hasPipeline ? `<button class="btn btn-emerald btn-sm" onclick="window.switchToPipelineModel()">🔬 Switch to 7-Step Pipeline Model</button>` : `<button class="btn btn-emerald btn-sm" onclick="window.goToStep && window.goToStep('pipeline')">🔬 Test 7-Step Pipeline to Compare</button>`}
+                ${hasPipeline ? `<button class="btn btn-emerald btn-sm" ${actionAttrs('switchToPipelineModel')}>🔬 Switch to 7-Step Pipeline Model</button>` : `<button class="btn btn-emerald btn-sm" ${actionAttrs('goToStep', 'pipeline')}>🔬 Test 7-Step Pipeline to Compare</button>`}
             </div>
         `;
         if (singleBar) {
@@ -7250,7 +7800,7 @@ function renderPipelineVsBaselineComparison() {
                     You have successfully completed the 7-Step Pipeline with <strong>${escapeHtml(pipeBest.name)}</strong> (${metricSummary}).<br>
                     To see whether the 7-Step Pipeline predicts better than the standard workflow on this cohort, click below:
                     <div style="margin-top: 10px;">
-                        <button class="btn btn-primary btn-sm" onclick="window.trainStandardBaselineFromPipeline && window.trainStandardBaselineFromPipeline()">
+                        <button class="btn btn-primary btn-sm" ${actionAttrs('trainStandardBaselineFromPipeline')}>
                             ⚖️ Train Standard Baseline &amp; Compare
                         </button>
                         <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 6px;">Uses your Step 4 model choices and the same train/test split as the pipeline, then brings you straight back here with the comparison.</div>
@@ -7390,7 +7940,7 @@ function renderPipelineVsBaselineComparison() {
             <span>${AppState.baselineJustTrained
                 ? `✓ Standard baseline trained just now${trainedAt ? ` (${trainedAt})` : ''} with the same train/test split as the pipeline.`
                 : `ℹ️ This comparison uses the standard-workflow (Step 4) results already trained${trainedAt ? ` at ${trainedAt}` : ''}, so no new training was needed. If you have since changed settings, re-run it to compare like with like.`}</span>
-            <button type="button" class="btn btn-outline btn-sm" onclick="window.trainStandardBaselineFromPipeline && window.trainStandardBaselineFromPipeline()">↻ Re-run baseline &amp; compare</button>
+            <button type="button" class="btn btn-outline btn-sm" ${actionAttrs('trainStandardBaselineFromPipeline')}>↻ Re-run baseline &amp; compare</button>
         </div>
         <div style="margin-bottom: 14px; font-size: 13px; color: var(--text-secondary);">
             Results of each workflow's best model for <strong>${escapeHtml(AppState.fileName || 'Cohort')}</strong>, ${sameTestPatients ? 'both scored on the <strong>same</strong> test patients' : 'each scored on its <strong>own</strong> test patients'}.
@@ -7750,7 +8300,7 @@ function downloadPipelineProtocolReport() {
 // ---- src/survival.js ----
 // survival.js: time-to-event analysis with a Cox proportional-hazards model (Efron ties).
 // Split first (stratified by event), imputation and encoding fitted on the training patients only; hazard
-// ratios; Harrell's C-index on the test patients (with bootstrap CI); calibration at a chosen horizon
+// ratios; Harrell's C-index, time-dependent AUC and Brier score (censoring-weighted) on the test patients; calibration at a chosen horizon
 // against Kaplan-Meier observed risk; Kaplan-Meier curves by predicted-risk group; single-patient prediction.
 /* global DataEngine, ModelEngine */
 
@@ -7877,15 +8427,27 @@ async function runSurvival() {
     const cIndex = ModelEngine.concordanceIndex(tTe, eTe, lpTe);
     // bootstrap CI for the C-index (test patients resampled)
     const rng = DataEngine.createPRNG(seed);
-    const boots = [];
+    // Time-dependent measures at the horizon, weighted for censoring (censoring distribution from the training patients)
+    const censKM = ModelEngine.censoringKM(tTr, eTr);
+    const survTe = Xte.map(x => cox.survivalAt(x, horizon));
+    const tdAuc = ModelEngine.timeDependentAUC(tTe, eTe, lpTe, horizon, censKM);
+    const brier = ModelEngine.ipcwBrier(tTe, eTe, survTe, horizon, censKM);
+    const sNull = ModelEngine.kmAt(ModelEngine.kaplanMeier(tTr, eTr), horizon); // the same risk for everyone
+    const brierNull = ModelEngine.ipcwBrier(tTe, eTe, tTe.map(() => sNull), horizon, censKM);
+    const scaledBrier = brier !== null && brierNull > 0 ? 1 - brier / brierNull : null;
+    const boots = [], bootsTd = [];
     for (let b = 0; b < 500; b++) {
         const idx = tTe.map(() => Math.floor(rng() * tTe.length));
-        const c = ModelEngine.concordanceIndex(idx.map(i => tTe[i]), idx.map(i => eTe[i]), idx.map(i => lpTe[i]));
+        const bt = idx.map(i => tTe[i]), be = idx.map(i => eTe[i]), bl = idx.map(i => lpTe[i]);
+        const c = ModelEngine.concordanceIndex(bt, be, bl);
         if (c !== null) boots.push(c);
+        const a = ModelEngine.timeDependentAUC(bt, be, bl, horizon, censKM);
+        if (a !== null) bootsTd.push(a);
         if (b % 100 === 99) await ModelEngine.yieldToBrowser();
     }
-    boots.sort((a, b) => a - b);
-    const cCI = boots.length >= 50 ? [boots[Math.floor(0.025 * (boots.length - 1))], boots[Math.floor(0.975 * (boots.length - 1))]] : null;
+    const pctCI = arr => { arr.sort((a, b) => a - b); return arr.length >= 50 ? [arr[Math.floor(0.025 * (arr.length - 1))], arr[Math.floor(0.975 * (arr.length - 1))]] : null; };
+    const cCI = pctCI(boots);
+    const tdCI = pctCI(bootsTd);
     // calibration at the horizon: groups of predicted risk vs Kaplan-Meier observed risk
     const risk = Xte.map(x => 1 - cox.survivalAt(x, horizon));
     const nG = tTe.length >= 100 ? 5 : tTe.length >= 30 ? 3 : 2;
@@ -7902,7 +8464,7 @@ async function runSurvival() {
     const tert = [0, 1, 2].map(g => order.slice(Math.round(g * order.length / 3), Math.round((g + 1) * order.length / 3)));
     const kmGroups = tert.map(g => ModelEngine.kaplanMeier(g.map(i => tTe[i]), g.map(i => eTe[i])));
     const maxFollow = Math.max(...tTr, ...tTe);
-    SURV.result = { tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, calib, meanPred, obsAll, kmGroups, maxFollow,
+    SURV.result = { tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, meanPred, obsAll, kmGroups, maxFollow,
         nTrain: Xtr.length, nTest: Xte.length, eventsTrain: events, eventsTest: eTe.reduce((a, b) => a + b, 0), excluded };
     renderSurvivalResults();
     status.textContent = '';
@@ -7942,7 +8504,10 @@ function renderSurvivalResults() {
         <div class="cal-panel">
             <div class="tune-title">📊 Performance on the test patients</div>
             <div class="cal-stats"><div><strong>Harrell's C-index</strong>: ${r.cIndex !== null ? r.cIndex.toFixed(3) : 'N/A'}${r.cCI ? ` <span class="tune-sd">(95% CI ${r.cCI[0].toFixed(3)}–${r.cCI[1].toFixed(3)})</span>` : ''} &mdash; the probability that, of two comparable patients, the one with the event first had the higher predicted risk (0.5 = chance, 1 = perfect).</div>
-            <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pctTxt(r.meanPred)} vs observed ${pctTxt(r.obsAll)} (Kaplan-Meier).</div></div>
+            <div><strong>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.tdAuc === 'number' ? r.tdAuc.toFixed(3) : 'N/A'}${r.tdCI ? ` <span class="tune-sd">(95% CI ${r.tdCI[0].toFixed(3)}–${r.tdCI[1].toFixed(3)})</span>` : ''} &mdash; of a patient who had the event by ${escapeHtml(String(r.horizon))} and one still event-free after it, how often the first had the higher predicted risk.</div>
+            <div><strong>Brier score at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.brier === 'number' ? r.brier.toFixed(3) : 'N/A'} (lower is better; giving everyone the overall Kaplan-Meier risk scores ${typeof r.brierNull === 'number' ? r.brierNull.toFixed(3) : 'N/A'})${typeof r.scaledBrier === 'number' ? `; <strong>scaled Brier</strong> ${(r.scaledBrier * 100).toFixed(1)}% (share of that error the model removes; 0% = no better than the overall risk)` : ''}.</div>
+            <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pctTxt(r.meanPred)} vs observed ${pctTxt(r.obsAll)} (Kaplan-Meier).</div>
+            <div class="tune-muted">The time-dependent AUC and Brier score weight each patient for censoring (inverse probability of censoring weights, with the censoring pattern estimated from the training patients), so patients lost to follow-up before ${escapeHtml(String(r.horizon))} do not bias them.</div></div>
             <div class="cal-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
                 <div>${lineChartSvg({ series: [{ name: 'cal', colour: 'var(--accent-cyan)', points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }, { name: 'calpts', colour: 'var(--accent-cyan)', scatter: true, points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }],
                     xLabel: `Predicted risk by ${r.horizon}`, yLabel: 'Observed risk (Kaplan-Meier)', xMax: calMax, yMax: calMax, diagonal: true, aria: 'Survival calibration at the horizon' })}
@@ -7991,7 +8556,7 @@ function downloadSurvivalReport() {
         generated_at: new Date().toISOString(), dataset: AppState.fileName, time_column: r.tc, event_column: r.ec, event_value: r.ev, predictors: r.preds,
         design: { split: `${Math.round(r.ratio * 100)}/${Math.round((1 - r.ratio) * 100)} stratified by event`, seed: r.seed, train_patients: r.nTrain, train_events: r.eventsTrain, test_patients: r.nTest, test_events: r.eventsTest, excluded_rows: r.excluded, ties: 'Efron', penalty: r.penalised ? 0.1 : 0 },
         hazard_ratios: summary.map((s, i) => ({ term: s.name, scale: r.cols[i].note, coef: s.coef, se: s.se, hr: s.hr, hr_95ci: [s.hrLow, s.hrHigh], p: s.p })),
-        test_performance: { c_index: r.cIndex, c_index_95ci_bootstrap: r.cCI, horizon: r.horizon, mean_predicted_risk: r.meanPred, observed_risk_kaplan_meier: r.obsAll, calibration_groups: r.calib }
+        test_performance: { c_index: r.cIndex, c_index_95ci_bootstrap: r.cCI, horizon: r.horizon, time_dependent_auc: r.tdAuc, time_dependent_auc_95ci_bootstrap: r.tdCI, brier_score_ipcw: r.brier, brier_score_null_km: r.brierNull, scaled_brier: r.scaledBrier, mean_predicted_risk: r.meanPred, observed_risk_kaplan_meier: r.obsAll, calibration_groups: r.calib }
     };
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -8034,7 +8599,8 @@ function collect(source) {
     }
     const res = AppState.allTestedResults || [];
     const top = res[0] ? res[0].evalRes : AppState.evalResults;
-    const protocol = top && top.protocol === 'option-c' ? `internal validation by bootstrap optimism correction (${(top.optimismCorrection || {}).B || '?'} resamples; all patients used for training)`
+    const oc = top && top.optimismCorrection;
+    const protocol = top && top.protocol === 'option-c' ? `bootstrap internal validation (${(oc || {}).B || '?'} resamples; all patients used for training; imputation, encoding and scaling${oc && oc.tuning === 'repeated' ? ' and hyperparameter tuning' : ''} repeated in every resample; Harrell's optimism correction for regression-type models and the .632+ estimate for flexible models${oc && oc.selection && oc.selection.repeated ? '; the choice between models was also repeated in every resample' : ''})`
         : top && top.protocol === 'option-b' ? 'external validation on a separate testing dataset (Dataset ii)'
         : `single ${describeSplit(top && top.splitInfo)} (${top && top.trainPct ? top.trainPct : 80}/${top && top.testPct ? top.testPct : 20})`;
     return {
@@ -8083,7 +8649,7 @@ function buildChecklist(source) {
         ['Analytical methods: validation', 'Internal validation approach and how performance was estimated.', `Validation: ${esc(d.validation)}. Model selection: ${esc(d.selection)}.${d.seed !== null && d.seed !== undefined ? ` Random seed ${d.seed}.` : ''}`, 'auto'],
         ['Analytical methods: performance measures', 'Measures of discrimination, calibration and clinical utility, with uncertainty.', `Discrimination (ROC-AUC / C-index, DeLong comparison), calibration (plot, slope, intercept, Brier score), decision curve analysis; percentile bootstrap 95% CIs over test patients${d.source === 'standard' && d.threshold ? `; decision threshold ${d.threshold}` : ''}.`, 'auto'],
         ['Class imbalance', 'Methods used to handle class imbalance and their effect on calibration.', esc(d.imbalance) + (d.recalibration && d.recalibration !== 'none' ? `; recalibration: ${esc(d.recalibration)}` : ''), 'auto'],
-        ['Fairness', 'Approaches to assess and address model fairness across groups.', `Not assessed automatically. ${AUTHOR} (e.g. performance by sex, age group, ethnicity, site)`, 'author'],
+        ['Fairness', 'Approaches to assess and address model fairness across groups.', `The app's subgroup panel reports, for a chosen column on the Testing set, the number of patients and events, AUC, observed and mean predicted risk (O:E), Brier score, sensitivity, specificity and net benefit in each group; results are not copied here automatically. ${AUTHOR} (state the groups examined, e.g. sex, age group, ethnicity, site, and what was found)`, 'partly'],
         ['Model output', 'What the model outputs (probabilities, classes) and how thresholds were chosen.', `Probabilities for each outcome class (or a numerical prediction); class assignment at a decision threshold of ${d.threshold ?? 0.5} chosen a priori, not tuned on the test set.`, 'auto'],
         ['Ethics, funding, conflicts, protocol, registration', 'Ethical approval, funding, competing interests, protocol and registration.', AUTHOR, 'author'],
         ['Open science', 'Availability of data, code and the model.', `Analysis performed in-browser with Universal Medical ML/NeuralNet Predictor v${APP_VERSION}; the trained model and settings can be exported as JSON files for sharing. ${AUTHOR} (data and code availability statements)`, 'partly'],
@@ -8483,12 +9049,31 @@ function handleUnexpectedError(err) {
 
 
 
+
+
 AppState.pipeline = createEmptyPipelineState(42);
 
 window.addEventListener('error', (e) => handleUnexpectedError(e.error || e.message));
 window.addEventListener('unhandledrejection', (e) => handleUnexpectedError(e.reason));
 
+// Delegated handling of controls marked with data-action (see actionAttrs in core.js): window[fn] is called
+// with the stored arguments, then the selected index (for a change) and the event. No inline handlers.
+function runAction(e, kind) {
+    const el = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
+    if (!el || (el.dataset.event || 'click') !== kind) return;
+    const fn = window[el.dataset.action];
+    if (typeof fn !== 'function') return;
+    let args = [];
+    try { args = JSON.parse(el.dataset.args || '[]'); } catch (err) { args = []; }
+    if (kind === 'change') args.push(el.selectedIndex);
+    fn(...args, e);
+}
+document.addEventListener('click', e => runAction(e, 'click'));
+document.addEventListener('change', e => runAction(e, 'change'));
+
 function start() {
+    // Seed boxes inside the model cards: a click there must not also select the card
+    document.querySelectorAll('[data-stop-click]').forEach(el => el.addEventListener('click', e => e.stopPropagation()));
     initDOM();
     setupEventListeners();
     document.getElementById('standard-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('standard'));

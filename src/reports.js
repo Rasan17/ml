@@ -1,5 +1,5 @@
 // reports.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { APP_VERSION, AppState, MODEL_INFO, escapeHtml, rankingMetricLabel } from './core.js';
+import { APP_VERSION, AppState, MODEL_INFO, escapeHtml, rankingMetricLabel, actionAttrs } from './core.js';
 import { describeSplit } from './cv-tuning.js';
 import { executePipelineStep7 } from './pipeline.js';
 import { SETTINGS_APP } from './settings.js';
@@ -39,7 +39,7 @@ function renderPipelineVsBaselineComparison() {
                     You have successfully completed the 7-Step Pipeline with <strong>${escapeHtml(pipeBest.name)}</strong> (${metricSummary}).<br>
                     To see whether the 7-Step Pipeline predicts better than the standard workflow on this cohort, click below:
                     <div style="margin-top: 10px;">
-                        <button class="btn btn-primary btn-sm" onclick="window.trainStandardBaselineFromPipeline && window.trainStandardBaselineFromPipeline()">
+                        <button class="btn btn-primary btn-sm" ${actionAttrs('trainStandardBaselineFromPipeline')}>
                             ⚖️ Train Standard Baseline &amp; Compare
                         </button>
                         <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 6px;">Uses your Step 4 model choices and the same train/test split as the pipeline, then brings you straight back here with the comparison.</div>
@@ -179,7 +179,7 @@ function renderPipelineVsBaselineComparison() {
             <span>${AppState.baselineJustTrained
                 ? `✓ Standard baseline trained just now${trainedAt ? ` (${trainedAt})` : ''} with the same train/test split as the pipeline.`
                 : `ℹ️ This comparison uses the standard-workflow (Step 4) results already trained${trainedAt ? ` at ${trainedAt}` : ''}, so no new training was needed. If you have since changed settings, re-run it to compare like with like.`}</span>
-            <button type="button" class="btn btn-outline btn-sm" onclick="window.trainStandardBaselineFromPipeline && window.trainStandardBaselineFromPipeline()">↻ Re-run baseline &amp; compare</button>
+            <button type="button" class="btn btn-outline btn-sm" ${actionAttrs('trainStandardBaselineFromPipeline')}>↻ Re-run baseline &amp; compare</button>
         </div>
         <div style="margin-bottom: 14px; font-size: 13px; color: var(--text-secondary);">
             Results of each workflow's best model for <strong>${escapeHtml(AppState.fileName || 'Cohort')}</strong>, ${sameTestPatients ? 'both scored on the <strong>same</strong> test patients' : 'each scored on its <strong>own</strong> test patients'}.

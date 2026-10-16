@@ -1,5 +1,5 @@
 // single-prediction.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { AppState, displayModelName, escapeHtml, probabilityLabel } from './core.js';
+import { AppState, displayModelName, escapeHtml, probabilityLabel, actionAttrs } from './core.js';
 import { thresholdedOutput } from './cv-tuning.js';
 import { renderPatientExplanation } from './panels.js';
 import { DOM } from './shell.js';
@@ -101,7 +101,7 @@ function runSinglePrediction() {
         : (AppState.evalResults?.seed !== null && AppState.evalResults?.seed !== undefined ? AppState.evalResults.seed : null);
 
     const seedSnippet = activeSeed !== null
-        ? ` &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px; cursor: pointer;" onclick="window.copySeedToClipboard(${activeSeed})" title="Click to copy reproducibility seed">🌱 ${activeSeed} 📋</code>`
+        ? ` &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px; cursor: pointer;" ${actionAttrs('copySeedToClipboard', activeSeed)} title="Click to copy reproducibility seed">🌱 ${activeSeed} 📋</code>`
         : '';
 
     if (prep.isClassification) {
