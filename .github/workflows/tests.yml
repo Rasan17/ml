@@ -48,9 +48,14 @@ jobs:
         run: python tests/nn_forward_check.py
 
   ui:
-    # Browser smoke tests of the interface (Playwright, Chromium)
+    # Browser tests of the interface (Playwright) in Chromium, Firefox and WebKit (Safari's engine)
+    name: ui (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -59,12 +64,12 @@ jobs:
       - name: Install Playwright
         run: |
           npm ci --no-audit --no-fund
-          npx playwright install --with-deps chromium
-      - name: Run browser smoke tests
-        run: npx playwright test
+          npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run browser tests
+        run: npx playwright test --project=${{ matrix.browser }}
       - name: Keep the test report on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.browser }}
           path: test-results/
