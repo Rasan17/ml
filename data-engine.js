@@ -1864,7 +1864,6 @@
         calculateVIF(trainRows, featureCols, columnConfigs) {
             // Build design matrix with reference category dropped for nominal features
             const encodedCols = [];
-            const colMapping = {}; // maps encoded column name back to original feature name
 
             featureCols.forEach(col => {
                 const conf = columnConfigs[col];

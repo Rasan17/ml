@@ -4,7 +4,7 @@
 // against Kaplan-Meier observed risk; Kaplan-Meier curves by predicted-risk group; single-patient prediction.
 /* global DataEngine, ModelEngine */
 import { AppState, escapeHtml, APP_VERSION } from './core.js';
-import { lineChartSvg, chartLegend, CURVE_COLOURS } from './panels.js';
+import { lineChartSvg, chartLegend } from './panels.js';
 
 const SURV = { result: null };
 

@@ -2893,12 +2893,28 @@
          * Censoring distribution G(t) = P(still uncensored at t): the Kaplan-Meier estimate with censoring as the
          * "event" (from the training patients). Used to weight the time-dependent measures (IPCW).
          */
-        censoringKM(time, event) { return this.kaplanMeier(time, event.map(e => (e === 1 ? 0 : 1))); },
+        // At tied times events come first and leave the risk set before censoring (the convention of
+        // scikit-survival's reverse Kaplan-Meier, so the weights can be checked against it exactly)
+        censoringKM(time, event) {
+            const ts = [...new Set(time)].sort((a, b) => a - b);
+            let G = 1;
+            const out = [{ time: 0, survival: 1 }];
+            ts.forEach(t => {
+                let atRisk = 0, events = 0, censored = 0;
+                for (let i = 0; i < time.length; i++) {
+                    if (time[i] >= t) atRisk++;
+                    if (time[i] === t) { if (event[i] === 1) events++; else censored++; }
+                }
+                const n = atRisk - events;
+                if (censored > 0 && n > 0) { G *= 1 - censored / n; out.push({ time: t, survival: G }); }
+            });
+            return out;
+        },
 
         /**
          * Time-dependent AUC at horizon tau (cumulative cases / dynamic controls, Uno et al. 2007): of a
          * patient with the event by tau and one still event-free after tau, how often the first had the
-         * higher risk. Cases are weighted by 1/G(T−) for censoring. Returns null if not estimable.
+         * higher risk. Cases are weighted by 1/G(T) for censoring (as in scikit-survival). Returns null if not estimable.
          */
         timeDependentAUC(time, event, risk, tau, censKM) {
             let num = 0, den = 0;
@@ -2907,7 +2923,7 @@
             if (!controls.length) return null;
             for (let i = 0; i < time.length; i++) {
                 if (!(event[i] === 1 && time[i] <= tau)) continue;
-                const g = this.kmBefore(censKM, time[i]);
+                const g = this.kmAt(censKM, time[i]);
                 if (!(g > 0)) continue;
                 const w = 1 / g;
                 let c = 0;
@@ -2927,7 +2943,7 @@
             const gTau = this.kmAt(censKM, tau);
             let sum = 0;
             for (let i = 0; i < time.length; i++) {
-                if (time[i] <= tau && event[i] === 1) { const g = this.kmBefore(censKM, time[i]); if (g > 0) sum += (survAtTau[i] ** 2) / g; }
+                if (time[i] <= tau && event[i] === 1) { const g = this.kmAt(censKM, time[i]); if (g > 0) sum += (survAtTau[i] ** 2) / g; }
                 else if (time[i] > tau && gTau > 0) sum += ((1 - survAtTau[i]) ** 2) / gTau;
             }
             return time.length ? sum / time.length : null;

@@ -2,7 +2,6 @@
 import { fitAndScore, fitModel } from './compute.js';
 import { TUNE_MAX_ROWS, TUNABLE_MODELS, tuningGrid, makeFolds, assignRowFolds, capRows, effectiveFolds, buildRowFolds, runTuningCore } from './validation-core.js';
 import { AppState, MODEL_INFO, RANKING_METRICS, escapeHtml, parseSeed, rankingMetricKey } from './core.js';
-import { disposeModels, evalAbortOpts, fitWithYields } from './training-actions.js';
 // =========================================================================
 // AUTOMATIC TUNING (standard workflow, Step 4): k-fold cross-validation inside the Training set
 // =========================================================================

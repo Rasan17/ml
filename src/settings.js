@@ -7,7 +7,7 @@ import { goToPipelineSubstep, updatePipelineCompleteCaseInfo } from './pipeline.
 import { executePipelineStep6 } from './pipeline-balance.js';
 import { executePipelineStep1 } from './pipeline-step1.js';
 import { executePipelineStep7 } from './pipeline-train.js';
-import { DOM, initDOM, setupEventListeners } from './shell.js';
+import { DOM } from './shell.js';
 import { startModelTraining } from './standard-training.js';
 import { showSeedToast, syncRankingSelectors } from './training-actions.js';
 import { renderVariableConfigGrid } from './variables.js';

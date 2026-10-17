@@ -5,6 +5,7 @@
 // ---- src/core.js ----
 // core.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 
+
 // Application State
 const AppState = {
     currentStep: 1,
@@ -2244,7 +2245,6 @@ function renderDataOverview() {
         if (analysis[h].missingCount > 0) colsWithMissing++;
     });
 
-    const targetCandidate = headers.find(h => AppState.columnConfigs[h].role === 'target') || headers[headers.length - 1];
 
     DOM.dataStatsGrid.innerHTML = `
         <div class="stat-card">
@@ -3983,7 +3983,6 @@ function updateImputationEstimate() {
 
 // ---- src/cv-tuning.js ----
 // cv-tuning.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-
 
 
 
@@ -5761,7 +5760,6 @@ function renderEvaluationDashboard() {
 
 
 
-
 // =========================================================================
 // STEP 5: SINGLE PREDICTION (CLINICAL PATIENT PREDICTOR)
 // =========================================================================
@@ -5777,7 +5775,6 @@ function renderSinglePredictionForm() {
         const fieldId = `predict-field-${colIdx}`;
 
         if (meta.type === 'continuous') {
-            const step = (meta.max - meta.min) > 20 ? '1' : '0.01';
             formHtml += `
                 <div class="form-field">
                     <label for="${fieldId}">
@@ -8093,7 +8090,6 @@ window.trainStandardBaselineFromPipeline = async function () {
 
 // ---- src/reports.js ----
 // reports.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-
 
 
 

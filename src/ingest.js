@@ -178,7 +178,6 @@ function renderDataOverview() {
         if (analysis[h].missingCount > 0) colsWithMissing++;
     });
 
-    const targetCandidate = headers.find(h => AppState.columnConfigs[h].role === 'target') || headers[headers.length - 1];
 
     DOM.dataStatsGrid.innerHTML = `
         <div class="stat-card">

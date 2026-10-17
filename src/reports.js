@@ -1,7 +1,6 @@
 // reports.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { APP_VERSION, AppState, MODEL_INFO, RESEARCH_USE_NOTICE, escapeHtml, rankingMetricLabel, actionAttrs } from './core.js';
 import { describeSplit } from './cv-tuning.js';
-import { executePipelineStep7 } from './pipeline-train.js';
 import { SETTINGS_APP } from './settings.js';
 import { DOM } from './shell.js';
 

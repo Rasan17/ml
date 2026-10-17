@@ -129,6 +129,32 @@ chk('Kaplan-Meier Greenwood standard error (vs statsmodels SurvfuncRight)',o['km
 def _loglog(S,se):
     w=1.959964*se/(S*abs(np.log(S))); ll=np.log(-np.log(S)); return [np.exp(-np.exp(ll+w)),np.exp(-np.exp(ll-w))]
 chk('Kaplan-Meier 95% CI on the log(-log) scale (from statsmodels S and SE)',[v for p in o['kmCI'] for v in p],[v for t in [0.5,1,2] for v in _loglog(sf.surv_prob[sf.surv_times<=t][-1],sf.surv_prob_se[sf.surv_times<=t][-1])],1e-9)
+# Time-dependent AUC (Uno, cumulative/dynamic) and Brier score with censoring weights, vs scikit-survival
+try:
+    from sksurv.metrics import cumulative_dynamic_auc, brier_score
+    from sksurv.util import Surv
+    sd=o['survTD']
+    ytr=Surv.from_arrays(np.array(sd['trE'],bool),np.array(sd['trT'])); yte=Surv.from_arrays(np.array(sd['teE'],bool),np.array(sd['teT']))
+    auc_ref=[cumulative_dynamic_auc(ytr,yte,np.array(sd['risk']),[t])[0][0] for t in sd['taus']]
+    chk('Time-dependent AUC with censoring weights (vs scikit-survival cumulative_dynamic_auc)',sd['auc'],auc_ref,1e-10)
+    bs_ref=[brier_score(ytr,yte,np.array(sd['surv'][k]).reshape(-1,1),[t])[1][0] for k,t in enumerate(sd['taus'])]
+    chk('Brier score with censoring weights (vs scikit-survival brier_score)',sd['brier'],bs_ref,1e-10)
+except ImportError:
+    print('scikit-survival not installed: time-dependent AUC and Brier checks skipped (pip install scikit-survival)')
+# Riley minimum sample size (binary outcome) vs the pmsampsize package, every criterion and the final size
+try:
+    import io, contextlib
+    import pmsampsize.pmsampsize as _pms
+    app_n, ref_n = [], []
+    for c in o['riley']:
+        with contextlib.redirect_stdout(io.StringIO()):
+            r = _pms.pmsampsize(type='b', parameters=c['p'], csrsquared=c['r2'], prevalence=c['prev'], noprint=True)
+        rows = [x for x in r['results_table'] if isinstance(x, list)]
+        app_n += c['crit'] + [c['n']]
+        ref_n += [rows[0][1], rows[1][1], rows[2][1], r['sample_size']]
+    chk('Riley minimum sample size, binary outcome: 3 criteria and final size (vs pmsampsize)', app_n, ref_n, 0.5)
+except ImportError:
+    print('pmsampsize not installed: Riley sample-size check skipped (pip install pmsampsize)')
 w=max(len(x[1]) for x in res)
 for st,nm,d,t in res: print(f'{st}  {nm:<{w}}  max|diff|={d:.2e}  (tol {t:.0e})')
 print(f"\n{sum(1 for x in res if x[0]=='PASS')}/{len(res)} checks passed")

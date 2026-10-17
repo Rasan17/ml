@@ -1,5 +1,4 @@
 // core.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { createEmptyPipelineState } from './ingest.js';
 
 
 // Application State

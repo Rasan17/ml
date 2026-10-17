@@ -63,5 +63,22 @@ out.rubin=ME.poolRubin(out.rubinIn,120); out.tq=[ME.tQuantile(0.975,4.3),ME.tQua
 const cxX=[],cxT=[],cxE=[];for(let i=0;i<250;i++){const a=rnd()*2-1,b=rnd()<0.5?1:0,c=rnd()*2-1; const h=Math.exp(0.8*a-0.5*b+0.3*c); const t=-Math.log(rnd()||1e-9)/h, cens=rnd()*2.5; cxX.push([a,b,c]); cxT.push(Math.round(Math.min(t,cens)*20)/20+0.05); cxE.push(t<=cens?1:0);}
 const cox=new window.CoxModel().fit(cxX,cxT,cxE); out.cxX=cxX; out.cxT=cxT; out.cxE=cxE; out.cox={beta:cox.beta,se:cox.se,loglik:cox.loglik,converged:cox.converged,H:[0.3,0.8,1.5].map(t=>cox.cumHazAt(t))};
 out.cindex=ME.concordanceIndex(cxT,cxE,cxX.map(x=>cox.linearPredictor(x))); const km=ME.kaplanMeier(cxT,cxE); out.km=[0.5,1,2].map(t=>ME.kmAt(km,t)); out.kmSE=[0.5,1,2].map(t=>ME.kmStepAt(km,t).se); out.kmCI=[0.5,1,2].map(t=>{const s=ME.kmStepAt(km,t); return [s.lower,s.upper];});
+// Time-dependent AUC and censoring-weighted Brier score (checked against scikit-survival); a train/test pair with
+// ties and censoring; censoring weights from the training patients, as in the app's survival tab
+{
+    const r2 = DE.createPRNG(77);
+    const mk = n => Array.from({ length: n }, () => { const x = r2() * 2 - 1; const t = Math.round((-Math.log(r2() || 1e-9) / Math.exp(x)) * 20) / 10 + 0.1; const c = Math.round((-Math.log(r2() || 1e-9) / 0.5) * 20) / 10 + 0.1; return { x, t: Math.min(t, c), e: t <= c ? 1 : 0 }; });
+    const tr = mk(300), te = mk(200), taus = [0.5, 1, 1.5];
+    const cens = ME.censoringKM(tr.map(d => d.t), tr.map(d => d.e));
+    out.survTD = { trT: tr.map(d => d.t), trE: tr.map(d => d.e), teT: te.map(d => d.t), teE: te.map(d => d.e), risk: te.map(d => d.x), taus,
+        auc: taus.map(tau => ME.timeDependentAUC(te.map(d => d.t), te.map(d => d.e), te.map(d => d.x), tau, cens)),
+        surv: taus.map(tau => te.map(d => Math.exp(-Math.exp(d.x) * tau))),
+        brier: taus.map(tau => ME.ipcwBrier(te.map(d => d.t), te.map(d => d.e), te.map(d => Math.exp(-Math.exp(d.x) * tau)), tau, cens)) };
+}
+// Riley et al. minimum sample size, binary outcome (checked against the pmsampsize package)
+out.riley = [[24, 0.174, 0.288], [10, 0.3, 0.1], [30, 0.05, 0.04], [15, 0.5, 0.25]].map(([p, prev, r2]) => {
+    const r = ME.rileySampleSize({ type: 'binary', p, prevalence: prev, r2 });
+    return { p, prev, r2, n: r.n, crit: r.criteria.map(c => c.n) };
+});
 fs.writeFileSync(path.join(__dirname,'reference_values.json'),JSON.stringify(out));
 console.log('App values written to tests/reference_values.json; now run: python3 tests/reference_check.py');

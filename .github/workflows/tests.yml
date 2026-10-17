@@ -23,7 +23,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python reference libraries
-        run: pip install numpy scipy scikit-learn statsmodels
+        run: pip install numpy scipy scikit-learn statsmodels scikit-survival pmsampsize
 
       - name: Fallback bundle and import-map versions are up to date with src/
         run: |

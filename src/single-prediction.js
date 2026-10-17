@@ -3,7 +3,6 @@ import { AppState, displayModelName, escapeHtml, probabilityLabel, actionAttrs }
 import { thresholdedOutput } from './cv-tuning.js';
 import { renderPatientExplanation } from './panels.js';
 import { DOM } from './shell.js';
-import { copySeedToClipboard } from './training-actions.js';
 // =========================================================================
 // STEP 5: SINGLE PREDICTION (CLINICAL PATIENT PREDICTOR)
 // =========================================================================
@@ -19,7 +18,6 @@ function renderSinglePredictionForm() {
         const fieldId = `predict-field-${colIdx}`;
 
         if (meta.type === 'continuous') {
-            const step = (meta.max - meta.min) > 20 ? '1' : '0.01';
             formHtml += `
                 <div class="form-field">
                     <label for="${fieldId}">
