@@ -5930,6 +5930,7 @@ function runSinglePrediction() {
 
 
 
+
 // =========================================================================
 // STEP 6: BATCH PREDICTION FACILITY
 // =========================================================================
@@ -5964,6 +5965,7 @@ function processBatchCSV(csvText, name) {
     try {
         const parsed = DataEngine.parseCSV(csvText);
         AppState.batchData = parsed;
+        AppState.batchFileName = name;
         DOM.runBatchPredictBtn.disabled = false;
         alert(`Uploaded batch file "${name}" with ${parsed.totalRows} records.`);
     } catch (e) {
@@ -6056,6 +6058,9 @@ async function executeBatchPrediction() {
     }
 
     AppState.batchPredictions = results;
+    // The file also contains the outcome: validate the model on these patients
+    if (headers.includes(prep.targetCol)) await validateOnLabelledCohort(rows, AppState.batchFileName);
+    else { const vb = document.getElementById('external-validation-container'); if (vb) vb.innerHTML = ''; }
     DOM.batchResultsCard.style.display = 'flex';
     DOM.downloadBatchCsvBtn.disabled = false;
 
@@ -9053,6 +9058,7 @@ ${items.map(([t, w, v, st]) => `<tr><td><strong>${esc(t)}</strong></td><td>${esc
 
 
 
+
 const REPORT_CSS = `
 :root { --bg: #fff; --text-primary: #0f172a; --text-secondary: #334155; --text-muted: #64748b; --border-color: #cbd5e1;
   --accent-cyan: #0e7490; --accent-emerald: #047857; --accent-amber: #b45309; --accent-rose: #be123c; --accent-purple: #7e22ce;
@@ -9170,6 +9176,144 @@ ${sections.join('\n')}
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+// Validation report: the active model scored on a labelled cohort (Step 6), as a printable page
+function downloadValidationReport() {
+    const v = AppState.externalValidation;
+    if (!v || !v.ev) { alert('Validate a model on a labelled cohort first (Step 6, with a file that contains the outcome).'); return; }
+    const { ev, prep, name } = v;
+    const item = { name, ev };
+    const positiveLabel = ev.positiveClass !== null && ev.positiveClass !== undefined ? String(ev.positiveClass) : 'positive outcome';
+    const binary = prep.isClassification && ev.probPositive && ev.calibration;
+    const c = ev.validationCohort || {};
+    const info = AppState.deployedSource === 'imported' ? (AppState.importedModelInfo || {}) : {};
+    const sections = [
+        `<h2>1. Model and validation cohort</h2>
+         <p>Model: <strong>${escapeHtml(name)}</strong>${info.dataset ? `, developed on ${escapeHtml(String(info.dataset))}` : AppState.fileName ? `, developed on ${escapeHtml(AppState.fileName)}` : ''}${info.exportedAt ? ` (exported ${escapeHtml(String(info.exportedAt).slice(0, 10))})` : ''}. Outcome: ${escapeHtml(prep.targetCol)}.</p>
+         <p>Validation cohort: ${escapeHtml(c.fileName || '—')}, ${c.n} patients analysed of ${c.provided} rows${c.missingOutcome ? `; ${c.missingOutcome} without a usable outcome` : ''}${c.unknownClass ? `; ${c.unknownClass} with an unknown outcome category` : ''}${c.imputedCells ? `; ${c.imputedCells} blank or unrecognised predictor values filled with the model's own missing-data method` : ''}. The model was applied exactly as saved (no refitting). This is an external validation only if none of these patients contributed to developing the model.</p>`,
+        `<h2>2. Performance</h2><table><tbody>${validationSummary(ev, prep).map(([k, val]) => `<tr><th style="width: 45%;">${k}</th><td>${val}</td></tr>`).join('')}</tbody></table>
+         <p class="meta">95% confidence intervals: percentile bootstrap over the validation patients (1,000 resamples).</p>`
+    ];
+    if (binary) {
+        sections.push(`<h2>3. Discrimination</h2>${discriminationSection([item], positiveLabel)}`);
+        sections.push(`<h2>4. Calibration, thresholds and clinical usefulness</h2>${calibrationBody(item, positiveLabel)}`);
+    } else if (!prep.isClassification) {
+        sections.push(`<h2>3. Prediction errors</h2>${residualSection(ev, prep.targetCol)}`);
+    }
+    sections.push(`<h2>Interpretation</h2><ul>
+        <li>Discrimination (AUC) shows how well the model ranks patients in this cohort; calibration shows whether its predicted risks match what happened here.</li>
+        <li>An O:E ratio away from 1 or an intercept away from 0 means the average risk differs from the development setting (case mix, care); a slope below 1 means predictions are too extreme. These are commonly corrected by updating the model's calibration with local data, which should itself be validated.</li>
+        <li>Small validation cohorts give wide confidence intervals; at least 100–200 patients with the outcome (and as many without) are commonly recommended.</li></ul>`);
+    const title = `Validation report: ${name} for ${prep.targetCol}`;
+    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title><style>${REPORT_CSS}</style></head><body>
+<h1>${escapeHtml(title)}</h1>
+<div class="meta">Universal Medical ML/NeuralNet Predictor ${escapeHtml(APP_VERSION)} · generated ${escapeHtml(new Date().toLocaleString('en-GB'))}</div>
+<div class="notice">${escapeHtml(RESEARCH_USE_NOTICE)}</div>
+${sections.join('\n')}
+<p class="meta">Use your browser's Print command (Save as PDF) for a PDF copy.</p>
+</body></html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `validation-report-${new Date().toISOString().slice(0, 10)}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+// ---- src/external-validation.js ----
+// external-validation.js: validation of the active model (trained here or imported from a file) on a labelled
+// cohort. When a batch file also contains the model's outcome column, the frozen model is scored on those
+// patients: discrimination, calibration, clinical usefulness and subgroups, with bootstrap confidence intervals,
+// and a printable validation report. Nothing is refitted: preprocessing and model are used exactly as saved.
+/* global DataEngine, ModelEngine */
+
+
+
+
+const vPct = v => (typeof v === 'number' && isFinite(v) ? `${(v * 100).toFixed(1)}%` : '—');
+const vNum = (v, d = 3) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : '—');
+const vCi = (ev, k, f) => (ev.ci && ev.ci[k] ? ` <span class="tune-sd">(95% CI ${f(ev.ci[k][0])}–${f(ev.ci[k][1])})</span>` : '');
+
+// Summary figures of a validation (binary, multi-category or numerical outcome)
+function validationSummary(ev, prep) {
+    const rows = [];
+    if (!prep.isClassification) {
+        rows.push(['R²', vNum(ev.r2) + vCi(ev, 'r2', vNum)], ['RMSE (lower is better)', vNum(ev.rmse) + vCi(ev, 'rmse', vNum)], ['MAE (lower is better)', vNum(ev.mae) + vCi(ev, 'mae', vNum)]);
+        if (Array.isArray(ev.actuals) && Array.isArray(ev.predictions)) {
+            const mo = ev.actuals.reduce((a, b) => a + b, 0) / ev.actuals.length, mp = ev.predictions.reduce((a, b) => a + b, 0) / ev.predictions.length;
+            rows.push(['Mean observed vs mean predicted', `${vNum(mo, 2)} vs ${vNum(mp, 2)}`]);
+        }
+        return rows;
+    }
+    const binary = (prep.targetClasses || []).length === 2 && Array.isArray(ev.probPositive);
+    if (binary) {
+        const y = ev.actuals.map(v => (v === 1 ? 1 : 0));
+        const events = y.reduce((a, b) => a + b, 0), meanP = ev.probPositive.reduce((a, b) => a + b, 0) / y.length;
+        const cm = ev.confMatrix || [[0, 0], [0, 0]];
+        const sens = (cm[1][0] + cm[1][1]) ? cm[1][1] / (cm[1][0] + cm[1][1]) : null, spec = (cm[0][0] + cm[0][1]) ? cm[0][0] / (cm[0][0] + cm[0][1]) : null;
+        const cal = ev.calibration || {};
+        rows.push(
+            ['Patients with the outcome ("' + escapeHtml(String(prep.targetIdxToClass[1])) + '")', `${events} of ${y.length} (${vPct(events / y.length)})`],
+            ['ROC-AUC (discrimination)', vNum(ev.rocAuc) + vCi(ev, 'rocAuc', vNum)],
+            ['Observed vs mean predicted risk', `${vPct(events / y.length)} vs ${vPct(meanP)} (O:E ${vNum((events / y.length) / meanP, 2)})`],
+            ['Calibration slope (ideal 1)', vNum(cal.slope, 2) + vCi(ev, 'calibrationSlope', v => v.toFixed(2))],
+            ['Calibration intercept (ideal 0)', vNum(cal.intercept, 2) + vCi(ev, 'calibrationIntercept', v => v.toFixed(2))],
+            ['Brier score (lower is better)', vNum(ev.brierScore) + vCi(ev, 'brierScore', vNum)],
+            [`Sensitivity / specificity at the model's threshold (${vPct(ev.decisionThreshold || 0.5)})`, `${vPct(sens)} / ${vPct(spec)}`]);
+    } else {
+        rows.push(['Accuracy', vPct(ev.accuracy) + vCi(ev, 'accuracy', vPct)], ['Balanced accuracy', vPct(ev.balancedAccuracy) + vCi(ev, 'balancedAccuracy', vPct)], ['Macro F1', vPct(ev.macroF1) + vCi(ev, 'macroF1', vPct)]);
+    }
+    return rows;
+}
+
+/**
+ * Validates the active model on labelled rows (raw patient rows that include the outcome column).
+ * Renders into #external-validation-container; returns the evaluation (or null).
+ */
+async function validateOnLabelledCohort(rows, fileName) {
+    const box = document.getElementById('external-validation-container');
+    const prep = AppState.prepMeta, model = AppState.trainedModel;
+    if (!box) return null;
+    if (!prep || !model || !rows || !rows.length || !rows.some(r => !DataEngine.isMissing(r[prep.targetCol]))) { box.innerHTML = ''; AppState.externalValidation = null; return null; }
+    box.innerHTML = `<div class="cal-panel"><p class="tune-muted">Validating the model on the patients in ${escapeHtml(fileName || 'this file')}…</p></div>`;
+    await ModelEngine.yieldToBrowser();
+    const test = DataEngine.prepareTestingDataset(rows, prep);
+    const name = displayModelName(AppState.deployedModelId || AppState.selectedModelId, model);
+    if (test.X.length < 10) {
+        box.innerHTML = `<div class="cal-panel"><div class="tune-title">🧪 Validation on a labelled cohort</div><p class="tune-muted">Only ${test.X.length} patient(s) have a usable value of "${escapeHtml(prep.targetCol)}"; at least 10 are needed (and far more for a meaningful validation).</p></div>`;
+        return null;
+    }
+    const threshold = AppState.evalResults && AppState.evalResults.decisionThreshold;
+    const ev = await ModelEngine.evaluateAsync(model, test.X, test.y, prep.isClassification, prep.targetClasses,
+        prep.isClassification ? { decisionThreshold: threshold } : { regressionThreshold: null });
+    if (!ev) { box.innerHTML = ''; return null; }
+    ev.ci = await bootstrapFor(ev, 2024);
+    ev.validationCohort = { fileName: fileName || null, n: test.X.length, provided: rows.length, missingOutcome: test.missingTargetCount, unknownClass: test.unknownClassCount, imputedCells: test.imputedFeatureCells };
+    AppState.externalValidation = { ev, name, fileName, rows: test.validRows, prep };
+    const summary = validationSummary(ev, prep);
+    const sameAsTraining = AppState.fileName && fileName && AppState.fileName === fileName;
+    box.innerHTML = `
+        <div class="cal-panel">
+            <div class="cal-head">
+                <div class="tune-title">🧪 Validation of ${escapeHtml(name)} on ${escapeHtml(fileName || 'the uploaded patients')}</div>
+                <button type="button" id="external-validation-report-btn" class="btn btn-secondary btn-sm" title="Readable validation report; print it to PDF from the browser">🖨️ Printable Validation Report</button>
+            </div>
+            <p class="tune-muted">The file contains the outcome "${escapeHtml(prep.targetCol)}", so the model was scored on these ${test.X.length} patients exactly as saved: nothing was refitted.
+                ${ev.validationCohort.missingOutcome ? `${ev.validationCohort.missingOutcome} row(s) without a usable outcome were left out. ` : ''}${ev.validationCohort.unknownClass ? `${ev.validationCohort.unknownClass} row(s) with an outcome category the model does not know were left out. ` : ''}${ev.validationCohort.imputedCells ? `${ev.validationCohort.imputedCells} blank or unrecognised predictor value(s) were filled with the model's own missing-data method. ` : ''}
+                This is an <strong>external validation</strong> only if none of these patients were used to develop the model${sameAsTraining ? ' — <strong>caution: this file has the same name as the training data</strong>' : ''}.</p>
+            <table class="data-table thr-table"><tbody>${summary.map(([k, v]) => `<tr><th style="width: 45%;">${k}</th><td>${v}</td></tr>`).join('')}</tbody></table>
+            <p class="tune-muted">Models often keep their discrimination (AUC) in a new hospital but predict risks that are too high or too low on average (O:E away from 1, intercept away from 0), or too extreme (slope below 1). That is common when case mix or care differs, and is usually handled by updating the model's calibration with local data before use.</p>
+        </div>
+        <div id="external-validation-calibration"></div>
+        <div id="external-validation-subgroups"></div>`;
+    renderCalibrationPanel('external-validation-calibration', [{ name, ev }], prep.isClassification);
+    renderSubgroupPanel('external-validation-subgroups', [{ name, model, prep, threshold }], test.validRows, prep.isClassification);
+    document.getElementById('external-validation-report-btn').addEventListener('click', () => window.downloadValidationReport && window.downloadValidationReport());
+    return ev;
 }
 
 // ---- src/settings.js ----
@@ -9532,6 +9676,7 @@ function handleUnexpectedError(err) {
 
 
 
+
 AppState.pipeline = createEmptyPipelineState(42);
 
 window.addEventListener('error', (e) => handleUnexpectedError(e.error || e.message));
@@ -9560,6 +9705,7 @@ function start() {
     document.getElementById('standard-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('standard'));
     document.getElementById('pipeline-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('pipeline'));
     document.getElementById('standard-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('standard'));
+    window.downloadValidationReport = downloadValidationReport;
     document.getElementById('pipeline-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('pipeline'));
     document.getElementById('mi-select')?.addEventListener('change', updateImputationEstimate);
     // Keep the sample-size check in step with the chosen split and validation protocol

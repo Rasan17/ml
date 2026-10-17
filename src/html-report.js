@@ -5,6 +5,7 @@
 import { AppState, APP_VERSION, MODEL_INFO, RESEARCH_USE_NOTICE, escapeHtml } from './core.js';
 import { buildChecklist, methodsParagraph } from './tripod.js';
 import { calibrationBody, discriminationSection, renderOptimismPanel, residualSection } from './panels.js';
+import { validationSummary } from './external-validation.js';
 
 const REPORT_CSS = `
 :root { --bg: #fff; --text-primary: #0f172a; --text-secondary: #334155; --text-muted: #64748b; --border-color: #cbd5e1;
@@ -125,4 +126,50 @@ ${sections.join('\n')}
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
-export { downloadHtmlReport };
+// Validation report: the active model scored on a labelled cohort (Step 6), as a printable page
+function downloadValidationReport() {
+    const v = AppState.externalValidation;
+    if (!v || !v.ev) { alert('Validate a model on a labelled cohort first (Step 6, with a file that contains the outcome).'); return; }
+    const { ev, prep, name } = v;
+    const item = { name, ev };
+    const positiveLabel = ev.positiveClass !== null && ev.positiveClass !== undefined ? String(ev.positiveClass) : 'positive outcome';
+    const binary = prep.isClassification && ev.probPositive && ev.calibration;
+    const c = ev.validationCohort || {};
+    const info = AppState.deployedSource === 'imported' ? (AppState.importedModelInfo || {}) : {};
+    const sections = [
+        `<h2>1. Model and validation cohort</h2>
+         <p>Model: <strong>${escapeHtml(name)}</strong>${info.dataset ? `, developed on ${escapeHtml(String(info.dataset))}` : AppState.fileName ? `, developed on ${escapeHtml(AppState.fileName)}` : ''}${info.exportedAt ? ` (exported ${escapeHtml(String(info.exportedAt).slice(0, 10))})` : ''}. Outcome: ${escapeHtml(prep.targetCol)}.</p>
+         <p>Validation cohort: ${escapeHtml(c.fileName || '—')}, ${c.n} patients analysed of ${c.provided} rows${c.missingOutcome ? `; ${c.missingOutcome} without a usable outcome` : ''}${c.unknownClass ? `; ${c.unknownClass} with an unknown outcome category` : ''}${c.imputedCells ? `; ${c.imputedCells} blank or unrecognised predictor values filled with the model's own missing-data method` : ''}. The model was applied exactly as saved (no refitting). This is an external validation only if none of these patients contributed to developing the model.</p>`,
+        `<h2>2. Performance</h2><table><tbody>${validationSummary(ev, prep).map(([k, val]) => `<tr><th style="width: 45%;">${k}</th><td>${val}</td></tr>`).join('')}</tbody></table>
+         <p class="meta">95% confidence intervals: percentile bootstrap over the validation patients (1,000 resamples).</p>`
+    ];
+    if (binary) {
+        sections.push(`<h2>3. Discrimination</h2>${discriminationSection([item], positiveLabel)}`);
+        sections.push(`<h2>4. Calibration, thresholds and clinical usefulness</h2>${calibrationBody(item, positiveLabel)}`);
+    } else if (!prep.isClassification) {
+        sections.push(`<h2>3. Prediction errors</h2>${residualSection(ev, prep.targetCol)}`);
+    }
+    sections.push(`<h2>Interpretation</h2><ul>
+        <li>Discrimination (AUC) shows how well the model ranks patients in this cohort; calibration shows whether its predicted risks match what happened here.</li>
+        <li>An O:E ratio away from 1 or an intercept away from 0 means the average risk differs from the development setting (case mix, care); a slope below 1 means predictions are too extreme. These are commonly corrected by updating the model's calibration with local data, which should itself be validated.</li>
+        <li>Small validation cohorts give wide confidence intervals; at least 100–200 patients with the outcome (and as many without) are commonly recommended.</li></ul>`);
+    const title = `Validation report: ${name} for ${prep.targetCol}`;
+    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title><style>${REPORT_CSS}</style></head><body>
+<h1>${escapeHtml(title)}</h1>
+<div class="meta">Universal Medical ML/NeuralNet Predictor ${escapeHtml(APP_VERSION)} · generated ${escapeHtml(new Date().toLocaleString('en-GB'))}</div>
+<div class="notice">${escapeHtml(RESEARCH_USE_NOTICE)}</div>
+${sections.join('\n')}
+<p class="meta">Use your browser's Print command (Save as PDF) for a PDF copy.</p>
+</body></html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `validation-report-${new Date().toISOString().slice(0, 10)}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+export { downloadHtmlReport, downloadValidationReport };

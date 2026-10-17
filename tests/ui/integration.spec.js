@@ -137,3 +137,31 @@ test('7-step pipeline with recalibration and its printable report', async ({ pag
     expect(report).toContain('Calibration');
     expect(errors).toEqual([]);
 });
+
+test('external validation: an exported model is imported and validated on a separate labelled cohort', async ({ page }) => {
+    test.setTimeout(400000);
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await toStep4(page);
+    await page.locator('.model-card[data-model-id="glm"]').click();
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText(/Deployed|Complete/, { timeout: 170000 });
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#model-export-btn')]);
+    const modelFile = await dl.path();
+    // A colleague's fresh copy of the app: import the model, then a cohort that includes the outcome
+    await page.goto('/index.html');
+    await page.setInputFiles('#model-file-input', modelFile);
+    await expect(page.locator('#step-5-content')).toBeVisible();
+    await page.click('button.step-tab[data-step="6"]');
+    await page.setInputFiles('#batch-file-input', path.join(ROOT, 'medical_shunt_validation_cohort.csv'));
+    await page.click('#run-batch-predict-btn');
+    const panel = page.locator('#external-validation-container');
+    await expect(panel).toContainText('ROC-AUC', { timeout: 60000 });
+    await expect(panel).toContainText('87 of 150');
+    await expect(page.locator('#external-validation-calibration')).toContainText('Calibration');
+    const [rep] = await Promise.all([page.waitForEvent('download'), page.click('#external-validation-report-btn')]);
+    const html = fs.readFileSync(await rep.path(), 'utf8');
+    expect(html).toContain('Validation report');
+    expect(html).toContain('<svg');
+    expect(errors).toEqual([]);
+});

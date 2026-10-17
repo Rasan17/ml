@@ -2,6 +2,7 @@
 import { AppState, displayModelName, escapeHtml, probabilityLabel } from './core.js';
 import { thresholdedOutput } from './cv-tuning.js';
 import { DOM } from './shell.js';
+import { validateOnLabelledCohort } from './external-validation.js';
 
 
 // =========================================================================
@@ -38,6 +39,7 @@ function processBatchCSV(csvText, name) {
     try {
         const parsed = DataEngine.parseCSV(csvText);
         AppState.batchData = parsed;
+        AppState.batchFileName = name;
         DOM.runBatchPredictBtn.disabled = false;
         alert(`Uploaded batch file "${name}" with ${parsed.totalRows} records.`);
     } catch (e) {
@@ -130,6 +132,9 @@ async function executeBatchPrediction() {
     }
 
     AppState.batchPredictions = results;
+    // The file also contains the outcome: validate the model on these patients
+    if (headers.includes(prep.targetCol)) await validateOnLabelledCohort(rows, AppState.batchFileName);
+    else { const vb = document.getElementById('external-validation-container'); if (vb) vb.innerHTML = ''; }
     DOM.batchResultsCard.style.display = 'flex';
     DOM.downloadBatchCsvBtn.disabled = false;
 

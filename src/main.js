@@ -29,7 +29,8 @@ import './reports.js';
 import './model-io.js';
 import './survival.js';
 import { downloadTripodChecklist } from './tripod.js';
-import { downloadHtmlReport } from './html-report.js';
+import { downloadHtmlReport, downloadValidationReport } from './html-report.js';
+import './external-validation.js';
 import { handleUnexpectedError } from './settings.js';
 
 AppState.pipeline = createEmptyPipelineState(42);
@@ -60,6 +61,7 @@ function start() {
     document.getElementById('standard-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('standard'));
     document.getElementById('pipeline-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('pipeline'));
     document.getElementById('standard-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('standard'));
+    window.downloadValidationReport = downloadValidationReport;
     document.getElementById('pipeline-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('pipeline'));
     document.getElementById('mi-select')?.addEventListener('change', updateImputationEstimate);
     // Keep the sample-size check in step with the chosen split and validation protocol
