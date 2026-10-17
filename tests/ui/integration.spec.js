@@ -248,6 +248,7 @@ test('"How many predictors?" guide in Step 2 and pipeline Step 4 follows the sel
     await expect(guide).toContainText('0 predictor(s) = 0 parameter(s)');
     await expect(guide).toContainText('within the recommended number');
     await page.click('#var-include-all-btn');
+    await page.click('button.step-tab[data-step="1"]'); // the pipeline is launched from Step 1
     await page.click('#pipeline-direct-launch-btn');
     await page.click('#pipeline-step1-run-btn');
     for (const n of [2, 3, 4]) await page.click(`#subpill-${n}`);
