@@ -216,7 +216,7 @@ The suite includes built-in clinical datasets for instant experimentation:
 
 ## 🏛️ For ethics committees
 
-[`docs/ethics-committee-information-pack.html`](docs/ethics-committee-information-pack.html) describes, for research ethics and data-protection review, how patient data are handled (processed only in the browser, never transmitted; offline use), the intended use and regulatory status, what each export contains, and the accuracy and verification evidence. Open it in a browser and print it to PDF to submit it.
+[`docs/ethics-committee-information-pack.html`](docs/ethics-committee-information-pack.html) describes, for research ethics and data-protection review, how patient data are handled (processed only in the browser, never transmitted; offline use), the intended use and regulatory status, what each export contains, and the accuracy and verification evidence. Open it in a browser and print it to PDF to submit it, or use the editable Word version [`docs/ethics-committee-information-pack.docx`](docs/ethics-committee-information-pack.docx).
 
 ## ✅ Verification Tests
 
