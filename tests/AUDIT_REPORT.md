@@ -1,5 +1,24 @@
 # Independent checks with open-source audit tools
 
+## Code audit (October 2026)
+
+- **Static analysis:** ESLint 9 (recommended rules) over every source file: no undefined names, unreachable code
+  or other logic errors; unused imports and variables left over from refactoring were removed.
+- **Mathematics against Python libraries:** 66 reference checks against SciPy, scikit-learn, statsmodels,
+  scikit-survival and pmsampsize, run on every push. Added in this audit: the time-dependent AUC and
+  censoring-weighted Brier score (scikit-survival; the app now follows its conventions for tied times and
+  matches to 1e-16) and the Riley minimum sample size (pmsampsize; every criterion identical).
+- **Behaviour across browsers:** 19 browser tests in Chromium, Firefox and WebKit on every push, including
+  combinations most likely to break (settings round-trip with the newer controls; export and re-import of a
+  multiply imputed, recalibrated model with identical predictions; batch prediction with blanks and an
+  out-of-range value; Option B with multiple imputation; the pipeline with recalibration and its report) and
+  an axe-core accessibility scan (WCAG 2.1 AA) of every main screen in both themes.
+- **Engine tests:** 25 end-to-end checks (leakage on pure noise, .632+, patient-level bootstrap, Shapley values
+  against brute force, multiple imputation, reproducibility with fixed seeds, worker = page results), 9
+  edge-case checks and 9 neural-network forward-pass checks.
+
+## Open-source audit tools (Fairlearn and Deepchecks)
+
 October 2026. The app's own engine (preprocessing, models, subgroup code) was run on the simulated iNPH cohort
 (`medical_shunt_cohort_large.csv`, Option A split with seed 42: 336 training and 84 test patients) by
 `tests/audit_app_runner.js`, and its outputs were checked with two widely used open-source tools. The raw

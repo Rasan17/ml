@@ -215,16 +215,16 @@ The suite includes built-in clinical datasets for instant experimentation:
 
 ## ✅ Verification Tests
 
-From the project folder (Node.js; the reference check also needs Python with SciPy, scikit-learn and statsmodels):
+From the project folder (Node.js; the reference check also needs Python 3.12 with SciPy, scikit-learn, statsmodels, scikit-survival and pmsampsize):
 
 ```bash
-node tests/reference_check.js && python3 tests/reference_check.py   # 61 checks against SciPy / scikit-learn / statsmodels (incl. calibration, recalibration, DeLong, decision curve, IRLS odds ratios, Rubin's rules, t distribution, Cox model, C-index, Kaplan-Meier)
+node tests/reference_check.js && python3 tests/reference_check.py   # 66 checks against SciPy / scikit-learn / statsmodels / scikit-survival / pmsampsize (incl. calibration, recalibration, DeLong, decision curve, IRLS odds ratios, Rubin's rules, t distribution, Cox model, C-index, Kaplan-Meier with Greenwood CIs, time-dependent AUC and Brier score, Riley sample size)
 node tests/module_check.js                                         # every import between the src/ modules resolves
 node tests/edge_cases.js                                           # robustness: single class, all-missing, constant features, imbalance, zero-variance target
 node tests/end_to_end.js                                           # 19 end-to-end checks: binary/multiclass/regression, missing values, unseen categories, rare outcome, tiny cohort, patient/date splits, calibration, threshold, NN fallback, batch = evaluation preprocessing, export/import of all model types; Option C on pure noise (tuning repeated, .632+ for flexible models, model-selection correction); .632+ no-information rates; TreeSHAP and sampled Shapley vs brute force; time-dependent AUC/Brier under censoring
 python3 tests/benchmark_vs_python.py                               # app vs scikit-learn / PyTorch / imbalanced-learn (~2 min)
 python3 tests/nn_forward_check.py                                  # exact forward pass of the trained TF.js network, recomputed in NumPy
-npm ci && npx playwright install --with-deps && npx playwright test   # 14 browser tests in Chromium, Firefox and WebKit (Safari's engine): every workflow, yes/no, numerical and three-category outcomes, and an axe-core accessibility scan (WCAG 2.1 AA) of every main screen in both themes
+npm ci && npx playwright install --with-deps && npx playwright test   # 19 browser tests in Chromium, Firefox and WebKit (Safari's engine): every workflow; yes/no, numerical and three-category outcomes; settings round-trip; export/re-import of a multiply imputed, recalibrated model; batch prediction; and an axe-core accessibility scan (WCAG 2.1 AA) of every main screen in both themes
 node tools/build.js                                                # rebuild the file:// bundle and import-map versions after editing src/
 ```
 
