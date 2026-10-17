@@ -214,6 +214,10 @@ The suite includes built-in clinical datasets for instant experimentation:
 - **Assessing a model.** Report it following TRIPOD+AI and assess risk of bias and applicability with PROBAST+AI; the app's checklist export pre-fills the TRIPOD+AI items it can.
 - **Not a medical device.** For research and education only; not for individual clinical decisions without independent validation.
 
+## 🏛️ For ethics committees
+
+[`docs/ethics-committee-information-pack.html`](docs/ethics-committee-information-pack.html) describes, for research ethics and data-protection review, how patient data are handled (processed only in the browser, never transmitted; offline use), the intended use and regulatory status, what each export contains, and the accuracy and verification evidence. Open it in a browser and print it to PDF to submit it.
+
 ## ✅ Verification Tests
 
 From the project folder (Node.js; the reference check also needs Python 3.12 with SciPy, scikit-learn, statsmodels, scikit-survival and pmsampsize):

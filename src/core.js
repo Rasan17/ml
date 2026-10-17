@@ -173,7 +173,7 @@ function cssEscape(value) {
 }
 
 // Software version recorded in exported reports and settings files
-const APP_VERSION = '2026.10.16';
+const APP_VERSION = '2026.10.17';
 // Stamped on every exported report, model file and checklist
 const RESEARCH_USE_NOTICE = 'Investigational research and education use only. Not a certified medical device; not validated for individual clinical decisions.';
 

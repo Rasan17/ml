@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ethics Committee Information Pack</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,650&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+/* Layout: a single reading column like a submitted protocol document, with ruled tables and numbered sections */
+:root {
+  --paper: #fbfbf9;
+  --ink: #1d2430;
+  --ink-soft: #4a5466;
+  --rule: #d5d9e0;
+  --band: #eef1f4;
+  --accent: #1f5f73;
+  --caution: #8a4b0f;
+  --caution-bg: #fbf1e4;
+  --ok: #1e6b4f;
+  --font-display: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #14181e; --ink: #e6e9ee; --ink-soft: #a9b2c0; --rule: #333b47; --band: #1c222b; --accent: #7cc4d8; --caution: #f0b46e; --caution-bg: #2a2117; --ok: #7fd1ad; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --paper: #14181e; --ink: #e6e9ee; --ink-soft: #a9b2c0; --rule: #333b47; --band: #1c222b; --accent: #7cc4d8; --caution: #f0b46e; --caution-bg: #2a2117; --ok: #7fd1ad; color-scheme: dark }
+body { background: var(--paper); color: var(--ink); font: 15px/1.6 var(--font-body); }
+.page { max-width: 820px; margin: 0 auto; padding-block: 40px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.25; }
+h1 { font-size: 2rem; font-weight: 650; margin: 0 0 6px; }
+h2 { font-size: 1.35rem; font-weight: 650; margin: 40px 0 10px; padding-top: 14px; border-top: 2px solid var(--ink); }
+h3 { font-size: 1.05rem; font-weight: 650; margin: 22px 0 6px; }
+p, li { max-width: 68ch; }
+.subtitle { color: var(--ink-soft); margin: 0 0 18px; }
+.label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); font-weight: 600; }
+.doc-control { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 18px; padding: 14px 16px; background: var(--band); border-radius: 6px; margin: 14px 0 22px; }
+.doc-control div { min-width: 0; overflow-wrap: anywhere; }
+.doc-control .v { font-size: 0.92rem; }
+.notice { border: 2px solid var(--caution); background: var(--caution-bg); color: var(--ink); padding: 12px 14px; border-radius: 6px; margin: 16px 0; }
+.notice strong { color: var(--caution); }
+.table-wrap { overflow-x: auto; margin: 10px 0 14px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; vertical-align: top; padding: 7px 9px; border-bottom: 1px solid var(--rule); }
+thead th { border-bottom: 2px solid var(--ink); font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.yes { color: var(--caution); font-weight: 600; }
+.no { color: var(--ok); font-weight: 600; }
+code { font-family: var(--font-mono); font-size: 0.85em; background: var(--band); padding: 1px 4px; border-radius: 3px; overflow-wrap: anywhere; }
+.flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; margin: 12px 0; }
+.flow div { flex: 1 1 150px; min-width: 0; border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; font-size: 0.88rem; background: var(--paper); }
+.flow div b { display: block; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); margin-bottom: 4px; }
+.paste { border-left: 3px solid var(--accent); padding: 4px 0 4px 14px; margin: 10px 0; }
+footer { margin-top: 44px; padding-top: 12px; border-top: 1px solid var(--rule); color: var(--ink-soft); font-size: 0.85rem; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media print { .page { padding: 0; max-width: none; } h2 { break-after: avoid; } table, .notice, .flow { break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<div class="page">
+<div class="label">Information for research ethics committees and data-protection review</div>
+<h1>Universal Medical ML/NeuralNet Predictor</h1>
+<p class="subtitle">Ethics committee information pack: data handling, intended use, accuracy and verification</p>
+
+<div class="doc-control">
+  <div><div class="label">Software version</div><div class="v">2.1 (build 2026.10.17)</div></div>
+  <div><div class="label">Document date</div><div class="v">17 October 2026</div></div>
+  <div><div class="label">Web address</div><div class="v">rasan17.github.io/ml</div></div>
+  <div><div class="label">Source code</div><div class="v">github.com/Rasan17/ml</div></div>
+  <div><div class="label">Developer</div><div class="v">Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)</div></div>
+  <div><div class="label">Licence</div><div class="v">© 2026 Dr G Narenthiran. All rights reserved.</div></div>
+</div>
+
+<div class="notice"><strong>Status:</strong> investigational research and education software. It is not a certified medical device and has not been validated for decisions about the care of individual patients. Prediction models developed with it are research findings that need independent validation before any clinical use.</div>
+
+<h2>1. Summary for the committee</h2>
+<p>The Universal Medical ML/NeuralNet Predictor is a web application for developing and evaluating clinical prediction models (for example, predicting response to a neurosurgical procedure from routinely collected variables). It offers logistic regression, Random Forest, gradient-boosted trees, k-nearest neighbours, naive Bayes, neural networks, an ensemble and Cox survival models, with the validation and reporting methods expected in prediction-model research.</p>
+<div class="table-wrap"><table>
+<tbody>
+<tr><th style="width:34%">Where patient data are processed</th><td>Only in the researcher's own web browser, on the researcher's own computer. The application has no server component and no database.</td></tr>
+<tr><th>Is any patient data transmitted?</th><td>No. The page is technically prevented from sending data anywhere other than its own address (section 3.2), and this was confirmed by monitoring the network traffic of the published site during a full analysis.</td></tr>
+<tr><th>Can it run without internet access?</th><td>Yes. The complete application can be downloaded and opened from the computer's disk with the network disconnected (section 3.3).</td></tr>
+<tr><th>What does it store on the computer?</th><td>Only the researcher's analysis settings (choices and column names), never patient values (section 3.4). Files are written only when the researcher chooses to export them.</td></tr>
+<tr><th>How has accuracy been checked?</th><td>66 automated comparisons against established statistical software (SciPy, scikit-learn, statsmodels, scikit-survival, pmsampsize), an equivalence benchmark against scikit-learn, PyTorch and imbalanced-learn, two open-source audit tools (Fairlearn, Deepchecks) and a suite of end-to-end and browser tests that run automatically on every change (section 6).</td></tr>
+<tr><th>Intended users</th><td>Clinicians and medical researchers (initially neurosurgeons) developing or validating prediction models for research.</td></tr>
+</tbody></table></div>
+
+<h2>2. Intended use and regulatory status</h2>
+<h3>Intended use</h3>
+<ul>
+  <li>Exploring de-identified or pseudonymised research datasets and comparing prediction methods.</li>
+  <li>Developing candidate prediction models, with internal validation (train/test split, cross-validation or bootstrap).</li>
+  <li>Validating a frozen model on a separate cohort, including a model received from another centre, without sharing patient data between centres.</li>
+  <li>Producing results and documentation for research reports, aligned with the TRIPOD+AI reporting guideline.</li>
+  <li>Teaching the principles of supervised machine learning and prediction-model evaluation.</li>
+</ul>
+<h3>Not intended for</h3>
+<ul>
+  <li>Diagnosis, treatment decisions or any decision about an individual patient's care.</li>
+  <li>Use as a clinical decision-support system in routine practice.</li>
+  <li>Processing identifiable patient data where a de-identified dataset would serve the research purpose.</li>
+</ul>
+<h3>Regulatory position</h3>
+<p>The software is not CE- or UKCA-marked and is not registered as a medical device. Software used to guide individual patient care may be regulated as a medical device (for example under UK MDR 2002 / MHRA guidance on software as a medical device, or EU MDR 2017/745). The application displays a research-use notice on its prediction screens, and every exported report, model file and checklist carries the statement “Investigational research and education use only. Not a certified medical device; not validated for individual clinical decisions.”</p>
+
+<h2>3. How patient data are handled</h2>
+<h3>3.1 Data flow</h3>
+<div class="flow">
+  <div><b>1. Open</b>The researcher selects a CSV file on their own computer.</div>
+  <div><b>2. Read</b>The browser reads it into the page's working memory. No copy is uploaded.</div>
+  <div><b>3. Analyse</b>All calculations run in the browser, partly in a background thread of the same page.</div>
+  <div><b>4. View</b>Results appear on screen.</div>
+  <div><b>5. Export (optional)</b>Only when the researcher clicks an export button is a file saved, to their own computer.</div>
+</div>
+<p>Closing or reloading the page discards the data from memory.</p>
+
+<h3>3.2 Technical safeguards against data leaving the computer</h3>
+<ul>
+  <li><strong>No server and no data upload.</strong> The website delivers only the application's own files (program code, stylesheet and simulated example datasets). It has no account system, database or upload function.</li>
+  <li><strong>Content Security Policy.</strong> The page declares a browser security policy that only allows it to contact its own address (<code>connect-src 'self'</code>), forbids form submissions to other sites (<code>form-action 'none'</code>), blocks plug-ins (<code>object-src 'none'</code>) and allows scripts only from its own files or by cryptographic hash. The browser enforces this policy, so even a programming error could not send data to another server.</li>
+  <li><strong>No third-party components at run time.</strong> No analytics, advertising, tracking, fonts or scripts are loaded from other organisations. The libraries the application uses (TensorFlow.js and Chart.js) are served from the application's own files.</li>
+  <li><strong>Verified on the published site.</strong> In October 2026, every network request made by the published application during a complete analysis (loading data, training models, making predictions) was recorded: all went to the application's own address, all were downloads of its own files and example data, and none sent data out.</li>
+</ul>
+
+<h3>3.3 Offline use (recommended where governance requires it)</h3>
+<p>The whole application can be downloaded from the source repository and opened directly from the computer's disk (by opening <code>index.html</code>), with the network switched off. It then works without any internet connection. Institutions that prefer can therefore keep the software, like the data, entirely within their own managed computers.</p>
+
+<h3>3.4 What is stored and what can be exported</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Item</th><th>Created when</th><th>Contains patient-level values?</th></tr></thead>
+<tbody>
+<tr><td>Browser storage (saved analysis settings)</td><td>Automatically, to restore settings for the same dataset</td><td class="no">No: variable roles, types and analysis choices only (column names, not values)</td></tr>
+<tr><td>Settings file (.json)</td><td>Researcher clicks “Save settings”</td><td class="no">No: analysis choices only</td></tr>
+<tr><td>Analysis reports (printable HTML, JSON) and TRIPOD+AI checklist</td><td>Researcher clicks the report button</td><td class="no">No: summary results only (counts, performance measures, plots)</td></tr>
+<tr><td>Trained model file (.json), most model types</td><td>Researcher clicks “Export trained model”</td><td class="no">No: model parameters and preprocessing rules (e.g. means used for scaling)</td></tr>
+<tr><td>Trained model file: k-nearest-neighbours models, or models using k-NN or multiple imputation for missing values</td><td>Researcher clicks “Export trained model” and confirms a warning</td><td class="yes">Yes: these methods need training patients' predictor values, which the application states before the file is saved</td></tr>
+<tr><td>Batch prediction results (.csv)</td><td>Researcher downloads predictions for an uploaded file</td><td class="yes">Yes: the researcher's own rows with a prediction added</td></tr>
+</tbody></table></div>
+
+<h3>3.5 Researcher and institution responsibilities</h3>
+<p>Keeping data in the browser supports data-protection-compliant research, but software alone cannot make a study compliant. Researchers should:</p>
+<ul>
+  <li>use de-identified or pseudonymised data, removing names, hospital numbers, dates of birth and free text that are not needed;</li>
+  <li>run the application on an institution-managed, encrypted computer, offline if local policy requires;</li>
+  <li>store any exported file that contains patient-level values (section 3.4) under the same rules as the source data, and share model files of those types only where data-sharing approvals permit;</li>
+  <li>complete the data-protection assessment (for example a DPIA) and confirm the lawful basis for processing required by their institution.</li>
+</ul>
+
+<h2>4. What the application does</h2>
+<div class="table-wrap"><table>
+<thead><tr><th style="width:30%">Area</th><th>Methods</th></tr></thead>
+<tbody>
+<tr><td>Outcomes</td><td>Two-category (e.g. responder / non-responder), multi-category, numerical and time-to-event (survival) outcomes.</td></tr>
+<tr><td>Models</td><td>Logistic / ridge regression, Random Forest, gradient-boosted trees, k-nearest neighbours, naive Bayes, neural network (multilayer perceptron), voting ensemble; Cox proportional-hazards model for survival.</td></tr>
+<tr><td>Missing data</td><td>Single imputation (median, mean, most frequent, k-NN and others) or multiple imputation by chained equations (MICE), always fitted on training patients only; optional complete-case analysis and missing-value indicators.</td></tr>
+<tr><td>Validation</td><td>Train/test split (random, by patient or by date); separate external cohort; bootstrap internal validation (Harrell's optimism correction and the .632+ estimate); cross-validated model selection and tuning; validation of a saved model on a new labelled cohort.</td></tr>
+<tr><td>Performance measures</td><td>Discrimination (ROC-AUC, DeLong comparison), calibration (plot, slope, intercept, observed/expected), Brier score, decision curve analysis, sensitivity and specificity at a chosen threshold, R², RMSE, MAE, with bootstrap 95% confidence intervals; for survival, C-index, time-dependent AUC and Brier score.</td></tr>
+<tr><td>Understanding models</td><td>Odds ratios with confidence intervals, permutation importance, per-patient explanations (Shapley values), subgroup (fairness) analysis by sex, age band, site or other groups.</td></tr>
+<tr><td>Planning and reporting</td><td>Riley et al. minimum sample size; pre-filled TRIPOD+AI checklist and draft methods paragraph; printable reports; recorded random seeds and software version for reproducibility.</td></tr>
+</tbody></table></div>
+
+<h2>5. Safeguards against misleading results</h2>
+<p>Prediction models are easily over-optimistic. The application contains specific protections, each of which is tested:</p>
+<ul>
+  <li><strong>No information leakage.</strong> Missing-value filling, encoding, scaling, class balancing, feature selection, tuning and recalibration are fitted on training patients only and refitted inside every cross-validation fold and bootstrap resample. On data with no true signal, the corrected performance estimates are about AUC 0.5, as they should be.</li>
+  <li><strong>Patients with several records.</strong> Splits, cross-validation and bootstrap resampling can keep each patient's records together, so a patient is never in both the training and the test set.</li>
+  <li><strong>Optimism and uncertainty.</strong> Results carry 95% confidence intervals; small test sets, few events per predictor and small subgroups are flagged; training (apparent) performance is never presented as evidence of predictive validity.</li>
+  <li><strong>Probabilities.</strong> Calibration is reported alongside discrimination; vote shares are labelled as such; recalibration is offered and fitted without the test patients.</li>
+  <li><strong>Inputs.</strong> Values outside the range of the training patients, unknown categories and blank values are flagged on every prediction.</li>
+  <li><strong>Reproducibility.</strong> All random processes are seeded; the seed and software version are recorded in every report and model file.</li>
+</ul>
+
+<h2>6. Accuracy and verification evidence</h2>
+<p>The calculations have been checked against established, widely used statistical software. The checks run automatically (GitHub Actions) every time the software is changed, and the result for every version is publicly recorded. The test code and reports are part of the public source repository, so an independent reviewer can repeat them.</p>
+<div class="table-wrap"><table>
+<thead><tr><th style="width:32%">Check</th><th>What it covers</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Reference checks against Python statistical libraries</td><td>66 comparisons with SciPy, scikit-learn, statsmodels, scikit-survival and pmsampsize: data preparation, logistic regression and odds ratios, calibration slope and intercept, Platt and isotonic recalibration, DeLong test, precision-recall and decision curves, Rubin's rules, Cox model (Efron ties), C-index, Kaplan–Meier estimates with Greenwood confidence intervals, time-dependent AUC and Brier score, Riley sample size</td><td class="num">66 / 66 agree within stated tolerances (most to 10⁻⁹ or better)</td></tr>
+<tr><td>Equivalence benchmark</td><td>The application's models against scikit-learn, PyTorch and imbalanced-learn on three public datasets over 10 paired train/test splits, with pre-specified margins (AUC ±0.02, accuracy/F1 ±0.03, R² ±0.05)</td><td class="num">0 failures</td></tr>
+<tr><td>Neural-network check</td><td>The trained network's predictions recomputed independently in NumPy</td><td class="num">9 / 9</td></tr>
+<tr><td>End-to-end tests</td><td>Complete workflows; leakage on pure-noise data; bootstrap and .632+ estimates; patient-level resampling; multiple imputation (results independent of the test patients' outcomes); Shapley values against exact enumeration; identical results with the same seed; exported models reproduce predictions exactly</td><td class="num">25 / 25</td></tr>
+<tr><td>Edge cases</td><td>Single-category outcomes, empty or constant columns, extreme imbalance, tiny datasets, unseen categories</td><td class="num">9 / 9</td></tr>
+<tr><td>Fairlearn (open-source fairness toolkit)</td><td>Every figure of the subgroup panel recomputed independently</td><td class="num">240 / 240 agree</td></tr>
+<tr><td>Deepchecks (open-source ML testing)</td><td>Data integrity, train/test leakage and drift, mixing of repeated patients between training and test sets, evaluation of the trained models</td><td>No data or leakage problems; model warnings explained (expected overfitting of flexible models, small subgroups)</td></tr>
+<tr><td>Browser tests</td><td>20 tests of the user interface in Chromium (Chrome, Edge), Firefox and WebKit (Safari's engine), including saving and restoring settings, export and re-import of models, batch prediction and validation on a separate cohort</td><td class="num">20 / 20 in each browser</td></tr>
+<tr><td>Accessibility</td><td>Automated scan (axe-core, WCAG 2.1 AA) of every main screen in light and dark themes</td><td class="num">No violations</td></tr>
+<tr><td>Static code analysis</td><td>ESLint over the complete source code</td><td>No errors</td></tr>
+</tbody></table></div>
+<h3>What this evidence does and does not show</h3>
+<p>These checks show that the software calculates the methods it offers correctly and guards against common methodological errors. They do not show that any particular prediction model is accurate for patients: that depends on the data, the outcome definition and the study design, and must be established by the research itself, ideally by validation in an independent cohort (which the application supports). The verification was carried out by the developer, using AI-assisted programming tools, and has not been certified by an external body; the published tests and reports allow independent repetition. Demonstration datasets supplied with the application are either simulated or public (Breast Cancer Wisconsin, UCI) and contain no real patients' data.</p>
+
+<h2>7. Limitations and residual risks</h2>
+<div class="table-wrap"><table>
+<thead><tr><th style="width:38%">Risk</th><th>Mitigation</th></tr></thead>
+<tbody>
+<tr><td>A model that performs well in the development data may not work in other patients.</td><td>Internal validation with optimism correction; external validation on a separate cohort supported; results carry confidence intervals; reports state that independent validation is required.</td></tr>
+<tr><td>Predicted probabilities may be miscalibrated.</td><td>Calibration reported with every model; warnings when calibration is poor; optional recalibration fitted on training data.</td></tr>
+<tr><td>Small samples produce unstable models.</td><td>Riley minimum sample-size calculation; warnings for few events per predictor, small test sets and small subgroups.</td></tr>
+<tr><td>Misuse for individual clinical decisions.</td><td>Research-use notices on screen and in every export; not intended or marketed for clinical use.</td></tr>
+<tr><td>Exported files containing patient-level values (section 3.4).</td><td>Explicit warning before saving; researcher responsible for storage under local governance.</td></tr>
+<tr><td>Browser differences.</td><td>Tested in the three major browser engines; Chrome or Edge on a desktop computer recommended.</td></tr>
+<tr><td>Software errors not yet detected.</td><td>Extensive automated testing on every change; open source code for review; version recorded in every output so results can be traced to the software release.</td></tr>
+</tbody></table></div>
+
+<h2>8. Reporting and reproducibility</h2>
+<ul>
+  <li>The application pre-fills a reporting checklist aligned with TRIPOD+AI (Collins et al., BMJ 2024) and drafts a methods paragraph; researchers complete the items that depend on their study.</li>
+  <li>Risk of bias and applicability of resulting models can be assessed with PROBAST+AI.</li>
+  <li>Every report and model file records the software version, the random seeds and the settings used; saved settings files allow an analysis to be repeated exactly.</li>
+  <li>The source code, its complete change history and all verification reports are available at github.com/Rasan17/ml.</li>
+</ul>
+
+<h2>9. Suggested wording for an ethics application</h2>
+<p>Researchers may adapt the following paragraph:</p>
+<div class="paste"><p>Prediction models will be developed using the Universal Medical ML/NeuralNet Predictor (version 2.1, build 2026.10.17; Dr G Narenthiran), a browser-based research application in which all data processing takes place locally on the researcher's computer. No patient data are transmitted to any server; the application has no server-side component and its security policy prevents network transmission, which has been verified on the published version. The application [will be run offline from a local copy on an institution-managed encrypted computer]. Only [de-identified / pseudonymised] data will be analysed. The software's statistical calculations have been verified against established statistical software (SciPy, scikit-learn, statsmodels, scikit-survival) and open-source audit tools (Fairlearn, Deepchecks); verification reports are publicly available. The software is research software, not a medical device, and no results will be used for decisions about individual patients' care. Model development and reporting will follow TRIPOD+AI.</p></div>
+
+<h2>10. Further information</h2>
+<p>Technical documentation, test reports (<code>tests/AUDIT_REPORT.md</code>, <code>tests/BENCHMARK_REPORT.md</code>, <code>tests/AUDIT_FAIRLEARN.md</code>, <code>tests/AUDIT_DEEPCHECKS.md</code>) and instructions for repeating every check are in the source repository's README. Questions about the software can be addressed to the developer, whose contact details are shown in the application's header.</p>
+
+<footer>Universal Medical ML/NeuralNet Predictor · Ethics committee information pack · document for software version 2.1 (build 2026.10.17) · 17 October 2026. This document describes the software; it does not replace the study-specific information required by the reviewing committee.</footer>
+</div>
+</body>
+</html>
