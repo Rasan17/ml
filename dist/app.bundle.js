@@ -2363,6 +2363,7 @@ function renderDataOverview() {
 
 
 
+
 // =========================================================================
 // STEP 2: VARIABLE ROLES & TYPES CONFIGURATION
 // =========================================================================
@@ -2536,6 +2537,14 @@ function renderVariableIncludeSummary() {
     const included = headers.filter(h => cfgs[h].role === 'feature').length;
     const excluded = headers.filter(h => cfgs[h].role === 'meta').length;
     el.textContent = `${included} predictor(s) included, ${excluded} excluded` + (target ? `; outcome: ${target}` : '; no outcome selected yet');
+    // How many predictors the sample supports, for the share of patients that will train the model
+    const mode = document.querySelector('input[name="validation-mode"]:checked')?.value || 'split';
+    const pct = Math.min(95, Math.max(50, parseFloat(document.getElementById('train-pct-input')?.value) || 80));
+    renderPredictorBudget('predictor-budget-container', {
+        rows: AppState.parsedData.rows, featureCols: headers.filter(h => cfgs[h].role === 'feature'), targetCol: target, columnConfigs: cfgs,
+        trainFraction: mode === 'split' ? pct / 100 : 1,
+        trainLabel: mode === 'split' ? `the ${pct}% Training set of Option A; Options B and C train on all loaded patients` : (mode === 'bootstrap' ? 'all patients, Option C' : 'all loaded patients, Option B')
+    });
 }
 
 function setAllVariablesIncluded(include) {
@@ -3702,7 +3711,8 @@ function renderSampleSizePanel() {
         box.innerHTML = `<div class="cal-panel"><div class="tune-title">📏 Is the sample large enough?</div><p class="tune-muted">Formal minimum sample-size criteria (Riley et al.) are available for two-outcome and numerical outcomes; for ${prep.targetClasses.length} outcome groups, aim for at least 10–20 patients in the smallest group per predictor parameter.</p></div>`;
         return;
     }
-    const p = prep.X[0].length;
+    // Parameters: one per numerical or ordered predictor, (categories − 1) per unordered categorical one
+    const p = Math.max(1, prep.X[0].length - Object.values(prep.featureMetadata || {}).filter(m => m.type === 'nominal' && m.length > 1).length);
     const prev = binary ? prep.y.filter(v => v === 1).length / prep.y.length : null;
     const r2Input = parseFloat(document.getElementById('sample-size-r2')?.value);
     const res = ModelEngine.rileySampleSize({ type: binary ? 'binary' : 'continuous', p, prevalence: prev, r2: isFinite(r2Input) ? r2Input : null });
@@ -3726,7 +3736,7 @@ function renderSampleSizePanel() {
             </div>
             <table class="data-table thr-table"><thead><tr><th>Criterion</th><th>Patients needed</th></tr></thead>
                 <tbody>${res.criteria.map(c => `<tr><td>${escapeHtml(c.label)}</td><td>${c.n}</td></tr>`).join('')}</tbody></table>
-            <p class="tune-muted">Criteria of Riley et al. (BMJ 2020; Stat Med 2019), as in the pmsampsize package, with ${p} candidate parameter(s) (each category of a categorical predictor counts)${binary ? `, outcome prevalence ${(prev * 100).toFixed(1)}%` : ''} and an anticipated ${binary ? 'Cox-Snell ' : ''}R² of ${res.r2.toFixed(3)}${res.r2Assumed ? (binary ? ' (conservative default: 15% of the maximum possible; enter a value from previous studies if available)' : ' (default; enter a value from previous studies if available)') : ''}. These replace the older "10 events per variable" rule of thumb. Flexible models (random forests, neural networks) typically need considerably more.</p>
+            <p class="tune-muted">Criteria of Riley et al. (BMJ 2020; Stat Med 2019), as in the pmsampsize package, with ${p} candidate parameter(s) (1 per numerical or ordered predictor, categories − 1 per unordered categorical one)${binary ? `, outcome prevalence ${(prev * 100).toFixed(1)}%` : ''} and an anticipated ${binary ? 'Cox-Snell ' : ''}R² of ${res.r2.toFixed(3)}${res.r2Assumed ? (binary ? ' (conservative default: 15% of the maximum possible; enter a value from previous studies if available)' : ' (default; enter a value from previous studies if available)') : ''}. These replace the older "10 events per variable" rule of thumb. Flexible models (random forests, neural networks) typically need considerably more.</p>
         </div>`;
     document.getElementById('sample-size-r2')?.addEventListener('change', renderSampleSizePanel);
 }
@@ -6587,6 +6597,7 @@ function renderPipelineStep1Results(trainMissing = 0, testMissing = 0) {
 // pipeline-screening.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from pipeline.js)
 
 
+
 // =========================================================================
 // STEP 2: Continuous Variable Correlation Check (Pearson vs. Spearman)
 // =========================================================================
@@ -6907,9 +6918,24 @@ function renderPipelineStep4() {
             cb.addEventListener('change', updateUnivSelectionSummary);
         });
     }
+    renderPipelineBudget();
+}
+
+// How many predictors the pipeline Training set supports, for the ticked predictors (all predictors that
+// entered the pipeline count as candidates considered)
+function renderPipelineBudget() {
+    const P = AppState.pipeline;
+    if (!P || !P.trainRows) return;
+    const cbs = Array.from(document.querySelectorAll('.pipeline-univ-checkbox'));
+    const ticked = cbs.length ? cbs.filter(cb => cb.checked).map(cb => cb.dataset.feature).filter(Boolean) : P.featureCols.filter(c => !P.droppedFeatures.has(c));
+    renderPredictorBudget('pipeline-budget-container', {
+        rows: P.trainRows, featureCols: ticked, targetCol: P.targetCol, columnConfigs: P.columnConfigs,
+        trainLabel: 'the pipeline Training set', candidateCols: P.featureCols
+    });
 }
 
 function updateUnivSelectionSummary() {
+    renderPipelineBudget();
     const cbs = document.querySelectorAll('.pipeline-univ-checkbox');
     const checkedCount = Array.from(cbs).filter(cb => cb.checked).length;
     if (DOM.pipelineUnivSelectedSummary) {
@@ -9862,6 +9888,10 @@ function start() {
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
         const el = document.getElementById(id);
         if (el) { el.addEventListener('change', renderSampleSizePanel); el.addEventListener('input', renderSampleSizePanel); }
+    });
+    // ... and the Step 2 guide on how many predictors the Training set supports
+    ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b', 'val-mode-c'].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', () => { if (AppState.parsedData) renderVariableIncludeSummary(); });
     });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

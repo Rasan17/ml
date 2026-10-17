@@ -7,7 +7,7 @@ import './validation-core.js';
 import { initDOM, setupEventListeners } from './shell.js';
 import './navigation.js';
 import { createEmptyPipelineState } from './ingest.js';
-import './variables.js';
+import { renderVariableIncludeSummary } from './variables.js';
 import './imputation.js';
 import './training-setup.js';
 import { renderSampleSizePanel } from './panels.js';
@@ -76,6 +76,10 @@ function start() {
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
         const el = document.getElementById(id);
         if (el) { el.addEventListener('change', renderSampleSizePanel); el.addEventListener('input', renderSampleSizePanel); }
+    });
+    // ... and the Step 2 guide on how many predictors the Training set supports
+    ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b', 'val-mode-c'].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', () => { if (AppState.parsedData) renderVariableIncludeSummary(); });
     });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

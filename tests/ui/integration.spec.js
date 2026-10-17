@@ -232,3 +232,28 @@ test('multiple imputation split across parallel workers gives exactly the single
     if (r.cores > 2) expect(r.parallel).toBeGreaterThan(1);
     expect(errors).toEqual([]);
 });
+
+test('"How many predictors?" guide in Step 2 and pipeline Step 4 follows the selection', async ({ page }) => {
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await page.click('#sample-shunt-large-btn');
+    await expect(page.locator('#data-stats-grid')).toContainText('420');
+    await page.click('button.step-tab[data-step="2"]');
+    const guide = page.locator('#predictor-budget-container');
+    await expect(guide).toContainText('336 training patients');
+    await expect(guide).toContainText('104 are in the smaller outcome group');
+    await expect(guide).toContainText('14 predictor(s) = 15 parameter(s)');
+    await expect(guide).toContainText('Riley');
+    await page.click('#var-exclude-all-btn');
+    await expect(guide).toContainText('0 predictor(s) = 0 parameter(s)');
+    await expect(guide).toContainText('within the recommended number');
+    await page.click('#var-include-all-btn');
+    await page.click('#pipeline-direct-launch-btn');
+    await page.click('#pipeline-step1-run-btn');
+    for (const n of [2, 3, 4]) await page.click(`#subpill-${n}`);
+    const pg = page.locator('#pipeline-budget-container');
+    await expect(pg).toContainText('15 parameter(s)');
+    await page.locator('.pipeline-univ-checkbox').first().uncheck();
+    await expect(pg).toContainText('candidate parameters considered');
+    expect(errors).toEqual([]);
+});

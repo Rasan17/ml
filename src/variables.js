@@ -2,6 +2,7 @@
 import { AppState, escapeHtml } from './core.js';
 import { renderImputationTable } from './imputation.js';
 import { DOM } from './shell.js';
+import { renderPredictorBudget } from './predictor-budget.js';
 
 
 // =========================================================================
@@ -177,6 +178,14 @@ function renderVariableIncludeSummary() {
     const included = headers.filter(h => cfgs[h].role === 'feature').length;
     const excluded = headers.filter(h => cfgs[h].role === 'meta').length;
     el.textContent = `${included} predictor(s) included, ${excluded} excluded` + (target ? `; outcome: ${target}` : '; no outcome selected yet');
+    // How many predictors the sample supports, for the share of patients that will train the model
+    const mode = document.querySelector('input[name="validation-mode"]:checked')?.value || 'split';
+    const pct = Math.min(95, Math.max(50, parseFloat(document.getElementById('train-pct-input')?.value) || 80));
+    renderPredictorBudget('predictor-budget-container', {
+        rows: AppState.parsedData.rows, featureCols: headers.filter(h => cfgs[h].role === 'feature'), targetCol: target, columnConfigs: cfgs,
+        trainFraction: mode === 'split' ? pct / 100 : 1,
+        trainLabel: mode === 'split' ? `the ${pct}% Training set of Option A; Options B and C train on all loaded patients` : (mode === 'bootstrap' ? 'all patients, Option C' : 'all loaded patients, Option B')
+    });
 }
 
 function setAllVariablesIncluded(include) {

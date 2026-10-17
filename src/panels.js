@@ -563,7 +563,8 @@ function renderSampleSizePanel() {
         box.innerHTML = `<div class="cal-panel"><div class="tune-title">📏 Is the sample large enough?</div><p class="tune-muted">Formal minimum sample-size criteria (Riley et al.) are available for two-outcome and numerical outcomes; for ${prep.targetClasses.length} outcome groups, aim for at least 10–20 patients in the smallest group per predictor parameter.</p></div>`;
         return;
     }
-    const p = prep.X[0].length;
+    // Parameters: one per numerical or ordered predictor, (categories − 1) per unordered categorical one
+    const p = Math.max(1, prep.X[0].length - Object.values(prep.featureMetadata || {}).filter(m => m.type === 'nominal' && m.length > 1).length);
     const prev = binary ? prep.y.filter(v => v === 1).length / prep.y.length : null;
     const r2Input = parseFloat(document.getElementById('sample-size-r2')?.value);
     const res = ModelEngine.rileySampleSize({ type: binary ? 'binary' : 'continuous', p, prevalence: prev, r2: isFinite(r2Input) ? r2Input : null });
@@ -587,7 +588,7 @@ function renderSampleSizePanel() {
             </div>
             <table class="data-table thr-table"><thead><tr><th>Criterion</th><th>Patients needed</th></tr></thead>
                 <tbody>${res.criteria.map(c => `<tr><td>${escapeHtml(c.label)}</td><td>${c.n}</td></tr>`).join('')}</tbody></table>
-            <p class="tune-muted">Criteria of Riley et al. (BMJ 2020; Stat Med 2019), as in the pmsampsize package, with ${p} candidate parameter(s) (each category of a categorical predictor counts)${binary ? `, outcome prevalence ${(prev * 100).toFixed(1)}%` : ''} and an anticipated ${binary ? 'Cox-Snell ' : ''}R² of ${res.r2.toFixed(3)}${res.r2Assumed ? (binary ? ' (conservative default: 15% of the maximum possible; enter a value from previous studies if available)' : ' (default; enter a value from previous studies if available)') : ''}. These replace the older "10 events per variable" rule of thumb. Flexible models (random forests, neural networks) typically need considerably more.</p>
+            <p class="tune-muted">Criteria of Riley et al. (BMJ 2020; Stat Med 2019), as in the pmsampsize package, with ${p} candidate parameter(s) (1 per numerical or ordered predictor, categories − 1 per unordered categorical one)${binary ? `, outcome prevalence ${(prev * 100).toFixed(1)}%` : ''} and an anticipated ${binary ? 'Cox-Snell ' : ''}R² of ${res.r2.toFixed(3)}${res.r2Assumed ? (binary ? ' (conservative default: 15% of the maximum possible; enter a value from previous studies if available)' : ' (default; enter a value from previous studies if available)') : ''}. These replace the older "10 events per variable" rule of thumb. Flexible models (random forests, neural networks) typically need considerably more.</p>
         </div>`;
     document.getElementById('sample-size-r2')?.addEventListener('change', renderSampleSizePanel);
 }

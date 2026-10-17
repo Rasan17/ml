@@ -1,6 +1,7 @@
 // pipeline-screening.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from pipeline.js)
 import { AppState, actionAttrs, escapeHtml } from './core.js';
 import { DOM } from './shell.js';
+import { renderPredictorBudget } from './predictor-budget.js';
 
 // =========================================================================
 // STEP 2: Continuous Variable Correlation Check (Pearson vs. Spearman)
@@ -322,9 +323,24 @@ function renderPipelineStep4() {
             cb.addEventListener('change', updateUnivSelectionSummary);
         });
     }
+    renderPipelineBudget();
+}
+
+// How many predictors the pipeline Training set supports, for the ticked predictors (all predictors that
+// entered the pipeline count as candidates considered)
+function renderPipelineBudget() {
+    const P = AppState.pipeline;
+    if (!P || !P.trainRows) return;
+    const cbs = Array.from(document.querySelectorAll('.pipeline-univ-checkbox'));
+    const ticked = cbs.length ? cbs.filter(cb => cb.checked).map(cb => cb.dataset.feature).filter(Boolean) : P.featureCols.filter(c => !P.droppedFeatures.has(c));
+    renderPredictorBudget('pipeline-budget-container', {
+        rows: P.trainRows, featureCols: ticked, targetCol: P.targetCol, columnConfigs: P.columnConfigs,
+        trainLabel: 'the pipeline Training set', candidateCols: P.featureCols
+    });
 }
 
 function updateUnivSelectionSummary() {
+    renderPipelineBudget();
     const cbs = document.querySelectorAll('.pipeline-univ-checkbox');
     const checkedCount = Array.from(cbs).filter(cb => cb.checked).length;
     if (DOM.pipelineUnivSelectedSummary) {
