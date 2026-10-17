@@ -165,3 +165,28 @@ test('external validation: an exported model is imported and validated on a sepa
     expect(html).toContain('<svg');
     expect(errors).toEqual([]);
 });
+
+test('multiple imputation is done once: a second model on the same patients reuses the imputed datasets', async ({ page }) => {
+    test.setTimeout(400000);
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await toStep4(page);
+    await page.selectOption('#mi-select', 'mice5');
+    // record every progress message of the imputation rounds
+    await page.evaluate(() => {
+        window.__miRounds = 0;
+        new MutationObserver(() => { if (/imputation \d+\/\d+, round/.test(document.getElementById('train-status').textContent)) window.__miRounds++; })
+            .observe(document.getElementById('train-status'), { childList: true, subtree: true, characterData: true });
+    });
+    await page.locator('.model-card[data-model-id="glm"]').click();
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText(/Deployed|Complete/, { timeout: 170000 });
+    expect(await page.evaluate(() => window.__miRounds)).toBeGreaterThan(0);
+    await page.evaluate(() => { window.__miRounds = 0; });
+    await page.locator('.model-card[data-model-id="nb"]').click();
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText(/Deployed|Complete/, { timeout: 170000 });
+    expect(await page.evaluate(() => window.__miRounds)).toBe(0);
+    await expect(page.locator('body')).toContainText('Multiple imputation:');
+    expect(errors).toEqual([]);
+});
