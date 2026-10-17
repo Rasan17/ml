@@ -253,11 +253,11 @@ test('"How many predictors?" (Step 2, pipeline Step 4) and per-model data needs 
     await page.click('#apply-imputation-btn');
     await page.click('button.step-tab[data-step="4"]');
     const models = page.locator('#model-sample-guide');
-    await page.locator('.model-card[data-model-id="glm"]').click();
+    await page.locator('.model-card[data-model-id="glm"]').click({ position: { x: 12, y: 12 } }); // corner: the seed box in the middle ignores clicks
     await expect(models).toContainText('Enough data for each model');
     await expect(models).toContainText('GLM');
     await expect(models).toContainText('150–300 events');
-    await page.locator('.model-card[data-model-id="rf"]').click();
+    await page.locator('.model-card[data-model-id="rf"]').click({ position: { x: 12, y: 12 } }); // corner: the seed box in the middle ignores clicks
     await expect(models).toContainText('Random Forest');
     await expect(models).toContainText('3,000 events');
     await page.click('button.step-tab[data-step="1"]'); // the pipeline is launched from Step 1
