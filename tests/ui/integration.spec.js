@@ -27,7 +27,7 @@ test('settings with the newer controls are saved and restored', async ({ page })
     await toStep4(page);
     await page.selectOption('#mi-select', 'mice10');
     await page.selectOption('#recalibration-select', 'isotonic');
-    await page.selectOption('#rf-split-select', 'exact');
+    await page.selectOption('#rf-split-select', 'exact', { force: true }); // in the Random Forest settings panel (hidden until RF is configured)
     await page.check('input[name="validation-mode"][value="bootstrap"]', { force: true });
     await page.selectOption('#bootstrap-reps', '200');
     await page.selectOption('#bootstrap-group-col', 'Patient_ID');
