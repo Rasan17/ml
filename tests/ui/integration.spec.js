@@ -233,7 +233,7 @@ test('multiple imputation split across parallel workers gives exactly the single
     expect(errors).toEqual([]);
 });
 
-test('"How many predictors?" guide in Step 2 and pipeline Step 4 follows the selection', async ({ page }) => {
+test('"How many predictors?" (Step 2, pipeline Step 4) and per-model data needs (Step 4) follow the selection', async ({ page }) => {
     const errors = watch(page);
     await page.goto('/index.html');
     await page.click('#sample-shunt-large-btn');
@@ -248,6 +248,18 @@ test('"How many predictors?" guide in Step 2 and pipeline Step 4 follows the sel
     await expect(guide).toContainText('0 predictor(s) = 0 parameter(s)');
     await expect(guide).toContainText('within the recommended number');
     await page.click('#var-include-all-btn');
+    // Step 4: data needed by each selected model
+    await page.click('button.step-tab[data-step="3"]');
+    await page.click('#apply-imputation-btn');
+    await page.click('button.step-tab[data-step="4"]');
+    const models = page.locator('#model-sample-guide');
+    await page.locator('.model-card[data-model-id="glm"]').click();
+    await expect(models).toContainText('Enough data for each model');
+    await expect(models).toContainText('GLM');
+    await expect(models).toContainText('150–300 events');
+    await page.locator('.model-card[data-model-id="rf"]').click();
+    await expect(models).toContainText('Random Forest');
+    await expect(models).toContainText('3,000 events');
     await page.click('button.step-tab[data-step="1"]'); // the pipeline is launched from Step 1
     await page.click('#pipeline-direct-launch-btn');
     await page.click('#pipeline-step1-run-btn');

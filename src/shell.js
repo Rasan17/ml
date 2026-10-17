@@ -20,6 +20,7 @@ import { rerankExistingResults } from './training-actions.js';
 import { setupSeedManagement, updateHyperparamsVisibility } from './training-setup.js';
 import { setAllVariablesIncluded } from './variables.js';
 import { ExecutionWatchdog } from './watchdog.js';
+import { refreshModelSampleGuide } from './predictor-budget.js';
 
 
 // DOM Elements
@@ -439,6 +440,7 @@ function setupEventListeners() {
     }
 
     function updateTrainButtonLabel() {
+        refreshModelSampleGuide();
         if (!DOM.trainModelBtn) return;
         const count = AppState.selectedModelIds.length;
         if (count === 1) {

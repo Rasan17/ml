@@ -4,6 +4,7 @@ import { renderPipelineStep5, renderPipelineStep6UI } from './pipeline-balance.j
 import { renderPipelineStep2, renderPipelineStep3, renderPipelineStep4 } from './pipeline-screening.js';
 import { renderPipelineStep1Results } from './pipeline-step1.js';
 import { DOM } from './shell.js';
+import { refreshPipelineModelGuide } from './predictor-budget.js';
 
 // =========================================================================
 // 7-STEP CLINICAL ML PIPELINE CONTROLLER
@@ -89,6 +90,7 @@ function goToPipelineSubstep(substepNum) {
     if (substepNum === 4) renderPipelineStep4();
     if (substepNum === 5) renderPipelineStep5();
     if (substepNum === 6) renderPipelineStep6UI();
+    if (substepNum === 7) refreshPipelineModelGuide();
 }
 
 export { updatePipelineCompleteCaseInfo, initPipelineUI, goToPipelineSubstep };

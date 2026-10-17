@@ -9,6 +9,7 @@ import { goToPipelineSubstep, initPipelineUI } from './pipeline.js';
 import { DOM } from './shell.js';
 import { renderSinglePredictionForm } from './single-prediction.js';
 import { renderVariableConfigGrid } from './variables.js';
+import { refreshModelSampleGuide } from './predictor-budget.js';
 
 
 function syncTrainTestSplit(trainVal) {
@@ -253,7 +254,7 @@ function goToStep(stepNum) {
 
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
     if (stepNum === 3 || stepNum === '3') renderImputationTable();
-    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); }
+    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); refreshModelSampleGuide(); }
     if (stepNum === 5 || stepNum === '5') renderSinglePredictionForm();
     if (stepNum === 'survival') renderSurvivalSetup();
     if (stepNum === 'pipeline') {

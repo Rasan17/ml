@@ -1195,6 +1195,7 @@ function plus632(key, apparent, oobValue, noInfo) {
 
 
 
+
 // DOM Elements
 const DOM = {};
 
@@ -1612,6 +1613,7 @@ function setupEventListeners() {
     }
 
     function updateTrainButtonLabel() {
+        refreshModelSampleGuide();
         if (!DOM.trainModelBtn) return;
         const count = AppState.selectedModelIds.length;
         if (count === 1) {
@@ -1838,6 +1840,7 @@ function setupEventListeners() {
 
 // ---- src/navigation.js ----
 // navigation.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+
 
 
 
@@ -2090,7 +2093,7 @@ function goToStep(stepNum) {
 
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
     if (stepNum === 3 || stepNum === '3') renderImputationTable();
-    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); }
+    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); refreshModelSampleGuide(); }
     if (stepNum === 5 || stepNum === '5') renderSinglePredictionForm();
     if (stepNum === 'survival') renderSurvivalSetup();
     if (stepNum === 'pipeline') {
@@ -6280,6 +6283,7 @@ function downloadBatchCSV() {
 
 
 
+
 // =========================================================================
 // 7-STEP CLINICAL ML PIPELINE CONTROLLER
 // Conceived, designed and developed by Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)
@@ -6364,6 +6368,7 @@ function goToPipelineSubstep(substepNum) {
     if (substepNum === 4) renderPipelineStep4();
     if (substepNum === 5) renderPipelineStep5();
     if (substepNum === 6) renderPipelineStep6UI();
+    if (substepNum === 7) refreshPipelineModelGuide();
 }
 
 // ---- src/pipeline-step1.js ----
@@ -9081,6 +9086,206 @@ function downloadSurvivalReport() {
     URL.revokeObjectURL(url);
 }
 
+// ---- src/predictor-budget.js ----
+// predictor-budget.js: "How many predictors?" guidance where predictors are chosen (Step 2 of the standard
+// workflow, Step 4 of the 7-step pipeline). From the number of training patients and the size of the smaller
+// outcome group it gives the largest number of predictor parameters supported by the Riley et al. minimum
+// sample-size criteria (pmsampsize), by 10 and 20 events per parameter, and the much larger samples flexible
+// machine-learning models need, and compares them with the current selection.
+/* global DataEngine, ModelEngine */
+
+// Parameters each predictor adds to a regression model: 1 for a number or an ordered scale, (categories − 1)
+// for an unordered categorical predictor
+function predictorParameters(rows, featureCols, columnConfigs) {
+    const perCol = featureCols.map(col => {
+        const cfg = columnConfigs[col] || {};
+        if (cfg.type !== 'nominal') return { col, df: 1, levels: null };
+        const set = new Set();
+        for (const r of rows) if (!DataEngine.isMissing(r[col])) set.add(String(r[col]).trim());
+        return { col, df: Math.max(1, set.size - 1), levels: set.size };
+    });
+    return { total: perCol.reduce((a, c) => a + c.df, 0), perCol };
+}
+
+// Largest number of parameters for which the Riley criteria are met with nTrain patients (0 if none)
+function rileyMaxParameters(type, nTrain, prevalence) {
+    let best = 0;
+    for (let p = 1; p <= 300; p++) {
+        const r = ModelEngine.rileySampleSize({ type, p, prevalence });
+        if (!r || r.n > nTrain) break;
+        best = p;
+    }
+    return best;
+}
+
+/**
+ * Renders the guidance into containerId. rows: patient records (raw or imputed) with the outcome; featureCols:
+ * the predictors currently selected; trainFraction: share of rows that will train the model; trainLabel
+ * describes it; candidateCols (optional): every predictor considered so far, when some were dropped by
+ * looking at the data (counts towards overfitting even if not kept).
+ */
+function renderPredictorBudget(containerId, { rows, featureCols, targetCol, columnConfigs, trainFraction = 1, trainLabel = '', candidateCols = null }) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    if (!rows || !rows.length || !targetCol || !columnConfigs[targetCol]) {
+        box.innerHTML = '<div class="cal-panel"><div class="tune-title">📐 How many predictors?</div><p class="tune-muted">Choose the outcome (Target) to see how many predictors the sample can support.</p></div>';
+        return;
+    }
+    const tcfg = columnConfigs[targetCol];
+    const withOutcome = rows.filter(r => !DataEngine.isMissing(r[targetCol]));
+    const n = withOutcome.length;
+    const nTrain = Math.round(n * trainFraction);
+    const { total: P, perCol } = predictorParameters(withOutcome, featureCols, columnConfigs);
+    const isClass = tcfg.type === 'nominal' || tcfg.type === 'ordinal';
+    const fmt = v => v.toLocaleString('en-GB');
+    const rows4 = []; // [guide, max parameters, note]
+    let headline = '', minority = null, minorityLabel = '', status = 'ok';
+
+    if (isClass) {
+        const counts = {};
+        withOutcome.forEach(r => { const k = String(r[targetCol]).trim(); counts[k] = (counts[k] || 0) + 1; });
+        const groups = Object.entries(counts).sort((a, b) => a[1] - b[1]);
+        if (groups.length < 2) { box.innerHTML = ''; return; }
+        [minorityLabel, minority] = groups[0];
+        const E = Math.round(minority * trainFraction);
+        const binary = groups.length === 2;
+        headline = `<strong>${fmt(nTrain)}</strong> training patients${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}, of whom about <strong>${fmt(E)}</strong> are in the smaller outcome group ("${escapeHtml(minorityLabel)}", ${(minority / n * 100).toFixed(1)}%)${binary ? '' : ` of ${groups.length} groups`}.`;
+        if (binary) {
+            const riley = rileyMaxParameters('binary', nTrain, minority / n);
+            rows4.push(['Minimum sample-size criteria (Riley et al.; logistic regression)', riley,
+                riley ? 'the recommended standard: limits overfitting and estimates the overall risk precisely' : `not met for any number of predictors: ${fmt(ModelEngine.rileySampleSize({ type: 'binary', p: 1, prevalence: minority / n }).n)} patients are needed just to estimate the overall risk precisely`]);
+        }
+        rows4.push(['10 patients in the smaller group per parameter', Math.floor(E / 10), 'traditional minimum; often too lenient'],
+            ['20 patients in the smaller group per parameter', Math.floor(E / 20), 'more cautious; logistic regression reached stable performance at about 20–50'],
+            ['Flexible models (random forest, boosted trees, neural network, k-NN): 200 per parameter', Math.floor(E / 200), 'still unstable at this level in simulations (over 10 times what logistic regression needs); below it, treat these models as exploratory']);
+        const main = binary ? Math.min(rows4[0][1], rows4[1][1]) : rows4[0][1];
+        status = P <= main ? 'ok' : P <= Math.floor(E / 10) ? 'caution' : 'over';
+    } else {
+        headline = `<strong>${fmt(nTrain)}</strong> training patients${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}; numerical outcome.`;
+        const riley = rileyMaxParameters('continuous', nTrain, null);
+        rows4.push(['Minimum sample-size criteria (Riley et al.; linear regression, anticipated R² 0.2)', riley, riley ? 'the recommended standard' : 'not met for any number of predictors'],
+            ['Flexible models (random forest, boosted trees, neural network, k-NN)', Math.floor(nTrain / 200), 'rough guide; flexible models need much more data than regression']);
+        status = P <= riley ? 'ok' : P <= riley * 1.5 ? 'caution' : 'over';
+    }
+
+    const multi = perCol.filter(c => c.levels && c.levels > 2).sort((a, b) => b.df - a.df).slice(0, 3);
+    const candidates = candidateCols ? predictorParameters(withOutcome, candidateCols, columnConfigs).total : null;
+    const statusText = {
+        ok: '✓ Your selection is within the recommended number of predictor parameters.',
+        caution: '⚠️ Your selection is above the recommended number but not grossly so: expect some overfitting; penalised (ridge) regression and cross-validated tuning help.',
+        over: '⚠️ <strong>Too many predictor parameters for this sample</strong>: models are likely to overfit (good results in these patients, worse in new ones). Reduce the number of predictors, group rare categories, or add patients.'
+    }[status];
+
+    box.innerHTML = `
+        <div class="cal-panel">
+            <div class="tune-title">📐 How many predictors can this sample support?</div>
+            <p class="tune-muted" style="margin-top: 4px;">${headline} Your selection: <strong>${featureCols.length}</strong> predictor(s) = <strong>${P}</strong> parameter(s)${candidates !== null && candidates > P ? `, from <strong>${candidates}</strong> candidate parameters considered` : ''}.</p>
+            <div class="${status === 'ok' ? 'explain-box' : 'tune-warn'}" style="margin-top: 6px;">${statusText}</div>
+            <table class="data-table thr-table"><thead><tr><th>Guide</th><th>Largest number of parameters</th><th>Comment</th></tr></thead>
+                <tbody>${rows4.map(([g, v, c]) => `<tr><td>${escapeHtml(g)}</td><td><strong>${v}</strong>${P > v ? ' <span class="tune-sd">(you have ' + P + ')</span>' : ''}</td><td>${escapeHtml(c)}</td></tr>`).join('')}</tbody></table>
+            ${multi.length ? `<p class="tune-muted">Categorical predictors use one parameter per category beyond the first: ${multi.map(c => `"${escapeHtml(c.col)}" ${c.levels} categories = ${c.df}`).join('; ')}. Grouping rare categories saves parameters.</p>` : ''}
+            <p class="tune-muted">A parameter is one number the model estimates: 1 for each numerical or ordered predictor, and (categories − 1) for an unordered categorical one. Choose predictors from clinical knowledge and earlier studies before looking at their association with the outcome: selecting them by p-value in the same patients makes the model look better than it is, and every predictor considered counts towards overfitting, not only those kept. SMOTENC and other balancing add no real patients. Riley et al. (BMJ 2020) with the default anticipated R² (15% of the maximum, as in pmsampsize; Step 4 lets you change it); 20–50 and 200 per parameter: van der Ploeg, Austin and Steyerberg, “Modern modelling techniques are data hungry” (BMC Med Res Methodol 2014;14:137).</p>
+        </div>`;
+}
+
+
+// How much data each model needs, in patients of the smaller outcome group (events) per predictor parameter.
+// Logistic regression: Riley criteria / 10-20 per parameter, stable at about 20-50 (van der Ploeg et al. 2014).
+// Random forest and neural network: still unstable above 200 per parameter in that study; k-NN, boosted trees
+// and the ensemble were not studied there and are treated like them, as flexible models.
+const MODEL_NEEDS = {
+    glm: { per: 10, better: 20, kind: 'regression', evidence: 'Riley criteria; stable at about 20–50 per parameter in simulations' },
+    nb: { per: 10, better: 20, kind: 'simple', evidence: 'simple model with few estimates, like logistic regression (little direct evidence)' },
+    rf: { per: 200, kind: 'flexible', evidence: 'still unstable above 200 per parameter in simulations' },
+    nn: { per: 200, kind: 'flexible', evidence: 'still unstable above 200 per parameter in simulations' },
+    gbm: { per: 200, kind: 'flexible', evidence: 'flexible like random forests (not studied directly)' },
+    knn: { per: 200, kind: 'flexible', evidence: 'flexible, and weakens quickly as predictors are added (not studied directly)' },
+    ensemble: { per: 200, kind: 'flexible', evidence: 'needs as much as its most data-hungry member' }
+};
+
+/**
+ * For each selected model: the data it needs for the current predictors, what the Training set has, and a
+ * verdict (adequate / borderline / exploratory only).
+ */
+function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, columnConfigs, modelIds, trainFraction = 1, trainLabel = '' }) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    if (!rows || !rows.length || !targetCol || !columnConfigs[targetCol] || !modelIds || !modelIds.length) { box.innerHTML = ''; return; }
+    const tcfg = columnConfigs[targetCol];
+    const withOutcome = rows.filter(r => !DataEngine.isMissing(r[targetCol]));
+    const n = withOutcome.length, nTrain = Math.round(n * trainFraction);
+    const P = Math.max(1, predictorParameters(withOutcome, featureCols, columnConfigs).total);
+    const isClass = tcfg.type === 'nominal' || tcfg.type === 'ordinal';
+    const fmt = v => Math.round(v).toLocaleString('en-GB');
+    let E = nTrain, share = 1, unit = 'patients', binary = false;
+    if (isClass) {
+        const counts = {};
+        withOutcome.forEach(r => { const k = String(r[targetCol]).trim(); counts[k] = (counts[k] || 0) + 1; });
+        const groups = Object.values(counts).sort((a, b) => a - b);
+        if (groups.length < 2) { box.innerHTML = ''; return; }
+        share = groups[0] / n;
+        E = Math.round(groups[0] * trainFraction);
+        unit = 'in the smaller outcome group';
+        binary = groups.length === 2;
+    }
+    const riley = binary ? rileyMaxParameters('binary', nTrain, share) : (!isClass ? rileyMaxParameters('continuous', nTrain, null) : null);
+    const rowsHtml = modelIds.filter(id => MODEL_NEEDS[id] && (isClass || id !== 'nb')).map(id => {
+        const need = MODEL_NEEDS[id];
+        const needed = need.per * P, better = need.better ? need.better * P : null;
+        let verdict, cls;
+        if (need.kind === 'flexible') {
+            if (E >= needed) { verdict = '✓ Enough data'; cls = 'ok'; }
+            else if (E >= needed / 4) { verdict = '⚠️ Exploratory only: expect overfitting'; cls = 'warn'; }
+            else { verdict = '✗ Far too little data: results unreliable'; cls = 'bad'; }
+        } else {
+            const rileyOk = id === 'glm' && riley !== null ? P <= riley : true;
+            if (E >= (better || needed) && rileyOk) { verdict = '✓ Enough data'; cls = 'ok'; }
+            else if (E >= needed) { verdict = '⚠️ Borderline: fewer predictors would be safer'; cls = 'warn'; }
+            else { verdict = '✗ Too little data for this many predictors'; cls = 'bad'; }
+        }
+        const approx = v => { const d = Math.pow(10, Math.max(0, Math.floor(Math.log10(Math.max(1, v))) - 1)); return fmt(Math.round(v / d) * d); }; // 2 significant figures
+        const patients = isClass ? ` (≈ ${approx(needed / share)}${better ? `–${approx(better / share)}` : ''} patients)` : '';
+        const supports = id === 'glm' && riley !== null ? Math.min(riley, Math.floor(E / need.per)) : Math.floor(E / need.per);
+        return `<tr><td>${MODEL_INFO[id] ? MODEL_INFO[id].icon + ' ' + escapeHtml(MODEL_INFO[id].short) : id}</td>
+            <td><strong>${fmt(needed)}${need.better ? `–${fmt(better)}` : ''}</strong> ${isClass ? 'events' : 'patients'}${patients}<br><span class="tune-sd">${need.better ? `${need.per}–${need.better}` : `${need.per}+`} per parameter: ${escapeHtml(need.evidence)}</span></td>
+            <td class="budget-${cls}"><strong>${verdict}</strong><br><span class="tune-sd">supports about ${supports} parameter(s)</span></td></tr>`;
+    }).join('');
+    if (!rowsHtml) { box.innerHTML = ''; return; }
+    box.innerHTML = `
+        <div class="cal-panel">
+            <div class="tune-title">📏 Enough data for each model?</div>
+            <p class="tune-muted" style="margin-top: 4px;">Training set${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}: <strong>${fmt(nTrain)}</strong> patients, <strong>${fmt(E)}</strong> ${isClass ? 'in the smaller outcome group' : 'in all'}; <strong>${P}</strong> predictor parameter(s).${riley !== null ? ` The Riley criteria allow logistic regression up to <strong>${riley}</strong> parameter(s) here.` : ''}</p>
+            <table class="data-table thr-table budget-table"><thead><tr><th>Model</th><th>Needed for your ${P} parameter(s)</th><th>Your Training set</th></tr></thead>
+                <tbody>${rowsHtml}</tbody></table>
+            <p class="tune-muted">An "event" is a patient in the smaller outcome group. Flexible models (random forest, boosted trees, neural network, k-NN, ensemble) need roughly ten times the data of logistic regression; with typical clinical cohorts of a few hundred patients they rarely beat penalised logistic regression and overfit more. Training them anyway is fine as a comparison, but judge them by validated results (Option C), not by apparent performance.${isClass ? '' : ' Numerical outcomes: rough guide in patients rather than events.'} Sources: Riley et al. (BMJ 2020); van der Ploeg, Austin and Steyerberg (BMC Med Res Methodol 2014;14:137).</p>
+        </div>`;
+}
+
+// Step 4 of the standard workflow: the models currently selected, for the share of patients that will train them
+function refreshModelSampleGuide() {
+    if (!AppState.parsedData || !AppState.columnConfigs) return;
+    const cfgs = AppState.columnConfigs, headers = AppState.parsedData.headers;
+    const mode = document.querySelector('input[name="validation-mode"]:checked')?.value || 'split';
+    const pct = Math.min(95, Math.max(50, parseFloat(document.getElementById('train-pct-input')?.value) || 80));
+    renderModelSampleGuide('model-sample-guide', {
+        rows: AppState.parsedData.rows, featureCols: headers.filter(h => cfgs[h] && cfgs[h].role === 'feature'),
+        targetCol: headers.find(h => cfgs[h] && cfgs[h].role === 'target'), columnConfigs: cfgs,
+        modelIds: AppState.selectedModelIds && AppState.selectedModelIds.length ? AppState.selectedModelIds : [AppState.selectedModelId || 'nn'],
+        trainFraction: mode === 'split' ? pct / 100 : 1,
+        trainLabel: mode === 'split' ? `Option A, ${pct}% of patients` : (mode === 'bootstrap' ? 'Option C, all patients' : 'Option B, all loaded patients')
+    });
+}
+
+// Step 7 of the pipeline: every model, on the pipeline Training set and the predictors still in use
+function refreshPipelineModelGuide() {
+    const P = AppState.pipeline;
+    if (!P || !P.trainRows) return;
+    renderModelSampleGuide('pipeline-model-sample-guide', {
+        rows: P.trainRows, featureCols: P.featureCols.filter(c => !P.droppedFeatures.has(c)), targetCol: P.targetCol,
+        columnConfigs: P.columnConfigs, modelIds: ALL_MODEL_IDS, trainLabel: '7-step pipeline'
+    });
+}
+
 // ---- src/tripod.js ----
 // tripod.js: pre-filled reporting checklist aligned with the TRIPOD+AI topics (Collins et al., BMJ 2024;385:e078378)
 // and a draft Methods paragraph, generated from the analysis actually run. Items are described in our own
@@ -9845,6 +10050,7 @@ function handleUnexpectedError(err) {
 
 
 
+
 AppState.pipeline = createEmptyPipelineState(42);
 
 window.addEventListener('error', (e) => handleUnexpectedError(e.error || e.message));
@@ -9891,7 +10097,7 @@ function start() {
     });
     // ... and the Step 2 guide on how many predictors the Training set supports
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b', 'val-mode-c'].forEach(id => {
-        document.getElementById(id)?.addEventListener('change', () => { if (AppState.parsedData) renderVariableIncludeSummary(); });
+        document.getElementById(id)?.addEventListener('change', () => { if (AppState.parsedData) { renderVariableIncludeSummary(); refreshModelSampleGuide(); } });
     });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

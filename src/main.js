@@ -28,6 +28,7 @@ import './pipeline-results.js';
 import './reports.js';
 import './model-io.js';
 import './survival.js';
+import { refreshModelSampleGuide } from './predictor-budget.js';
 import { downloadTripodChecklist } from './tripod.js';
 import { downloadHtmlReport, downloadValidationReport } from './html-report.js';
 import './external-validation.js';
@@ -79,7 +80,7 @@ function start() {
     });
     // ... and the Step 2 guide on how many predictors the Training set supports
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b', 'val-mode-c'].forEach(id => {
-        document.getElementById(id)?.addEventListener('change', () => { if (AppState.parsedData) renderVariableIncludeSummary(); });
+        document.getElementById(id)?.addEventListener('change', () => { if (AppState.parsedData) { renderVariableIncludeSummary(); refreshModelSampleGuide(); } });
     });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

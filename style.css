@@ -1934,3 +1934,7 @@ body.comparison-running { overflow: hidden; }
 [data-theme="light"] .pill-missing { color: var(--accent-rose); }
 [data-theme="light"] .cm-cell-hit { color: var(--accent-emerald); }
 [data-theme="light"] .cm-cell-miss { color: var(--accent-rose); }
+.budget-ok strong { color: var(--accent-emerald); }
+.budget-warn strong { color: var(--accent-amber, #b45309); }
+.budget-bad strong { color: var(--accent-rose, #dc2626); }
+.budget-table td, .budget-table th { white-space: normal; vertical-align: top; }
