@@ -166,7 +166,7 @@ test('external validation: an exported model is imported and validated on a sepa
     expect(errors).toEqual([]);
 });
 
-test('multiple imputation is done once: a second model on the same patients reuses the imputed datasets', async ({ page }) => {
+test('multiple imputation is done once: reused for a second model, and saved and loaded for a later session', async ({ page }) => {
     test.setTimeout(400000);
     const errors = watch(page);
     await page.goto('/index.html');
@@ -175,7 +175,7 @@ test('multiple imputation is done once: a second model on the same patients reus
     // record every progress message of the imputation rounds
     await page.evaluate(() => {
         window.__miRounds = 0;
-        new MutationObserver(() => { if (/imputation \d+\/\d+, round/.test(document.getElementById('train-status').textContent)) window.__miRounds++; })
+        new MutationObserver(() => { if (/Multiple imputation of .*(round \d+\/\d+|% of rounds done)/.test(document.getElementById('train-status').textContent)) window.__miRounds++; })
             .observe(document.getElementById('train-status'), { childList: true, subtree: true, characterData: true });
     });
     await page.locator('.model-card[data-model-id="glm"]').click();
@@ -188,5 +188,47 @@ test('multiple imputation is done once: a second model on the same patients reus
     await expect(page.locator('#train-status')).toContainText(/Deployed|Complete/, { timeout: 170000 });
     expect(await page.evaluate(() => window.__miRounds)).toBe(0);
     await expect(page.locator('body')).toContainText('Multiple imputation:');
+    // Saved imputed data lets a later session skip the imputation
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#mi-save-btn')]);
+    expect(dl.suggestedFilename()).toContain('PATIENT-DATA');
+    const saved = await dl.path();
+    await page.goto('/index.html');
+    await toStep4(page);
+    await page.selectOption('#mi-select', 'mice5');
+    await page.setInputFiles('#mi-file-input', saved);
+    await expect(page.locator('#mi-file-status')).toContainText('Loaded');
+    await page.evaluate(() => {
+        window.__miRounds = 0;
+        new MutationObserver(() => { if (/Multiple imputation of .*(round \d+\/\d+|% of rounds done)/.test(document.getElementById('train-status').textContent)) window.__miRounds++; })
+            .observe(document.getElementById('train-status'), { childList: true, subtree: true, characterData: true });
+    });
+    await page.locator('.model-card[data-model-id="glm"]').click();
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText(/Deployed|Complete/, { timeout: 170000 });
+    expect(await page.evaluate(() => window.__miRounds)).toBe(0);
+    expect(errors).toEqual([]);
+});
+
+test('multiple imputation split across parallel workers gives exactly the single-run result', async ({ page }) => {
+    test.setTimeout(400000);
+    const errors = watch(page);
+    await page.goto('/index.html');
+    const r = await page.evaluate(async () => {
+        const { miceFitRun } = await import('./src/compute.js');
+        const rng = window.DataEngine.createPRNG(9);
+        const rows = Array.from({ length: 2500 }, () => {
+            const o = { Y: rng() < 0.4 ? 'Yes' : 'No', Cat: rng() < 0.15 ? '' : ['A', 'B', 'C'][Math.floor(rng() * 3)] };
+            for (let j = 0; j < 10; j++) o[`X${j}`] = rng() < 0.15 ? '' : (rng() * 10).toFixed(2);
+            return o;
+        });
+        const cfg = { Y: { role: 'target', type: 'nominal' }, Cat: { role: 'feature', type: 'nominal' } };
+        for (let j = 0; j < 10; j++) cfg[`X${j}`] = { role: 'feature', type: 'continuous' };
+        let parallel = 0;
+        const par = await miceFitRun(rows, cfg, { m: 5, seed: 3 }, { onProgress: (l, m, it, iters, k) => { parallel = Math.max(parallel, k || 1); } });
+        const single = window.DataEngine.miceFit(rows, cfg, { m: 5, seed: 3 });
+        return { same: JSON.stringify(par) === JSON.stringify(single), parallel, cores: navigator.hardwareConcurrency };
+    });
+    expect(r.same).toBe(true);
+    if (r.cores > 2) expect(r.parallel).toBeGreaterThan(1);
     expect(errors).toEqual([]);
 });

@@ -1170,8 +1170,10 @@
          * in exactly the same way as the training patients. Returns the m completed training datasets and a
          * fitted "imputer" (one set of imputation models per completed dataset, for every predictor) that
          * miceApplyRow uses to impute any new patient.
+         * `chains` (optional) computes only those imputations (0-based): each is seeded on its own, so imputations
+         * computed separately (e.g. in parallel workers) and merged in order equal a single run (mergeMiceParts).
          */
-        miceFit(rows, columnConfigs, { m = 5, iterations = 10, seed = 2024, donors = 5, maxDonors = 500, maxFitRows = 2000, maxSearch = 1000, onProgress = null } = {}) {
+        miceFit(rows, columnConfigs, { m = 5, iterations = 10, seed = 2024, donors = 5, maxDonors = 500, maxFitRows = 2000, maxSearch = 1000, onProgress = null, chains: chainList = null } = {}) {
             const cols = Object.keys(columnConfigs).filter(c => columnConfigs[c].role === 'feature');
             const numeric = {}, levels = {}, start = {};
             cols.forEach(c => {
@@ -1200,6 +1202,8 @@
             const obsOf = {};
             usable.forEach(c => { const mis = new Set(missingIdx[c]); obsOf[c] = []; for (let i = 0; i < n; i++) if (!mis.has(i)) obsOf[c].push(i); });
             const respOf = c => (numeric[c] ? (i => [coded[c][i]]) : (i => levels[c].map((_, k) => (coded[c][i] === k ? 1 : 0))));
+            // Design matrices are stored flat (row i at i * p) in typed arrays: the same arithmetic in the same
+            // order as row arrays, so the results are unchanged, with far less memory traffic
             const fitModel = (cur, c, rng, obsIdxAll) => {
                 // Imputation model for c on all other usable predictors (current completed values)
                 const others = usable.filter(o => o !== c);
@@ -1213,15 +1217,21 @@
                         stats[o] = { mu, sd: Math.sqrt(ss / n) || 1 };
                     }
                 });
-                const Xall = new Array(n);
-                for (let i = 0; i < n; i++) {
-                    const x = [1];
-                    others.forEach(o => {
-                        if (numeric[o]) x.push((cur[o][i] - stats[o].mu) / stats[o].sd);
-                        else for (let k = 1; k < levels[o].length; k++) x.push(cur[o][i] === k ? 1 : 0);
-                    });
-                    Xall[i] = x;
-                }
+                let p = 1;
+                others.forEach(o => { p += numeric[o] ? 1 : levels[o].length - 1; });
+                const Xall = new Float64Array(n * p);
+                for (let i = 0; i < n; i++) Xall[i * p] = 1;
+                let col = 1;
+                others.forEach(o => {
+                    const v = cur[o];
+                    if (numeric[o]) {
+                        const { mu, sd } = stats[o];
+                        for (let i = 0; i < n; i++) Xall[i * p + col] = (v[i] - mu) / sd;
+                        col++;
+                    } else {
+                        for (let k = 1; k < levels[o].length; k++, col++) for (let i = 0; i < n; i++) Xall[i * p + col] = v[i] === k ? 1 : 0;
+                    }
+                });
                 // Large cohorts: each imputation model is fitted on a random subset of the observed rows
                 // (results are practically unchanged; cohorts below maxFitRows use every row)
                 let obsIdx = obsIdxAll;
@@ -1232,27 +1242,33 @@
                 }
                 const resp = respOf(c);
                 const lam = 1e-3 * obsIdx.length;
-                const betaHat = ridge(obsIdx.map(i => Xall[i]), obsIdx.map(resp), lam);
+                const betaHat = ridge(Xall, p, obsIdx, resp, lam);
                 const boot = obsIdx.map(() => obsIdx[Math.floor(rng() * obsIdx.length)]);
-                const betaStar = ridge(boot.map(i => Xall[i]), boot.map(resp), lam);
-                return { spec: { c, others, stats }, Xall, betaHat, betaStar, obsIdx };
+                const betaStar = ridge(Xall, p, boot, resp, lam);
+                return { spec: { c, others, stats }, Xall, p, betaHat, betaStar, obsIdx };
             };
-            const pred = (x, B) => {
-                const q = B[0].length, out = new Array(q).fill(0);
-                for (let j = 0; j < x.length; j++) { const xv = x[j]; if (xv === 0) continue; const Bj = B[j]; for (let k = 0; k < q; k++) out[k] += xv * Bj[k]; }
+            // Prediction for row i of a flat design matrix
+            const pred = (f, i, B) => {
+                const q = B[0].length, out = new Array(q).fill(0), X = f.Xall, base = i * f.p;
+                for (let j = 0; j < f.p; j++) { const xv = X[base + j]; if (xv === 0) continue; const Bj = B[j]; for (let k = 0; k < q; k++) out[k] += xv * Bj[k]; }
                 return out;
             };
+            // The `donors` closest predictions (ties: earlier first), one chosen at random. Kept sorted by
+            // insertion, which orders them exactly as sorting after every change did
+            const bestK = new Int32Array(donors), bestD = new Float64Array(donors);
             const nearest = (target, preds, rng) => {
-                const best = [];
+                let len = 0;
                 const q = target.length;
                 for (let k = 0; k < preds.length; k++) {
                     const pv = preds[k];
                     let d = 0;
                     for (let j = 0; j < q; j++) d += (pv[j] - target[j]) ** 2;
-                    if (best.length < donors) { best.push({ k, d }); best.sort((a, b) => a.d - b.d); }
-                    else if (d < best[donors - 1].d) { best[donors - 1] = { k, d }; best.sort((a, b) => a.d - b.d); }
+                    if (len === donors && !(d < bestD[donors - 1])) continue;
+                    let pos = len < donors ? len++ : donors - 1;
+                    while (pos > 0 && bestD[pos - 1] > d) { bestD[pos] = bestD[pos - 1]; bestK[pos] = bestK[pos - 1]; pos--; }
+                    bestD[pos] = d; bestK[pos] = k;
                 }
-                return best[Math.floor(rng() * best.length)].k;
+                return bestK[Math.floor(rng() * len)];
             };
             // Same result as nearest() for one-dimensional predictions (numeric predictors), but by binary search
             // in the sorted predictions: the closest `donors` (ties by position, as above), one chosen at random
@@ -1279,7 +1295,7 @@
             };
 
             const datasets = [], chains = [];
-            for (let l = 0; l < m; l++) {
+            for (const l of (chainList || Array.from({ length: m }, (_, k) => k))) {
                 const rng = this.createPRNG(seed + 1009 * l);
                 const cur = {}, src = {}; // current values, and the row each imputed value was taken from
                 usable.forEach(c => { cur[c] = Float64Array.from(coded[c]); src[c] = {}; });
@@ -1292,9 +1308,9 @@
                         const f = fitModel(cur, c, rng, obsOf[c]);
                         // Donors for predictive mean matching (a random subset of maxSearch in large cohorts)
                         const pool = f.obsIdx.length > maxSearch ? Array.from({ length: maxSearch }, () => f.obsIdx[Math.floor(rng() * f.obsIdx.length)]) : f.obsIdx;
-                        const poolPred = pool.map(i => pred(f.Xall[i], f.betaHat));
+                        const poolPred = pool.map(i => pred(f, i, f.betaHat));
                         const find = numeric[c] ? nearestSorted(poolPred) : (target => nearest(target, poolPred, rng));
-                        missingIdx[c].forEach(i => { const d = pool[find(pred(f.Xall[i], f.betaStar), rng)]; cur[c][i] = coded[c][d]; src[c][i] = d; });
+                        missingIdx[c].forEach(i => { const d = pool[find(pred(f, i, f.betaStar), rng)]; cur[c][i] = coded[c][d]; src[c][i] = d; });
                     });
                     if (onProgress) onProgress(l + 1, m, it + 1, iterations);
                 }
@@ -1311,7 +1327,7 @@
                     const r4 = v => Number(v.toPrecision(6));
                     models[c] = {
                         others: f.spec.others, stats: f.spec.stats, beta: f.betaStar.map(row => row.map(r4)),
-                        donorPred: take.map(k => pred(f.Xall[f.obsIdx[k]], f.betaHat).map(r4)),
+                        donorPred: take.map(k => pred(f, f.obsIdx[k], f.betaHat).map(r4)),
                         donorVal: take.map(k => rows[f.obsIdx[k]][c])
                     };
                 });
@@ -1320,6 +1336,15 @@
             return {
                 datasets, imputedColumns: incomplete,
                 imputer: { kind: 'mice', m, iterations: Math.min(iterations, 5), donors, columns: usable, numeric, levels, start, chains, seed }
+            };
+        },
+
+        /** Joins miceFit results computed for separate imputations (in order) into one result */
+        mergeMiceParts(parts) {
+            const first = parts[0];
+            return {
+                datasets: [].concat(...parts.map(r => r.datasets)), imputedColumns: first.imputedColumns,
+                imputer: { ...first.imputer, chains: [].concat(...parts.map(r => r.imputer.chains)) }
             };
         },
 
@@ -1366,21 +1391,26 @@
             return out;
         },
 
-        /** Ridge regression by the normal equations (no penalty on the intercept); coefficients p x q */
-        _ridgeSolve(X, Y, lam) {
-            const p = X[0].length, q = Y[0].length;
-            const A = Array.from({ length: p }, () => new Array(p).fill(0));
-            const Bm = Array.from({ length: p }, () => new Array(q).fill(0));
-            for (let i = 0; i < X.length; i++) {
-                const xi = X[i];
+        /**
+         * Ridge regression by the normal equations (no penalty on the intercept); coefficients p x q. X is a flat
+         * design matrix (row i at i * p), rows lists the rows to use (repeats allowed) and resp(i) gives row i's
+         * response vector.
+         */
+        _ridgeSolve(X, p, rows, resp, lam) {
+            const q = resp(rows[0]).length;
+            const A = new Float64Array(p * p), Bm = new Float64Array(p * q);
+            for (let r = 0; r < rows.length; r++) {
+                const i = rows[r], base = i * p, yi = resp(i);
                 for (let a = 0; a < p; a++) {
-                    if (xi[a] === 0) continue;
-                    for (let b = a; b < p; b++) A[a][b] += xi[a] * xi[b];
-                    for (let k = 0; k < q; k++) Bm[a][k] += xi[a] * Y[i][k];
+                    const xa = X[base + a];
+                    if (xa === 0) continue;
+                    const row = a * p;
+                    for (let b = a; b < p; b++) A[row + b] += xa * X[base + b];
+                    for (let k = 0; k < q; k++) Bm[a * q + k] += xa * yi[k];
                 }
             }
-            for (let a = 0; a < p; a++) { for (let b = 0; b < a; b++) A[a][b] = A[b][a]; if (a > 0) A[a][a] += lam; }
-            const M = A.map((r, i) => [...r, ...Bm[i]]);
+            for (let a = 0; a < p; a++) { for (let b = 0; b < a; b++) A[a * p + b] = A[b * p + a]; if (a > 0) A[a * p + a] += lam; }
+            const M = Array.from({ length: p }, (_, i) => [...A.subarray(i * p, i * p + p), ...Bm.subarray(i * q, i * q + q)]);
             for (let c = 0; c < p; c++) {
                 let piv = c;
                 for (let r = c + 1; r < p; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;

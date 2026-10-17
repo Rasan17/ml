@@ -498,12 +498,15 @@ async function optionC(VC, rows, cfg, modelId, hp, B, tune) {
         const page = DE.miceFit(small, cfg, { m: 3, seed: 5 });
         assert(JSON.stringify(done.result.datasets) === JSON.stringify(page.datasets) && JSON.stringify(done.result.imputer) === JSON.stringify(page.imputer), 'worker and page imputations differ');
         const progress = sent.filter(m => m.progress && m.progress.kind === 'mice').length;
+        // Imputations computed separately (as by parallel workers) and merged equal a single run
+        const merged = DE.mergeMiceParts([[0], [1, 2]].map(chains => DE.miceFit(small, cfg, { m: 3, seed: 5, chains })));
+        assert(JSON.stringify(merged) === JSON.stringify(page), 'imputations computed in parts differ from a single run');
         // Speed guard: 5,000 patients, 16 predictors, 5 imputations (about 4 s on a laptop; was 24 s)
         const t0 = Date.now();
         DE.miceFit(make(5000), cfg, { m: 5 });
         const secs = (Date.now() - t0) / 1000;
         assert(secs < 30, `multiple imputation of 5,000 patients took ${secs.toFixed(1)} s`);
-        return `identical in worker and page (${progress} progress messages); 5,000 patients imputed 5 times in ${secs.toFixed(1)} s`;
+        return `identical in worker, page and in parallel parts (${progress} progress messages); 5,000 patients imputed 5 times in ${secs.toFixed(1)} s`;
     });
 
     await check('Safeguards: Youden threshold, fewer folds for a rare outcome, out-of-range inputs, near-constant predictors', async () => {

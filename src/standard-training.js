@@ -75,10 +75,12 @@ async function startModelTraining() {
             say(`🧩 Multiple imputation of ${what}: ${nRows.toLocaleString('en-GB')} patients, ${m} imputations${est >= 10 ? ` (about ${est < 60 ? `${Math.max(10, Math.round(est / 5) * 5)} s` : `${Math.round(est / 60)} min`})` : ''}...`);
             return {
                 isAborted: () => Boolean(watchdog && watchdog.aborted),
-                onProgress: (l, mm, it, iters) => {
+                onReuse: () => say(`🧩 Multiple imputation of ${what}: already done for these patients and settings, reusing the imputed datasets...`),
+                onProgress: (l, mm, it, iters, parallel = 1) => {
                     const done = ((l - 1) * iters + it) / (mm * iters);
                     const left = done > 0 ? ((Date.now() - t0) / done) * (1 - done) / 1000 : null;
-                    say(`🧩 Multiple imputation of ${what}: imputation ${l}/${mm}, round ${it}/${iters}${left !== null && left >= 5 ? ` (about ${left < 60 ? `${Math.round(left / 5) * 5} s` : `${Math.round(left / 60)} min`} left)` : ''}...`);
+                    const where = parallel > 1 ? `${Math.round(done * 100)}% of rounds done (${parallel} imputations at a time)` : `imputation ${l}/${mm}, round ${it}/${iters}`;
+                    say(`🧩 Multiple imputation of ${what}: ${where}${left !== null && left >= 5 ? ` (about ${left < 60 ? `${Math.round(left / 5) * 5} s` : `${Math.round(left / 60)} min`} left)` : ''}...`);
                 }
             };
         };

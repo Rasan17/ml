@@ -4,7 +4,7 @@
 // patients are imputed with the same fitted chains by DataEngine.transformSingleRow.
 /* global DataEngine, ModelEngine */
 import { fitModel, miceFitRun } from './compute.js';
-import { AppState } from './core.js';
+import { APP_VERSION, AppState } from './core.js';
 
 // Number of imputations chosen in Step 4 (0 = single imputation)
 function readMultipleImputation() {
@@ -30,24 +30,83 @@ function miCacheKey(rows, columnConfigs, m, seed) {
     }
     return `${m}|${seed}|${rows.length}|${text.length}|${(h1 >>> 0).toString(16)}${(h2 >>> 0).toString(16)}`;
 }
-function clearImputationCache() { miCache.clear(); }
+function clearImputationCache() { miCache.clear(); updateImputedDataButtons(); }
+
+// "Save imputed data" file: the cached imputations (completed datasets and the fitted imputation models),
+// so a later session can skip the imputation. It holds patient-level data, unlike the settings file. On
+// loading, entries are only ever used for exactly the same patients and settings (the cache key).
+const MI_FILE_KIND = 'ummp-imputed-data';
+const MI_FILE_FORMAT = 1; // changes whenever the imputation method changes, so old files are not reused
+
+function updateImputedDataButtons() {
+    const btn = document.getElementById('mi-save-btn');
+    if (btn) {
+        btn.disabled = miCache.size === 0;
+        btn.title = miCache.size ? 'Download the imputed datasets of this session (contains patient data)' : 'Train a model with multiple imputation first';
+    }
+}
+
+function saveImputedData() {
+    if (!miCache.size) { alert('There are no imputed datasets yet: train a model with multiple imputation first.'); return; }
+    const file = {
+        kind: MI_FILE_KIND, format: MI_FILE_FORMAT, appVersion: APP_VERSION, savedAt: new Date().toISOString(),
+        dataset: AppState.fileName || null,
+        notice: 'CONTAINS PATIENT-LEVEL DATA: every patient\'s values, with the missing ones filled in. Store and share it only as the original dataset is permitted to be.',
+        entries: [...miCache.entries()].map(([key, mi]) => ({ key, m: mi.datasets.length, patients: mi.datasets[0] ? mi.datasets[0].length : 0, mi }))
+    };
+    const base = String(AppState.fileName || 'dataset').replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '_').slice(0, 60) || 'dataset';
+    const url = URL.createObjectURL(new Blob([JSON.stringify(file)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${base}_imputed-data_PATIENT-DATA_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setImputedDataStatus(`💾 Saved ${file.entries.length} set${file.entries.length === 1 ? '' : 's'} of imputed data. The file contains patient data: keep it as securely as the original dataset.`);
+}
+
+function loadImputedDataFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        let data;
+        try { data = JSON.parse(e.target.result); } catch (err) { alert('This file could not be read as an imputed-data file (it is not valid JSON).'); return; }
+        if (!data || data.kind !== MI_FILE_KIND || !Array.isArray(data.entries)) { alert('This is not an imputed-data file from this app.'); return; }
+        if (data.format !== MI_FILE_FORMAT) { alert(`This imputed-data file was made by a version of the app with a different imputation method (${data.appVersion || 'unknown version'}), so it cannot be reused; the imputation will be run again when you train.`); return; }
+        let added = 0;
+        data.entries.forEach(en => {
+            if (en && typeof en.key === 'string' && en.mi && Array.isArray(en.mi.datasets) && en.mi.imputer && Array.isArray(en.mi.imputer.chains)) { miCache.set(en.key, en.mi); added++; }
+        });
+        while (miCache.size > MI_CACHE_SIZE) miCache.delete(miCache.keys().next().value);
+        updateImputedDataButtons();
+        setImputedDataStatus(`📂 Loaded ${added} set${added === 1 ? '' : 's'} of imputed data${data.dataset ? ` (saved for "${data.dataset}")` : ''}. They are used automatically when you train on exactly the same patients with the same variable settings, number of imputations and seed; otherwise the imputation is run as usual.`);
+    };
+    reader.readAsText(file);
+}
+
+function setImputedDataStatus(html) {
+    const box = document.getElementById('mi-file-status');
+    if (box) { box.style.display = 'block'; box.textContent = html; }
+}
 
 /**
  * Multiply imputes raw training rows and returns the encoding fitted on all completed copies (prep, whose
  * X / y are the first copy, for counts and displays) and the encoded copies (sets) to train on.
  */
-async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onProgress = null, isAborted = null } = {}) {
+async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onProgress = null, isAborted = null, onReuse = null } = {}) {
     // Plain copies: the rows are sent to the background worker
     const plainRows = rawRows.map(r => ({ ...r }));
     const key = miCacheKey(plainRows, columnConfigs, m, seed);
     let mi = miCache.get(key);
     if (mi) {
         miCache.delete(key); miCache.set(key, mi); // most recently used last
+        if (onReuse) onReuse();
     } else {
         mi = await miceFitRun(plainRows, JSON.parse(JSON.stringify(columnConfigs)), { m, seed }, { onProgress, isAborted });
         if (isAborted && isAborted()) throw new Error('Training aborted by user.');
         miCache.set(key, mi);
         while (miCache.size > MI_CACHE_SIZE) miCache.delete(miCache.keys().next().value);
+        updateImputedDataButtons();
     }
     await ModelEngine.yieldToBrowser();
     const stacked = [].concat(...mi.datasets);
@@ -64,9 +123,13 @@ async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onPr
 }
 
 // Rough duration of the imputation step, for a warning before large runs (measured: 5,000 patients with
-// 16 predictors take about 4 s for 5 imputations, growing with patients, predictors and imputations)
+// 16 predictors take about 2 s for 5 imputations on one core, growing with patients, predictors and
+// imputations; larger jobs run several imputations at a time, as in compute.js miceFitRun)
 function estimateImputationSeconds(nRows, nPredictors, m) {
-    return Math.round((nRows / 5000) * Math.pow(nPredictors / 16, 1.6) * (m / 5) * 4);
+    const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2;
+    const k = nRows * nPredictors * m >= 100000 ? Math.min(m, Math.max(1, cores - 1), 8) : 1;
+    const oneCore = (nRows / 5000) * Math.pow(nPredictors / 16, 1.6) * (m / 5) * 2;
+    return Math.round(oneCore * Math.ceil(m / k) / m + (k > 1 ? 1 : 0)); // + starting the extra workers
 }
 
 /** Trains one model per completed copy and returns the pooled model */
@@ -93,4 +156,4 @@ function updateImputationEstimate() {
     box.innerHTML = `⏱️ For ${rows.toLocaleString('en-GB')} patients and ${nPred} predictors, the imputation step takes ${t(est)} (twice with Option A when the final model is retrained on all patients; done once: training other models later on the same patients with the same settings reuses the imputed datasets), and each selected model is trained ${m} times. It runs in the background: the page stays usable and Force Stop works. Keep this window in front while it runs: browsers slow down background work in hidden or minimised windows.`;
 }
 
-export { clearImputationCache, updateImputationEstimate, readMultipleImputation, prepareMultipleImputation, fitPooledModel, estimateImputationSeconds };
+export { clearImputationCache, loadImputedDataFile, saveImputedData, updateImputedDataButtons, updateImputationEstimate, readMultipleImputation, prepareMultipleImputation, fitPooledModel, estimateImputationSeconds };

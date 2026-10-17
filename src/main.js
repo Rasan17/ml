@@ -12,7 +12,7 @@ import './imputation.js';
 import './training-setup.js';
 import { renderSampleSizePanel } from './panels.js';
 import './subgroups.js';
-import { updateImputationEstimate } from './multiple-imputation.js';
+import { loadImputedDataFile, saveImputedData, updateImputationEstimate, updateImputedDataButtons } from './multiple-imputation.js';
 import './cv-tuning.js';
 import './standard-training.js';
 import './training-actions.js';
@@ -64,6 +64,14 @@ function start() {
     window.downloadValidationReport = downloadValidationReport;
     document.getElementById('pipeline-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('pipeline'));
     document.getElementById('mi-select')?.addEventListener('change', updateImputationEstimate);
+    document.getElementById('mi-save-btn')?.addEventListener('click', saveImputedData);
+    document.getElementById('mi-load-btn')?.addEventListener('click', () => document.getElementById('mi-file-input')?.click());
+    document.getElementById('mi-file-input')?.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (file) loadImputedDataFile(file);
+        e.target.value = '';
+    });
+    updateImputedDataButtons();
     // Keep the sample-size check in step with the chosen split and validation protocol
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
         const el = document.getElementById(id);

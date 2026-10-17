@@ -204,21 +204,70 @@ async function bootstrapRun(payload, { onResample = null, onInnerProgress = null
 }
 
 /**
- * Multiple imputation of training rows (DataEngine.miceFit) in the background worker, so the page stays
- * responsive and Force Stop works; on the page when workers are unavailable. onProgress(l, m, it, iters).
+ * Multiple imputation of training rows (DataEngine.miceFit) in the background, so the page stays responsive
+ * and Force Stop works; on the page when workers are unavailable. Larger jobs are split across several
+ * workers, each computing some of the imputations: every imputation is seeded on its own, so the merged
+ * result is identical to a single run, only sooner. onProgress(l, m, it, iters, parallel): the imputation
+ * and round reached (with `parallel` workers, l and it express the overall share of rounds completed).
  */
 async function miceFitRun(rows, columnConfigs, options = {}, { onProgress = null, isAborted = null } = {}) {
     if (workerAvailable()) {
+        const m = options.m || 5;
+        const nFeat = Object.values(columnConfigs).filter(c => c.role === 'feature').length;
+        const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2;
+        const k = rows.length * nFeat * m >= 100000 ? Math.min(m, Math.max(1, cores - 1), 8) : 1;
         try {
+            if (k > 1) return await miceFitParallel(rows, columnConfigs, options, k, { onProgress, isAborted });
             return await call('miceFit', { rows, columnConfigs, options }, {
                 isAborted,
-                onProgress: p => { if (p && p.kind === 'mice' && onProgress) onProgress(p.l, p.m, p.it, p.iters); }
+                onProgress: p => { if (p && p.kind === 'mice' && onProgress) onProgress(p.l, p.m, p.it, p.iters, 1); }
             });
         } catch (e) {
             if (!e.workerUnavailable) throw e;
         }
     }
     return DataEngine.miceFit(rows, columnConfigs, { ...options, onProgress });
+}
+
+// Runs the imputations in k separate workers (consecutive blocks of imputations, merged in order)
+function miceFitParallel(rows, columnConfigs, options, k, { onProgress = null, isAborted = null } = {}) {
+    const m = options.m || 5;
+    const blocks = Array.from({ length: k }, () => []);
+    for (let l = 0; l < m; l++) blocks[Math.floor(l * k / m)].push(l);
+    const done = new Array(k).fill(0); // rounds completed by each worker
+    const helpers = [];
+    let timer = null;
+    const stop = () => { clearInterval(timer); helpers.forEach(w => { try { w.terminate(); } catch (e) { /* ignore */ } }); };
+    return new Promise((resolve, reject) => {
+        const parts = new Array(k);
+        let left = k, failed = false;
+        const fail = err => { if (failed) return; failed = true; stop(); reject(err); };
+        if (isAborted) timer = setInterval(() => { if (isAborted()) fail(new Error('Training aborted by user.')); }, 150);
+        blocks.forEach((chains, b) => {
+            let w;
+            try { w = new Worker(versionedWorkerUrl()); } catch (e) { fail(Object.assign(new Error('Background worker unavailable'), { workerUnavailable: true })); return; }
+            helpers.push(w);
+            w.onmessage = ev => {
+                const { progress, result, error } = ev.data || {};
+                if (progress !== undefined) {
+                    if (progress && progress.kind === 'mice') {
+                        done[b] = (chains.indexOf(progress.l - 1)) * progress.iters + progress.it;
+                        const total = done.reduce((a, v) => a + v, 0), iters = progress.iters;
+                        const l = Math.max(1, Math.ceil(total / iters));
+                        if (onProgress) { try { onProgress(l, m, total - (l - 1) * iters, iters, k); } catch (e) { /* ignore */ } }
+                    }
+                    return;
+                }
+                if (error !== undefined) { fail(new Error(error)); return; }
+                parts[b] = result;
+                try { w.terminate(); } catch (e) { /* ignore */ }
+                if (--left === 0 && !failed) { clearInterval(timer); resolve(DataEngine.mergeMiceParts(parts)); }
+            };
+            w.onmessageerror = () => fail(new Error('The background worker sent a result that could not be read.'));
+            w.onerror = e => { e.preventDefault && e.preventDefault(); fail(Object.assign(new Error('Background worker unavailable'), { workerUnavailable: true })); };
+            w.postMessage({ id: 1, op: 'miceFit', payload: { rows, columnConfigs, options: { ...options, chains } } });
+        });
+    });
 }
 
 export { fitModel, fitAndScore, fitAndScoreMulti, bootstrapRun, miceFitRun, cancelAll, workerAvailable, describeWorker };

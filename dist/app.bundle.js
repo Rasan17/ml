@@ -683,21 +683,70 @@ async function bootstrapRun(payload, { onResample = null, onInnerProgress = null
 }
 
 /**
- * Multiple imputation of training rows (DataEngine.miceFit) in the background worker, so the page stays
- * responsive and Force Stop works; on the page when workers are unavailable. onProgress(l, m, it, iters).
+ * Multiple imputation of training rows (DataEngine.miceFit) in the background, so the page stays responsive
+ * and Force Stop works; on the page when workers are unavailable. Larger jobs are split across several
+ * workers, each computing some of the imputations: every imputation is seeded on its own, so the merged
+ * result is identical to a single run, only sooner. onProgress(l, m, it, iters, parallel): the imputation
+ * and round reached (with `parallel` workers, l and it express the overall share of rounds completed).
  */
 async function miceFitRun(rows, columnConfigs, options = {}, { onProgress = null, isAborted = null } = {}) {
     if (workerAvailable()) {
+        const m = options.m || 5;
+        const nFeat = Object.values(columnConfigs).filter(c => c.role === 'feature').length;
+        const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2;
+        const k = rows.length * nFeat * m >= 100000 ? Math.min(m, Math.max(1, cores - 1), 8) : 1;
         try {
+            if (k > 1) return await miceFitParallel(rows, columnConfigs, options, k, { onProgress, isAborted });
             return await call('miceFit', { rows, columnConfigs, options }, {
                 isAborted,
-                onProgress: p => { if (p && p.kind === 'mice' && onProgress) onProgress(p.l, p.m, p.it, p.iters); }
+                onProgress: p => { if (p && p.kind === 'mice' && onProgress) onProgress(p.l, p.m, p.it, p.iters, 1); }
             });
         } catch (e) {
             if (!e.workerUnavailable) throw e;
         }
     }
     return DataEngine.miceFit(rows, columnConfigs, { ...options, onProgress });
+}
+
+// Runs the imputations in k separate workers (consecutive blocks of imputations, merged in order)
+function miceFitParallel(rows, columnConfigs, options, k, { onProgress = null, isAborted = null } = {}) {
+    const m = options.m || 5;
+    const blocks = Array.from({ length: k }, () => []);
+    for (let l = 0; l < m; l++) blocks[Math.floor(l * k / m)].push(l);
+    const done = new Array(k).fill(0); // rounds completed by each worker
+    const helpers = [];
+    let timer = null;
+    const stop = () => { clearInterval(timer); helpers.forEach(w => { try { w.terminate(); } catch (e) { /* ignore */ } }); };
+    return new Promise((resolve, reject) => {
+        const parts = new Array(k);
+        let left = k, failed = false;
+        const fail = err => { if (failed) return; failed = true; stop(); reject(err); };
+        if (isAborted) timer = setInterval(() => { if (isAborted()) fail(new Error('Training aborted by user.')); }, 150);
+        blocks.forEach((chains, b) => {
+            let w;
+            try { w = new Worker(versionedWorkerUrl()); } catch (e) { fail(Object.assign(new Error('Background worker unavailable'), { workerUnavailable: true })); return; }
+            helpers.push(w);
+            w.onmessage = ev => {
+                const { progress, result, error } = ev.data || {};
+                if (progress !== undefined) {
+                    if (progress && progress.kind === 'mice') {
+                        done[b] = (chains.indexOf(progress.l - 1)) * progress.iters + progress.it;
+                        const total = done.reduce((a, v) => a + v, 0), iters = progress.iters;
+                        const l = Math.max(1, Math.ceil(total / iters));
+                        if (onProgress) { try { onProgress(l, m, total - (l - 1) * iters, iters, k); } catch (e) { /* ignore */ } }
+                    }
+                    return;
+                }
+                if (error !== undefined) { fail(new Error(error)); return; }
+                parts[b] = result;
+                try { w.terminate(); } catch (e) { /* ignore */ }
+                if (--left === 0 && !failed) { clearInterval(timer); resolve(DataEngine.mergeMiceParts(parts)); }
+            };
+            w.onmessageerror = () => fail(new Error('The background worker sent a result that could not be read.'));
+            w.onerror = e => { e.preventDefault && e.preventDefault(); fail(Object.assign(new Error('Background worker unavailable'), { workerUnavailable: true })); };
+            w.postMessage({ id: 1, op: 'miceFit', payload: { rows, columnConfigs, options: { ...options, chains } } });
+        });
+    });
 }
 
 // ---- src/validation-core.js ----
@@ -3946,24 +3995,83 @@ function miCacheKey(rows, columnConfigs, m, seed) {
     }
     return `${m}|${seed}|${rows.length}|${text.length}|${(h1 >>> 0).toString(16)}${(h2 >>> 0).toString(16)}`;
 }
-function clearImputationCache() { miCache.clear(); }
+function clearImputationCache() { miCache.clear(); updateImputedDataButtons(); }
+
+// "Save imputed data" file: the cached imputations (completed datasets and the fitted imputation models),
+// so a later session can skip the imputation. It holds patient-level data, unlike the settings file. On
+// loading, entries are only ever used for exactly the same patients and settings (the cache key).
+const MI_FILE_KIND = 'ummp-imputed-data';
+const MI_FILE_FORMAT = 1; // changes whenever the imputation method changes, so old files are not reused
+
+function updateImputedDataButtons() {
+    const btn = document.getElementById('mi-save-btn');
+    if (btn) {
+        btn.disabled = miCache.size === 0;
+        btn.title = miCache.size ? 'Download the imputed datasets of this session (contains patient data)' : 'Train a model with multiple imputation first';
+    }
+}
+
+function saveImputedData() {
+    if (!miCache.size) { alert('There are no imputed datasets yet: train a model with multiple imputation first.'); return; }
+    const file = {
+        kind: MI_FILE_KIND, format: MI_FILE_FORMAT, appVersion: APP_VERSION, savedAt: new Date().toISOString(),
+        dataset: AppState.fileName || null,
+        notice: 'CONTAINS PATIENT-LEVEL DATA: every patient\'s values, with the missing ones filled in. Store and share it only as the original dataset is permitted to be.',
+        entries: [...miCache.entries()].map(([key, mi]) => ({ key, m: mi.datasets.length, patients: mi.datasets[0] ? mi.datasets[0].length : 0, mi }))
+    };
+    const base = String(AppState.fileName || 'dataset').replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '_').slice(0, 60) || 'dataset';
+    const url = URL.createObjectURL(new Blob([JSON.stringify(file)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${base}_imputed-data_PATIENT-DATA_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setImputedDataStatus(`💾 Saved ${file.entries.length} set${file.entries.length === 1 ? '' : 's'} of imputed data. The file contains patient data: keep it as securely as the original dataset.`);
+}
+
+function loadImputedDataFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        let data;
+        try { data = JSON.parse(e.target.result); } catch (err) { alert('This file could not be read as an imputed-data file (it is not valid JSON).'); return; }
+        if (!data || data.kind !== MI_FILE_KIND || !Array.isArray(data.entries)) { alert('This is not an imputed-data file from this app.'); return; }
+        if (data.format !== MI_FILE_FORMAT) { alert(`This imputed-data file was made by a version of the app with a different imputation method (${data.appVersion || 'unknown version'}), so it cannot be reused; the imputation will be run again when you train.`); return; }
+        let added = 0;
+        data.entries.forEach(en => {
+            if (en && typeof en.key === 'string' && en.mi && Array.isArray(en.mi.datasets) && en.mi.imputer && Array.isArray(en.mi.imputer.chains)) { miCache.set(en.key, en.mi); added++; }
+        });
+        while (miCache.size > MI_CACHE_SIZE) miCache.delete(miCache.keys().next().value);
+        updateImputedDataButtons();
+        setImputedDataStatus(`📂 Loaded ${added} set${added === 1 ? '' : 's'} of imputed data${data.dataset ? ` (saved for "${data.dataset}")` : ''}. They are used automatically when you train on exactly the same patients with the same variable settings, number of imputations and seed; otherwise the imputation is run as usual.`);
+    };
+    reader.readAsText(file);
+}
+
+function setImputedDataStatus(html) {
+    const box = document.getElementById('mi-file-status');
+    if (box) { box.style.display = 'block'; box.textContent = html; }
+}
 
 /**
  * Multiply imputes raw training rows and returns the encoding fitted on all completed copies (prep, whose
  * X / y are the first copy, for counts and displays) and the encoded copies (sets) to train on.
  */
-async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onProgress = null, isAborted = null } = {}) {
+async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onProgress = null, isAborted = null, onReuse = null } = {}) {
     // Plain copies: the rows are sent to the background worker
     const plainRows = rawRows.map(r => ({ ...r }));
     const key = miCacheKey(plainRows, columnConfigs, m, seed);
     let mi = miCache.get(key);
     if (mi) {
         miCache.delete(key); miCache.set(key, mi); // most recently used last
+        if (onReuse) onReuse();
     } else {
         mi = await miceFitRun(plainRows, JSON.parse(JSON.stringify(columnConfigs)), { m, seed }, { onProgress, isAborted });
         if (isAborted && isAborted()) throw new Error('Training aborted by user.');
         miCache.set(key, mi);
         while (miCache.size > MI_CACHE_SIZE) miCache.delete(miCache.keys().next().value);
+        updateImputedDataButtons();
     }
     await ModelEngine.yieldToBrowser();
     const stacked = [].concat(...mi.datasets);
@@ -3980,9 +4088,13 @@ async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onPr
 }
 
 // Rough duration of the imputation step, for a warning before large runs (measured: 5,000 patients with
-// 16 predictors take about 4 s for 5 imputations, growing with patients, predictors and imputations)
+// 16 predictors take about 2 s for 5 imputations on one core, growing with patients, predictors and
+// imputations; larger jobs run several imputations at a time, as in compute.js miceFitRun)
 function estimateImputationSeconds(nRows, nPredictors, m) {
-    return Math.round((nRows / 5000) * Math.pow(nPredictors / 16, 1.6) * (m / 5) * 4);
+    const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2;
+    const k = nRows * nPredictors * m >= 100000 ? Math.min(m, Math.max(1, cores - 1), 8) : 1;
+    const oneCore = (nRows / 5000) * Math.pow(nPredictors / 16, 1.6) * (m / 5) * 2;
+    return Math.round(oneCore * Math.ceil(m / k) / m + (k > 1 ? 1 : 0)); // + starting the extra workers
 }
 
 /** Trains one model per completed copy and returns the pooled model */
@@ -4442,10 +4554,12 @@ async function startModelTraining() {
             say(`🧩 Multiple imputation of ${what}: ${nRows.toLocaleString('en-GB')} patients, ${m} imputations${est >= 10 ? ` (about ${est < 60 ? `${Math.max(10, Math.round(est / 5) * 5)} s` : `${Math.round(est / 60)} min`})` : ''}...`);
             return {
                 isAborted: () => Boolean(watchdog && watchdog.aborted),
-                onProgress: (l, mm, it, iters) => {
+                onReuse: () => say(`🧩 Multiple imputation of ${what}: already done for these patients and settings, reusing the imputed datasets...`),
+                onProgress: (l, mm, it, iters, parallel = 1) => {
                     const done = ((l - 1) * iters + it) / (mm * iters);
                     const left = done > 0 ? ((Date.now() - t0) / done) * (1 - done) / 1000 : null;
-                    say(`🧩 Multiple imputation of ${what}: imputation ${l}/${mm}, round ${it}/${iters}${left !== null && left >= 5 ? ` (about ${left < 60 ? `${Math.round(left / 5) * 5} s` : `${Math.round(left / 60)} min`} left)` : ''}...`);
+                    const where = parallel > 1 ? `${Math.round(done * 100)}% of rounds done (${parallel} imputations at a time)` : `imputation ${l}/${mm}, round ${it}/${iters}`;
+                    say(`🧩 Multiple imputation of ${what}: ${where}${left !== null && left >= 5 ? ` (about ${left < 60 ? `${Math.round(left / 5) * 5} s` : `${Math.round(left / 60)} min`} left)` : ''}...`);
                 }
             };
         };
@@ -9736,6 +9850,14 @@ function start() {
     window.downloadValidationReport = downloadValidationReport;
     document.getElementById('pipeline-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('pipeline'));
     document.getElementById('mi-select')?.addEventListener('change', updateImputationEstimate);
+    document.getElementById('mi-save-btn')?.addEventListener('click', saveImputedData);
+    document.getElementById('mi-load-btn')?.addEventListener('click', () => document.getElementById('mi-file-input')?.click());
+    document.getElementById('mi-file-input')?.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (file) loadImputedDataFile(file);
+        e.target.value = '';
+    });
+    updateImputedDataButtons();
     // Keep the sample-size check in step with the chosen split and validation protocol
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
         const el = document.getElementById(id);
