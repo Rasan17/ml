@@ -1,6 +1,6 @@
 // model-io.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 /* global DataEngine, ModelEngine */
-import { APP_VERSION, AppState, RESEARCH_USE_NOTICE, displayModelName, rankingMetricLabel } from './core.js';
+import { APP_VERSION, AppState, RESEARCH_USE_NOTICE, displayModelName, prepTypicality, rankingMetricLabel } from './core.js';
 import { describeSplit } from './cv-tuning.js';
 import { goToStep } from './navigation.js';
 import { updatePredictionProvenanceBar } from './pipeline-results.js';
@@ -22,7 +22,8 @@ const MODEL_FILE_VERSION = 2;
 
 function sanitizedPrep(prep) {
     const keep = ['featureCols', 'featureMetadata', 'totalDimensions', 'targetCol', 'isClassification', 'targetClasses',
-        'targetClassToIdx', 'targetIdxToClass', 'positiveClass', 'fillValues', 'encodedFeatureNames', 'derivedIndicators'];
+        'targetClassToIdx', 'targetIdxToClass', 'positiveClass', 'fillValues', 'encodedFeatureNames', 'derivedIndicators', 'typicality'];
+    prepTypicality(prep); // aggregate statistics only (mean and inverse covariance), for the unusual-patient check
     const out = {};
     keep.forEach(k => { if (prep[k] !== undefined) out[k] = JSON.parse(JSON.stringify(prep[k])); });
     let knnImputation = false, knnColumns = [];
@@ -138,6 +139,11 @@ function validateImportedPrep(prep) {
     });
     if (prep.isClassification && (!Array.isArray(prep.targetClasses) || prep.targetClasses.length < 2)) bad('outcome categories');
     ['__proto__', 'constructor', 'prototype'].forEach(k => { if (Object.prototype.hasOwnProperty.call(prep, k)) bad(k); });
+    // Unusual-patient statistics: used only if well formed (otherwise the check is skipped for this model)
+    const t = prep.typicality, num = v => typeof v === 'number' && isFinite(v);
+    const okT = t && Array.isArray(t.mean) && t.mean.length === prep.totalDimensions && t.mean.every(num) && Array.isArray(t.inv) && t.inv.length === t.mean.length
+        && t.inv.every(r => Array.isArray(r) && r.length === t.mean.length && r.every(num)) && num(t.q99) && num(t.q999);
+    prep.typicality = okT ? t : null;
 }
 
 // The imported model must predict a typical patient (all predictors at their fitted defaults) with valid output

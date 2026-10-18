@@ -1,5 +1,5 @@
 // reports.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { APP_VERSION, AppState, MODEL_INFO, RESEARCH_USE_NOTICE, escapeHtml, rankingMetricLabel, actionAttrs } from './core.js';
+import { APP_VERSION, AppState, MODEL_INFO, RESEARCH_USE_NOTICE, escapeHtml, rankingMetricLabel, actionAttrs, displayModelName } from './core.js';
 import { describeSplit } from './cv-tuning.js';
 import { SETTINGS_APP } from './settings.js';
 import { DOM } from './shell.js';
@@ -247,7 +247,7 @@ function downloadStandardAnalysisReport() {
         exclusions: { complete_case_analysis: Boolean(AppState.completeCase), test_rows_dropped: top.testDroppedRows ?? null },
         validation_design: {
             protocol: top.protocol === 'option-c' ? `internal validation by bootstrap optimism correction (${(top.optimismCorrection || {}).B || '?'} resamples)` : top.protocol === 'option-b' ? 'separate testing dataset (Dataset ii)' : 'internal train/test split',
-            optimism_correction: top.protocol === 'option-c' ? results.map(r => ({ model: (MODEL_INFO[r.modelId] || {}).name || r.modelId, ...(r.evalRes.optimismCorrection || {}) })) : undefined,
+            optimism_correction: top.protocol === 'option-c' ? results.map(r => ({ model: displayModelName(r.modelId, r.model), ...(r.evalRes.optimismCorrection || {}) })) : undefined,
             split: top.protocol === 'option-b' ? null : describeSplit(top.splitInfo),
             train_percent: top.trainPct ?? null, split_seed: top.splitSeed ?? null,
             train_cases: top.trainCount, test_cases: top.testCount,
@@ -257,9 +257,9 @@ function downloadStandardAnalysisReport() {
             decision_threshold: top.decisionThreshold ?? null,
             deployed_model_retrained_on_all_data: Boolean(top.retrainOn100)
         },
-        deployed_model: AppState.deployedSource === 'standard' ? (MODEL_INFO[AppState.deployedModelId] || {}).name || AppState.deployedModelId : null,
+        deployed_model: AppState.deployedSource === 'standard' ? displayModelName(AppState.deployedModelId, AppState.trainedModel) : null,
         models: results.map((r, i) => ({
-            rank: i + 1, model: (MODEL_INFO[r.modelId] || {}).name || r.modelId, seed: r.seed,
+            rank: i + 1, model: displayModelName(r.modelId, r.model), seed: r.seed,
             settings: r.hyperparams || null,
             cross_validated_training_scores: r.evalRes.cv || null,
             tuning: r.evalRes.tuning || null,

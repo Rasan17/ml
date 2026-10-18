@@ -125,7 +125,7 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   <li><strong>No third-party components at run time.</strong> No analytics, advertising, tracking, fonts or scripts are loaded from other organisations. The libraries the application uses (TensorFlow.js and Chart.js) are served from the application's own files.</li>
   <li><strong>Untrusted files are checked.</strong> Model and settings files loaded into the application are treated as untrusted: they are read as plain data only (a file cannot add program code), checked against the expected structure, and a model must predict a test patient correctly before anything is installed.</li>
   <li><strong>Clear session.</strong> A “Clear session and patient data” button discards every loaded dataset, result, trained model and cached imputation from the page. Closing the browser tab has the same effect.</li>
-  <li><strong>Verified on the published site.</strong> In October 2026, every network request made by the published application during a complete analysis (loading data, training models, making predictions) was recorded: all went to the application's own address, all were downloads of its own files and example data, and none sent data out.</li>
+  <li><strong>Verified on the published site.</strong> In October 2026, every network request made by the published application during a complete analysis (loading data, training models, making predictions) was recorded: all went to the application's own address, all were downloads of its own files and example data, and none sent data out. The same check is repeated automatically by a browser test on every change to the software.</li>
 </ul>
 
 <h3>3.3 Offline use (recommended where governance requires it)</h3>

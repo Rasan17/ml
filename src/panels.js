@@ -13,7 +13,9 @@ const calibrationItems = {};
 function calibrationSvg(cal) {
     const W = 240, P = 30, PL = 40, S = W - P - PL; // wider left margin: the axis title clears the tick labels
     const x = v => PL + v * S, y = v => W - P - v * S;
-    const pts = (cal.bins || []).map(b => ({ cx: x(b.meanPred), cy: y(b.observed), r: Math.max(3, Math.min(9, 2 + Math.sqrt(b.n))), tip: `${b.n} patients: mean predicted ${(b.meanPred * 100).toFixed(1)}%, observed ${(b.observed * 100).toFixed(1)}%` }));
+    // Each group's observed proportion with its 95% Wilson interval (vertical bar): wide bars mean few patients
+    const wilson = (p, n) => { if (!n) return [0, 1]; const z = 1.959964, d = 1 + z * z / n, c = (p + z * z / (2 * n)) / d, h = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d; return [Math.max(0, c - h), Math.min(1, c + h)]; };
+    const pts = (cal.bins || []).map(b => { const ci = wilson(b.observed, b.n); return { cx: x(b.meanPred), cy: y(b.observed), lo: y(ci[0]), hi: y(ci[1]), r: Math.max(3, Math.min(9, 2 + Math.sqrt(b.n))), tip: `${b.n} patients: mean predicted ${(b.meanPred * 100).toFixed(1)}%, observed ${(b.observed * 100).toFixed(1)}% (95% CI ${(ci[0] * 100).toFixed(0)}–${(ci[1] * 100).toFixed(0)}%)` }; });
     const path = pts.map((q, i) => `${i ? 'L' : 'M'}${q.cx.toFixed(1)},${q.cy.toFixed(1)}`).join(' ');
     const ticks = [0, 0.25, 0.5, 0.75, 1];
     return `<svg viewBox="0 0 ${W} ${W}" width="100%" style="max-width: 260px;" role="img" aria-label="Calibration plot: observed against predicted probability">
@@ -22,6 +24,7 @@ function calibrationSvg(cal) {
             <line x1="${x(0) - 4}" y1="${y(t)}" x2="${x(0)}" y2="${y(t)}" stroke="var(--text-muted)"/><text x="${x(0) - 6}" y="${y(t) + 3}" font-size="9" text-anchor="end" fill="var(--text-muted)">${t}</text>`).join('')}
         <line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}" stroke="var(--text-muted)" stroke-dasharray="4 4"/>
         ${path ? `<path d="${path}" fill="none" stroke="var(--accent-cyan)" stroke-width="2"/>` : ''}
+        ${pts.map(q => `<line x1="${q.cx.toFixed(1)}" y1="${q.lo.toFixed(1)}" x2="${q.cx.toFixed(1)}" y2="${q.hi.toFixed(1)}" stroke="var(--accent-cyan)" stroke-opacity="0.6" stroke-width="1.5"/>`).join('')}
         ${pts.map(q => `<circle cx="${q.cx.toFixed(1)}" cy="${q.cy.toFixed(1)}" r="${q.r.toFixed(1)}" fill="var(--accent-cyan)" fill-opacity="0.75"><title>${escapeHtml(q.tip)}</title></circle>`).join('')}
         <text x="${PL + S / 2}" y="${W - 4}" font-size="10" text-anchor="middle" fill="var(--text-secondary)">Predicted probability</text>
         <text x="10" y="${W - P - S / 2}" font-size="10" text-anchor="middle" fill="var(--text-secondary)" transform="rotate(-90 10 ${W - P - S / 2})">Observed proportion</text>
@@ -43,6 +46,22 @@ function thresholdTable(ev) {
         return `<tr${isCur ? ' class="thr-current"' : ''}><td>${t.toFixed(2)}${isCur ? ' (current)' : ''}</td><td>${pct(tp, tp + fn)}</td><td>${pct(tn, tn + fp)}</td><td>${pct(tp, tp + fp)}</td><td>${pct(tn, tn + fn)}</td><td>${pct(tp + fp, p.length)}</td></tr>`;
     }).join('');
     return `<table class="data-table thr-table"><thead><tr><th>Threshold</th><th>Sensitivity</th><th>Specificity</th><th>PPV</th><th>NPV</th><th>Classed positive</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// Calibration-in-the-large: observed event rate against the mean predicted risk (ratio O:E, ideal 1)
+function citlLine(ev) {
+    if (!Array.isArray(ev.probPositive) || !Array.isArray(ev.actuals) || !ev.actuals.length) return '';
+    const n = ev.actuals.length, obs = ev.actuals.filter(v => v === 1).length / n, pred = ev.probPositive.reduce((a, b) => a + b, 0) / n;
+    if (!(pred > 0)) return '';
+    return `<div><strong>Calibration-in-the-large</strong>: observed ${(obs * 100).toFixed(1)}% vs mean predicted ${(pred * 100).toFixed(1)}% (O:E ${(obs / pred).toFixed(2)}; ideal 1)</div>`;
+}
+
+// Reference Brier score: everyone given the observed event rate; scaled Brier = share of that error removed
+function brierReference(ev) {
+    if (typeof ev.brierScore !== 'number' || !Array.isArray(ev.actuals) || !ev.actuals.length) return '';
+    const prev = ev.actuals.filter(v => v === 1).length / ev.actuals.length, ref = prev * (1 - prev);
+    if (!(ref > 0)) return '';
+    return ` <span class="tune-sd">(reference ${ref.toFixed(3)} for giving everyone the observed rate of ${(prev * 100).toFixed(1)}%; scaled Brier ${((1 - ev.brierScore / ref) * 100).toFixed(1)}%, where 0% = no better than that and 100% = perfect)</span>`;
 }
 
 function calibrationBody(item, positiveLabel) {
@@ -68,9 +87,11 @@ function calibrationBody(item, positiveLabel) {
             <div class="cal-stats">
                 <div><strong>Calibration slope</strong> (ideal 1): ${slopeTxt}${ev.ci && ev.ci.calibrationSlope && cal.slope !== null ? ` <span class="tune-sd">(95% CI ${ev.ci.calibrationSlope[0].toFixed(2)}–${ev.ci.calibrationSlope[1].toFixed(2)})</span>` : ''}</div>
                 <div><strong>Calibration intercept</strong> (ideal 0): ${intTxt}</div>
-                <div><strong>Brier score</strong> (lower is better): ${typeof ev.brierScore === 'number' ? ev.brierScore.toFixed(3) : 'N/A'}</div>
+                ${citlLine(ev)}
+                <div><strong>Brier score</strong> (lower is better): ${typeof ev.brierScore === 'number' ? ev.brierScore.toFixed(3) : 'N/A'}${brierReference(ev)}</div>
                 <div class="tune-muted">Based on ${cal.n} test patients, ${cal.events} with "${escapeHtml(positiveLabel)}". ${cal.note ? escapeHtml(cal.note) : ''}</div>
-                <p class="tune-muted" style="margin-top: 6px;"><strong>How to read the plot:</strong> patients are grouped by their predicted probability. Each dot compares the average predicted probability in a group with the proportion who actually had "${escapeHtml(positiveLabel)}". Dots on the dashed diagonal mean that a predicted 30% really corresponds to about 30% of patients. Dots below the line mean the model over-estimates the risk; dots above it mean it under-estimates.</p>
+                <p class="tune-muted" style="margin-top: 6px;"><strong>Brier score</strong> is the mean squared difference between predicted probabilities and outcomes (0 or 1). It mixes calibration and discrimination and depends on how common the outcome is, so compare it with the reference (everyone given the observed rate), not across datasets.</p>
+                <p class="tune-muted" style="margin-top: 6px;"><strong>How to read the plot:</strong> each vertical bar is the 95% confidence interval of a group's observed proportion; patients are grouped by their predicted probability. Each dot compares the average predicted probability in a group with the proportion who actually had "${escapeHtml(positiveLabel)}". Dots on the dashed diagonal mean that a predicted 30% really corresponds to about 30% of patients. Dots below the line mean the model over-estimates the risk; dots above it mean it under-estimates.</p>
             </div>
         </div>
         ${recalNote}

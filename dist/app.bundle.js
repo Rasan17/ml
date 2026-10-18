@@ -4,6 +4,7 @@
 
 // ---- src/core.js ----
 // core.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+/* global DataEngine */
 
 
 // Application State
@@ -257,6 +258,14 @@ function summariseHeldOutSet(ev) {
         notes.push(`Class(es) absent from the test set: ${ev.classesMissingFromTest.map(escapeHtml).join(', ')}. Their recall/F1 cannot be evaluated and are counted as 0 in macro averages.`);
     }
     return notes;
+}
+
+// How typical the training patients' combinations of values are (DataEngine.fitTypicality), fitted once per
+// model from its training rows, or carried in an imported model file
+function prepTypicality(prep) {
+    if (!prep) return null;
+    if (prep.typicality === undefined) prep.typicality = typeof DataEngine !== 'undefined' ? DataEngine.fitTypicality(prep.X || null) : null;
+    return prep.typicality;
 }
 
 // ---- src/watchdog.js ----
@@ -3209,7 +3218,9 @@ const calibrationItems = {};
 function calibrationSvg(cal) {
     const W = 240, P = 30, PL = 40, S = W - P - PL; // wider left margin: the axis title clears the tick labels
     const x = v => PL + v * S, y = v => W - P - v * S;
-    const pts = (cal.bins || []).map(b => ({ cx: x(b.meanPred), cy: y(b.observed), r: Math.max(3, Math.min(9, 2 + Math.sqrt(b.n))), tip: `${b.n} patients: mean predicted ${(b.meanPred * 100).toFixed(1)}%, observed ${(b.observed * 100).toFixed(1)}%` }));
+    // Each group's observed proportion with its 95% Wilson interval (vertical bar): wide bars mean few patients
+    const wilson = (p, n) => { if (!n) return [0, 1]; const z = 1.959964, d = 1 + z * z / n, c = (p + z * z / (2 * n)) / d, h = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d; return [Math.max(0, c - h), Math.min(1, c + h)]; };
+    const pts = (cal.bins || []).map(b => { const ci = wilson(b.observed, b.n); return { cx: x(b.meanPred), cy: y(b.observed), lo: y(ci[0]), hi: y(ci[1]), r: Math.max(3, Math.min(9, 2 + Math.sqrt(b.n))), tip: `${b.n} patients: mean predicted ${(b.meanPred * 100).toFixed(1)}%, observed ${(b.observed * 100).toFixed(1)}% (95% CI ${(ci[0] * 100).toFixed(0)}–${(ci[1] * 100).toFixed(0)}%)` }; });
     const path = pts.map((q, i) => `${i ? 'L' : 'M'}${q.cx.toFixed(1)},${q.cy.toFixed(1)}`).join(' ');
     const ticks = [0, 0.25, 0.5, 0.75, 1];
     return `<svg viewBox="0 0 ${W} ${W}" width="100%" style="max-width: 260px;" role="img" aria-label="Calibration plot: observed against predicted probability">
@@ -3218,6 +3229,7 @@ function calibrationSvg(cal) {
             <line x1="${x(0) - 4}" y1="${y(t)}" x2="${x(0)}" y2="${y(t)}" stroke="var(--text-muted)"/><text x="${x(0) - 6}" y="${y(t) + 3}" font-size="9" text-anchor="end" fill="var(--text-muted)">${t}</text>`).join('')}
         <line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}" stroke="var(--text-muted)" stroke-dasharray="4 4"/>
         ${path ? `<path d="${path}" fill="none" stroke="var(--accent-cyan)" stroke-width="2"/>` : ''}
+        ${pts.map(q => `<line x1="${q.cx.toFixed(1)}" y1="${q.lo.toFixed(1)}" x2="${q.cx.toFixed(1)}" y2="${q.hi.toFixed(1)}" stroke="var(--accent-cyan)" stroke-opacity="0.6" stroke-width="1.5"/>`).join('')}
         ${pts.map(q => `<circle cx="${q.cx.toFixed(1)}" cy="${q.cy.toFixed(1)}" r="${q.r.toFixed(1)}" fill="var(--accent-cyan)" fill-opacity="0.75"><title>${escapeHtml(q.tip)}</title></circle>`).join('')}
         <text x="${PL + S / 2}" y="${W - 4}" font-size="10" text-anchor="middle" fill="var(--text-secondary)">Predicted probability</text>
         <text x="10" y="${W - P - S / 2}" font-size="10" text-anchor="middle" fill="var(--text-secondary)" transform="rotate(-90 10 ${W - P - S / 2})">Observed proportion</text>
@@ -3239,6 +3251,22 @@ function thresholdTable(ev) {
         return `<tr${isCur ? ' class="thr-current"' : ''}><td>${t.toFixed(2)}${isCur ? ' (current)' : ''}</td><td>${pct(tp, tp + fn)}</td><td>${pct(tn, tn + fp)}</td><td>${pct(tp, tp + fp)}</td><td>${pct(tn, tn + fn)}</td><td>${pct(tp + fp, p.length)}</td></tr>`;
     }).join('');
     return `<table class="data-table thr-table"><thead><tr><th>Threshold</th><th>Sensitivity</th><th>Specificity</th><th>PPV</th><th>NPV</th><th>Classed positive</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// Calibration-in-the-large: observed event rate against the mean predicted risk (ratio O:E, ideal 1)
+function citlLine(ev) {
+    if (!Array.isArray(ev.probPositive) || !Array.isArray(ev.actuals) || !ev.actuals.length) return '';
+    const n = ev.actuals.length, obs = ev.actuals.filter(v => v === 1).length / n, pred = ev.probPositive.reduce((a, b) => a + b, 0) / n;
+    if (!(pred > 0)) return '';
+    return `<div><strong>Calibration-in-the-large</strong>: observed ${(obs * 100).toFixed(1)}% vs mean predicted ${(pred * 100).toFixed(1)}% (O:E ${(obs / pred).toFixed(2)}; ideal 1)</div>`;
+}
+
+// Reference Brier score: everyone given the observed event rate; scaled Brier = share of that error removed
+function brierReference(ev) {
+    if (typeof ev.brierScore !== 'number' || !Array.isArray(ev.actuals) || !ev.actuals.length) return '';
+    const prev = ev.actuals.filter(v => v === 1).length / ev.actuals.length, ref = prev * (1 - prev);
+    if (!(ref > 0)) return '';
+    return ` <span class="tune-sd">(reference ${ref.toFixed(3)} for giving everyone the observed rate of ${(prev * 100).toFixed(1)}%; scaled Brier ${((1 - ev.brierScore / ref) * 100).toFixed(1)}%, where 0% = no better than that and 100% = perfect)</span>`;
 }
 
 function calibrationBody(item, positiveLabel) {
@@ -3264,9 +3292,11 @@ function calibrationBody(item, positiveLabel) {
             <div class="cal-stats">
                 <div><strong>Calibration slope</strong> (ideal 1): ${slopeTxt}${ev.ci && ev.ci.calibrationSlope && cal.slope !== null ? ` <span class="tune-sd">(95% CI ${ev.ci.calibrationSlope[0].toFixed(2)}–${ev.ci.calibrationSlope[1].toFixed(2)})</span>` : ''}</div>
                 <div><strong>Calibration intercept</strong> (ideal 0): ${intTxt}</div>
-                <div><strong>Brier score</strong> (lower is better): ${typeof ev.brierScore === 'number' ? ev.brierScore.toFixed(3) : 'N/A'}</div>
+                ${citlLine(ev)}
+                <div><strong>Brier score</strong> (lower is better): ${typeof ev.brierScore === 'number' ? ev.brierScore.toFixed(3) : 'N/A'}${brierReference(ev)}</div>
                 <div class="tune-muted">Based on ${cal.n} test patients, ${cal.events} with "${escapeHtml(positiveLabel)}". ${cal.note ? escapeHtml(cal.note) : ''}</div>
-                <p class="tune-muted" style="margin-top: 6px;"><strong>How to read the plot:</strong> patients are grouped by their predicted probability. Each dot compares the average predicted probability in a group with the proportion who actually had "${escapeHtml(positiveLabel)}". Dots on the dashed diagonal mean that a predicted 30% really corresponds to about 30% of patients. Dots below the line mean the model over-estimates the risk; dots above it mean it under-estimates.</p>
+                <p class="tune-muted" style="margin-top: 6px;"><strong>Brier score</strong> is the mean squared difference between predicted probabilities and outcomes (0 or 1). It mixes calibration and discrimination and depends on how common the outcome is, so compare it with the reference (everyone given the observed rate), not across datasets.</p>
+                <p class="tune-muted" style="margin-top: 6px;"><strong>How to read the plot:</strong> each vertical bar is the 95% confidence interval of a group's observed proportion; patients are grouped by their predicted probability. Each dot compares the average predicted probability in a group with the proportion who actually had "${escapeHtml(positiveLabel)}". Dots on the dashed diagonal mean that a predicted 30% really corresponds to about 30% of patients. Dots below the line mean the model over-estimates the risk; dots above it mean it under-estimates.</p>
             </div>
         </div>
         ${recalNote}
@@ -5412,6 +5442,7 @@ window.copySeedToClipboard = copySeedToClipboard;
 
 
 
+
 // Accuracy interval: the bootstrap interval when one was computed (it resamples patients, not rows, when a
 // patient-ID column is set, so it respects repeated records); otherwise Wilson's interval on the rows
 function accuracyInterval(ev) {
@@ -5470,7 +5501,7 @@ function renderEvaluationDashboard() {
                             <span>✓</span> Option A: Two-Phase Retraining Protocol &bull; 100% Retrained Models Active
                         </div>
                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 3px;">
-                            Accuracy evaluated on held-out <strong>${testPct}% test split (${testCount} cases)</strong> after fitting on <strong>${trainPct}% (${trainCount} cases)</strong>. Deployed models were then fully retrained on <strong>100% of cohort data (${totalCount} cases)</strong>.
+                            Accuracy evaluated on held-out <strong>${testPct}% test split (${testCount} cases)</strong> after fitting on <strong>${trainPct}% (${trainCount} cases)</strong>. The models were then retrained on <strong>100% of cohort data (${totalCount} cases)</strong> for use in Steps 5 and 6. <strong>The results shown are those of the models fitted on ${trainPct}% and scored on the held-out test cases.</strong> The retrained models have not themselves been tested (no unseen patients remain): their expected performance is taken from this evaluation, and they should be confirmed on new patients.
                         </div>
                     </div>
                     <span class="pill pill-target" style="background: rgba(16, 185, 129, 0.18); color: var(--tag-emerald); border-color: rgba(16, 185, 129, 0.4); font-size: 12px; font-weight: 700;">
@@ -5512,6 +5543,12 @@ function renderEvaluationDashboard() {
         AppState.lastTestRows, Boolean(evalRes && evalRes.isClassification),
         !isOptionB && AppState.baselineTestRawRows && AppState.lastTestRows && AppState.baselineTestRawRows.length === AppState.lastTestRows.length ? AppState.baselineTestRawRows : null);
 
+    // Plain-language reading of the active model's results
+    renderInterpretation('interpretation-container', {
+        ev: evalRes, prep, name: displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel),
+        design: isOptionB ? 'B' : isOptionC ? 'C' : 'A', dataset: AppState.fileName
+    });
+
     // Calibration and decision-threshold panel (binary outcomes)
     renderCalibrationPanel('calibration-panel-container', isOptionC ? [] :
         (allResults.length ? allResults : [{ modelId: AppState.selectedModelId, evalRes }]).map(r => ({
@@ -5529,10 +5566,11 @@ function renderEvaluationDashboard() {
             const counts = {};
             prep.y.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
             const minority = Math.min(...Object.values(counts));
-            const nPred = prep.X[0].length;
-            const epv = minority / Math.max(1, nPred);
+            // Parameters: 1 per numerical or ordered predictor, (categories − 1) per unordered categorical one
+            const nPred = Math.max(1, prep.X[0].length - Object.values(prep.featureMetadata || {}).filter(m => m.type === 'nominal' && m.length > 1).length);
+            const epv = minority / nPred;
             if (epv < 10) {
-                notes.push(`⚠️ <strong>Small sample for the number of predictors:</strong> the smaller outcome group has ${minority} patient(s) for ${nPred} encoded predictor column(s) (${epv.toFixed(1)} per predictor; at least 10–20 is a common rule of thumb). Models may overfit; consider fewer predictors or more patients, and treat the results as exploratory.`);
+                notes.push(`⚠️ <strong>Small sample for the number of predictors:</strong> the smaller outcome group has ${minority} patient(s) for ${nPred} predictor parameter(s) (${epv.toFixed(1)} per parameter; at least 10–20 is a common rule of thumb, and see the Riley criteria in Step 4). Models may overfit; consider fewer predictors or more patients, and treat the results as exploratory.`);
             }
         }
         if (evalRes && evalRes.multipleImputation) {
@@ -5542,6 +5580,21 @@ function renderEvaluationDashboard() {
         if (evalRes && evalRes.multipleImputationSkipped) notes.push(`🧩 ${escapeHtml(evalRes.multipleImputationSkipped)}`);
         if (evalRes && evalRes.cv) {
             notes.push(`Best model chosen by ${evalRes.cv.folds}-fold cross-validation inside the Training set${evalRes.cv.grouped ? ' (each patient\'s records kept in one fold)' : ''}; missing-value filling, encoding and scaling were refitted inside every fold.`);
+        } else if (allResults.length > 1 && !isOptionC) {
+            notes.push(`⚠️ <strong>Exploratory model choice:</strong> the leading model was chosen by its score on the same Testing patients it is reported on, so its test results are optimistic (the best of ${allResults.length} scores is partly luck). For a reportable result, choose "Cross-validation within the Training set" for model selection, so the Testing set is used once, only to evaluate the chosen model.`);
+        }
+        // Who the test metrics rest on: patients, events and non-events, with a warning when they are few
+        if (!isOptionC && evalRes && evalRes.isClassification && Array.isArray(evalRes.actuals) && evalRes.actuals.length) {
+            const n = evalRes.actuals.length, counts = {};
+            evalRes.actuals.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+            const groups = Object.keys(counts).map(k => `${counts[k]} "${escapeHtml(String(prep && prep.targetIdxToClass ? prep.targetIdxToClass[k] : k))}"`);
+            const fewest = Math.min(...Object.values(counts)), nGroups = Object.keys(counts).length;
+            const expected = prep && prep.targetClasses ? prep.targetClasses.length : nGroups;
+            let warn = '';
+            if (nGroups < expected) warn = ' <strong>Not every outcome group is present, so AUC and per-group results cannot be estimated.</strong>';
+            else if (fewest < 10) warn = ' <strong>Fewer than 10 patients in the smallest group: AUC, sensitivity, calibration and their intervals are unreliable; treat them as illustrative only.</strong>';
+            else if (fewest < 50) warn = ' With fewer than about 50 patients in the smallest group these estimates are imprecise (see the 95% intervals); calibration needs about 100 in each group.';
+            notes.push(`${fewest < 50 || nGroups < expected ? '⚠️ ' : ''}<strong>Testing set:</strong> ${n} ${isOptionB ? 'patients in Dataset (ii)' : 'test records'} (${groups.join(', ')}).${warn}`);
         }
         if (prep && prep.isClassification && prep.positiveClass !== null && prep.positiveClass !== undefined) {
             notes.push(`Positive (event) class for ROC-AUC, Brier score, sensitivity and TP/FN: <strong>${escapeHtml(prep.positiveClass)}</strong>. Change it in Step 2 (target card) if this is not the outcome of interest.`);
@@ -5952,7 +6005,7 @@ function renderEvaluationDashboard() {
             DOM.evaluationDetailContainer.innerHTML = `
                 ${regCmHtml}
                 <p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">
-                    Model validated on ${cohortDesc} with R² = ${fmtR2(evalRes.r2)} and Mean Absolute Error = ${evalRes.mae}. ${isOptionB ? `Fitted strictly on 100% of Training Dataset (i) (${trainCount} patients).` : (evalRes.retrainOn100 ? `Active model was then retrained on 100% of data (${totalCount} patients).` : `Active model maintained strictly on ${trainPct}% training split (${trainCount} patients; 100% retraining declined).`)}
+                    Model validated on ${cohortDesc} with R² = ${fmtR2(evalRes.r2)} and Mean Absolute Error = ${evalRes.mae}. ${isOptionB ? `Fitted strictly on 100% of Training Dataset (i) (${trainCount} patients).` : (evalRes.retrainOn100 ? `Active model was then retrained on 100% of data (${totalCount} patients); the results shown are from the split-trained model on the test patients, and the retrained model itself has not been tested.` : `Active model maintained strictly on ${trainPct}% training split (${trainCount} patients; 100% retraining declined).`)}
                 </p>
                 <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 6px;">
                     💡 <em>R², RMSE and MAE are the primary performance measures for a continuous outcome. If the outcome has a prespecified clinical decision threshold, analyse it as a binary outcome (Nominal) instead of relying on the exploratory split above.</em>
@@ -6052,6 +6105,14 @@ function runSinglePrediction() {
            </div>`
         : '';
 
+    // A patient whose combination of values is unlike the training patients, even with every value in range
+    const typ = DataEngine.typicality(xVector, prepTypicality(prep));
+    const typicalityHtml = typ && typ.level !== 'typical'
+        ? `<div style="font-size: 11.5px; color: var(--accent-rose); margin-top: 6px; font-weight: 600;">
+                ⚠️ Unusual patient: this combination of predictor values is ${typ.level === 'very unusual' ? 'more atypical than 99.9%' : 'more atypical than 99%'} of the training patients (Mahalanobis distance), even if each value is within range. The model has seen few patients like this, so the prediction may be unreliable.
+           </div>`
+        : '';
+
     DOM.singleResultBanner.style.display = 'flex';
 
     let ensembleDetailsHtml = '';
@@ -6099,7 +6160,7 @@ function runSinglePrediction() {
                     Active Model: <strong>${escapeHtml(displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel))}</strong> &bull; Target: <em>${escapeHtml(prep.targetCol)}</em>${seedSnippet}
                 </div>
                 ${ensembleDetailsHtml}
-                ${inputWarningHtml}${rangeWarningHtml}
+                ${inputWarningHtml}${rangeWarningHtml}${typicalityHtml}
                 ${renderPatientExplanation(AppState.trainedModel, xVector, prep, inputRow)}
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
                     ${probabilityLabel(result.probabilityType).note}: not a calibrated clinical risk or a measure of certainty (check the calibration panel and Brier score in Step 4 / Step 7). For research and educational use only.${AppState.evalResults && AppState.evalResults.decisionThreshold && Math.abs(AppState.evalResults.decisionThreshold - 0.5) > 1e-9 ? ` Classed with a decision threshold of ${AppState.evalResults.decisionThreshold.toFixed(2)} for the positive outcome.` : ''}
@@ -6125,7 +6186,7 @@ function runSinglePrediction() {
                     Active Model: <strong>${escapeHtml(displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel))}</strong> &bull; Unit/Scale: <em>${escapeHtml(prep.targetCol)}</em>${seedSnippet}
                 </div>
                 ${ensembleDetailsHtml}
-                ${inputWarningHtml}${rangeWarningHtml}
+                ${inputWarningHtml}${rangeWarningHtml}${typicalityHtml}
                 ${renderPatientExplanation(AppState.trainedModel, xVector, prep, inputRow)}
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">For research and educational use only; not for decisions about an individual patient's care.</div>
             </div>
@@ -6210,6 +6271,10 @@ async function executeBatchPrediction() {
     const rowRangeLists = rows.map(() => []);
     const xMatrix = rows.map((r, i) => DataEngine.transformSingleRow(r, prep, rowIssueLists[i], rowRangeLists[i]));
     const rowsOutOfRange = rowRangeLists.filter(l => l.length).length;
+    // Patients whose combination of values is unlike the training patients (see DataEngine.fitTypicality)
+    const typ = prepTypicality(prep);
+    const typLevels = xMatrix.map(x => { const t = DataEngine.typicality(x, typ); return t ? t.level : null; });
+    const rowsUnusual = typLevels.filter(l => l && l !== 'typical').length;
     // Asynchronous, chunked prediction keeps the page responsive for large files
     let outputs = [];
     if (rows.length) {
@@ -6249,6 +6314,7 @@ async function executeBatchPrediction() {
         rowCopy[`Probability_Type`] = prep.isClassification ? probabilityLabel(predRes.probabilityType).title : 'N/A (continuous outcome)';
         rowCopy[`Imputed_Inputs`] = rowIssues.length > 0 ? rowIssues.map(i => `${i.column}:${i.kind}`).join('; ') : '';
         rowCopy[`Outside_Training_Range`] = rowRangeLists[rowIdx].map(o => `${o.column}=${o.value} (training ${o.min}-${o.max})`).join('; ');
+        rowCopy[`Unusual_Combination`] = typLevels[rowIdx] && typLevels[rowIdx] !== 'typical' ? typLevels[rowIdx] : '';
         rowCopy[`Model`] = batchModelName;
         rowCopy[`Model_Seed`] = activeSeed;
         results.push(rowCopy);
@@ -6263,6 +6329,7 @@ async function executeBatchPrediction() {
             (absentCols.length > 0 ? `• Columns missing from the file (filled for every row): ${absentCols.join(', ')}\n` : '') +
             (rowsWithImputation > 0 ? `• ${rowsWithImputation} of ${results.length} row(s) had ${totalImputedCells} blank or unrecognised predictor value(s) replaced with training-cohort values (see the 'Imputed_Inputs' column).\n` : '') +
             (rowsOutOfRange > 0 ? `• ${rowsOutOfRange} row(s) have values outside the range of the training patients (see 'Outside_Training_Range'): check for typing errors; otherwise those predictions are extrapolations.\n` : '') +
+            (rowsUnusual > 0 ? `• ${rowsUnusual} row(s) have an unusual combination of values compared with the training patients (see 'Unusual_Combination'): the model has seen few patients like them, so treat those predictions with caution.\n` : '') +
             `Predictions for these rows are less reliable.`);
     }
 
@@ -8566,7 +8633,7 @@ function downloadStandardAnalysisReport() {
         exclusions: { complete_case_analysis: Boolean(AppState.completeCase), test_rows_dropped: top.testDroppedRows ?? null },
         validation_design: {
             protocol: top.protocol === 'option-c' ? `internal validation by bootstrap optimism correction (${(top.optimismCorrection || {}).B || '?'} resamples)` : top.protocol === 'option-b' ? 'separate testing dataset (Dataset ii)' : 'internal train/test split',
-            optimism_correction: top.protocol === 'option-c' ? results.map(r => ({ model: (MODEL_INFO[r.modelId] || {}).name || r.modelId, ...(r.evalRes.optimismCorrection || {}) })) : undefined,
+            optimism_correction: top.protocol === 'option-c' ? results.map(r => ({ model: displayModelName(r.modelId, r.model), ...(r.evalRes.optimismCorrection || {}) })) : undefined,
             split: top.protocol === 'option-b' ? null : describeSplit(top.splitInfo),
             train_percent: top.trainPct ?? null, split_seed: top.splitSeed ?? null,
             train_cases: top.trainCount, test_cases: top.testCount,
@@ -8576,9 +8643,9 @@ function downloadStandardAnalysisReport() {
             decision_threshold: top.decisionThreshold ?? null,
             deployed_model_retrained_on_all_data: Boolean(top.retrainOn100)
         },
-        deployed_model: AppState.deployedSource === 'standard' ? (MODEL_INFO[AppState.deployedModelId] || {}).name || AppState.deployedModelId : null,
+        deployed_model: AppState.deployedSource === 'standard' ? displayModelName(AppState.deployedModelId, AppState.trainedModel) : null,
         models: results.map((r, i) => ({
-            rank: i + 1, model: (MODEL_INFO[r.modelId] || {}).name || r.modelId, seed: r.seed,
+            rank: i + 1, model: displayModelName(r.modelId, r.model), seed: r.seed,
             settings: r.hyperparams || null,
             cross_validated_training_scores: r.evalRes.cv || null,
             tuning: r.evalRes.tuning || null,
@@ -8632,7 +8699,8 @@ const MODEL_FILE_VERSION = 2;
 
 function sanitizedPrep(prep) {
     const keep = ['featureCols', 'featureMetadata', 'totalDimensions', 'targetCol', 'isClassification', 'targetClasses',
-        'targetClassToIdx', 'targetIdxToClass', 'positiveClass', 'fillValues', 'encodedFeatureNames', 'derivedIndicators'];
+        'targetClassToIdx', 'targetIdxToClass', 'positiveClass', 'fillValues', 'encodedFeatureNames', 'derivedIndicators', 'typicality'];
+    prepTypicality(prep); // aggregate statistics only (mean and inverse covariance), for the unusual-patient check
     const out = {};
     keep.forEach(k => { if (prep[k] !== undefined) out[k] = JSON.parse(JSON.stringify(prep[k])); });
     let knnImputation = false, knnColumns = [];
@@ -8748,6 +8816,11 @@ function validateImportedPrep(prep) {
     });
     if (prep.isClassification && (!Array.isArray(prep.targetClasses) || prep.targetClasses.length < 2)) bad('outcome categories');
     ['__proto__', 'constructor', 'prototype'].forEach(k => { if (Object.prototype.hasOwnProperty.call(prep, k)) bad(k); });
+    // Unusual-patient statistics: used only if well formed (otherwise the check is skipped for this model)
+    const t = prep.typicality, num = v => typeof v === 'number' && isFinite(v);
+    const okT = t && Array.isArray(t.mean) && t.mean.length === prep.totalDimensions && t.mean.every(num) && Array.isArray(t.inv) && t.inv.length === t.mean.length
+        && t.inv.every(r => Array.isArray(r) && r.length === t.mean.length && r.every(num)) && num(t.q99) && num(t.q999);
+    prep.typicality = okT ? t : null;
 }
 
 // The imported model must predict a typical patient (all predictors at their fitted defaults) with valid output
@@ -9594,7 +9667,7 @@ function reportItems(source) {
     if (source === 'pipeline') {
         return (AppState.pipeline.benchmarkResults || []).map(b => ({ name: b.name, ev: b.eval, hp: null, note: b.eval && b.eval.constraintNote }));
     }
-    return (AppState.allTestedResults || []).map(r => ({ name: (MODEL_INFO[r.modelId] || { name: r.modelId }).name, ev: r.evalRes, hp: r.hyperparams, result: r }));
+    return (AppState.allTestedResults || []).map(r => ({ name: displayModelName(r.modelId, r.model), ev: r.evalRes, hp: r.hyperparams, result: r }));
 }
 
 function resultsTable(items, isClassification, optionC) {

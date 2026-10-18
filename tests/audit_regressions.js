@@ -163,6 +163,54 @@ const rejects = async (fn, what) => { try { await fn(); } catch (e) { return e.m
         return 'standard (and inside bootstrap resamples) and 7-step pipeline';
     });
 
+    await check('Leakage canaries: repeated patients inflate a random split but not a patient-grouped split; folds never split a patient; date split predicts later from earlier', async () => {
+        // Pure noise, but every patient has 4 near-identical records: a random split lets k-NN "recognise" patients
+        const rng = DE.createPRNG(21);
+        const rows = [];
+        for (let pid = 0; pid < 120; pid++) {
+            const base = [rng(), rng(), rng()], y = rng() < 0.5 ? 1 : 0;
+            for (let r = 0; r < 4; r++) rows.push({ pid: `P${pid}`, x: base.map(v => v + (rng() - 0.5) * 0.001), y });
+        }
+        const auc = split => {
+            const m = ME.createModel('knn', true, 2, { k: 1, seed: 1 });
+            m.fit(split.trainIndices.map(i => rows[i].x), split.trainIndices.map(i => rows[i].y));
+            const ev = ME.evaluate(m, split.testIndices.map(i => rows[i].x), split.testIndices.map(i => rows[i].y), true, [0, 1], {});
+            return ev.rocAuc;
+        };
+        const y = rows.map(r => r.y);
+        const leaky = auc(DE.trainTestSplit(rows.map(r => r.x), y, 0.75, true, 3));
+        const grouped = auc(DE.trainTestSplitGrouped(rows, y, rows.map(r => r.pid), 0.75, 3));
+        assert(leaky > 0.9, `the canary did not detect leakage in a random split (AUC ${leaky})`);
+        assert(Math.abs(grouped - 0.5) < 0.15, `patient-grouped split still leaks (AUC ${grouped})`);
+        // cross-validation folds keep each patient in one fold
+        const code = fs.readFileSync(path.join(dir, 'src', 'validation-core.js'), 'utf8').replace(/^export\s*\{[^}]*\};?\s*$/gm, '').replace(/^import .*$/gm, '');
+        const VC = new Function('DataEngine', 'ModelEngine', `${code}\nreturn { assignRowFolds };`)(DE, ME);
+        const fold = VC.assignRowFolds(rows.map(r => ({ ...r, Y: String(r.y) })), 5, true, 'Y', 7, r => r.pid);
+        const foldsOf = {};
+        rows.forEach((r, i) => { (foldsOf[r.pid] = foldsOf[r.pid] || new Set()).add(fold[i]); });
+        assert(Object.values(foldsOf).every(f => f.size === 1), 'a patient was split across folds');
+        // temporal split: every test record is dated after every training record
+        const dated = Array.from({ length: 50 }, (_, i) => ({ d: `2024-01-${String((i % 28) + 1).padStart(2, '0')}`, v: i }));
+        const t = DE.trainTestSplitTemporal(dated, dated.map(() => 0), dated.map(r => r.d), 0.8);
+        const lastTrain = Math.max(...t.trainIndices.map(i => Date.parse(dated[i].d))), firstTest = Math.min(...t.testIndices.map(i => Date.parse(dated[i].d)));
+        assert(firstTest > lastTrain, 'a test record is not later than the training records');
+        return `random split AUC ${leaky.toFixed(2)} (leak detected) vs patient-grouped ${grouped.toFixed(2)}; 120 patients each in one fold; date split strictly later`;
+    });
+
+    await check('Unusual-patient check: a combination unlike the training patients is flagged even when each value is in range', async () => {
+        const rng = DE.createPRNG(5);
+        const X = Array.from({ length: 400 }, () => { const a = rng() * 2 - 1; return [a, a + (rng() - 0.5) * 0.1, rng() * 2 - 1]; }); // first two strongly correlated
+        const t = DE.fitTypicality(X);
+        assert(t && t.q99 > 0, 'typicality could not be fitted');
+        const typical = DE.typicality([0.5, 0.5, 0], t), odd = DE.typicality([0.9, -0.9, 0], t); // each value within range
+        assert(typical.level === 'typical', `a typical patient was flagged (${typical.level})`);
+        assert(odd.level !== 'typical', 'an impossible combination was not flagged');
+        const share = X.filter(x => DE.typicality(x, t).level !== 'typical').length / X.length;
+        assert(share < 0.03, `too many training patients flagged (${(share * 100).toFixed(1)}%)`);
+        assert(DE.fitTypicality(X.slice(0, 10)) === null, 'fitted on too few patients');
+        return `typical → typical; opposite values of two correlated predictors → ${odd.level}; ${(share * 100).toFixed(1)}% of training patients flagged`;
+    });
+
     console.log(results.join('\n'));
     console.log(`\n${passed}/${passed + failed} audit regression checks passed`);
     if (failed) process.exit(1);

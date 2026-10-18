@@ -266,6 +266,62 @@
             };
         },
 
+        /**
+         * How typical a patient's combination of predictor values is, compared with the training patients:
+         * squared Mahalanobis distance from the training mean (encoded, scaled predictors; covariance with a
+         * small ridge so one-hot columns are allowed), and the 99th / 99.9th percentiles of the training patients'
+         * own distances. Only aggregates are kept (no patient values). null when too few patients or too many
+         * encoded columns.
+         */
+        fitTypicality(X) {
+            if (!Array.isArray(X) || X.length < 30 || !X[0] || X[0].length < 2 || X[0].length > 300) return null;
+            const rng = this.createPRNG(97);
+            const rows = X.length > 3000 ? Array.from({ length: 3000 }, () => X[Math.floor(rng() * X.length)]) : X;
+            const n = rows.length, p = rows[0].length;
+            const mean = new Array(p).fill(0);
+            rows.forEach(r => { for (let j = 0; j < p; j++) mean[j] += r[j] / n; });
+            const C = Array.from({ length: p }, () => new Float64Array(p));
+            rows.forEach(r => {
+                for (let a = 0; a < p; a++) { const da = r[a] - mean[a]; if (da === 0) continue; for (let b = a; b < p; b++) C[a][b] += da * (r[b] - mean[b]); }
+            });
+            let trace = 0;
+            for (let a = 0; a < p; a++) { for (let b = a; b < p; b++) { C[a][b] /= (n - 1); C[b][a] = C[a][b]; } trace += C[a][a]; }
+            const lam = 1e-3 * (trace / p) + 1e-9;
+            // Inverse by Gauss-Jordan elimination with partial pivoting
+            const M = C.map((r, i) => { const row = new Float64Array(2 * p); row.set(r); row[i] += lam; row[p + i] = 1; return row; });
+            for (let c = 0; c < p; c++) {
+                let piv = c;
+                for (let r = c + 1; r < p; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+                if (Math.abs(M[piv][c]) < 1e-12) return null;
+                [M[c], M[piv]] = [M[piv], M[c]];
+                const d = M[c][c];
+                for (let k = 0; k < 2 * p; k++) M[c][k] /= d;
+                for (let r = 0; r < p; r++) { if (r === c) continue; const f = M[r][c]; if (f) for (let k = 0; k < 2 * p; k++) M[r][k] -= f * M[c][k]; }
+            }
+            const inv = M.map(r => Array.from(r.subarray(p)));
+            const t = { mean, inv, q99: 0, q999: 0, n };
+            const d2 = rows.map(r => this.typicalityDistance(r, t)).sort((a, b) => a - b);
+            t.q99 = d2[Math.min(n - 1, Math.floor(0.99 * (n - 1)))];
+            t.q999 = d2[Math.min(n - 1, Math.floor(0.999 * (n - 1)))];
+            return t;
+        },
+
+        /** Squared Mahalanobis distance of an encoded patient from the training mean (see fitTypicality) */
+        typicalityDistance(x, t) {
+            const p = t.mean.length, d = new Array(p);
+            for (let j = 0; j < p; j++) d[j] = x[j] - t.mean[j];
+            let s = 0;
+            for (let a = 0; a < p; a++) { let r = 0; const ia = t.inv[a]; for (let b = 0; b < p; b++) r += ia[b] * d[b]; s += d[a] * r; }
+            return s;
+        },
+
+        /** 'typical', 'unusual' (beyond 99% of training patients) or 'very unusual' (beyond 99.9%); null if unknown */
+        typicality(x, t) {
+            if (!t || !x || x.length !== t.mean.length) return null;
+            const d2 = this.typicalityDistance(x, t);
+            return { d2, level: d2 > t.q999 ? 'very unusual' : d2 > t.q99 ? 'unusual' : 'typical' };
+        },
+
         /** Problems found while reading a CSV file, as messages for the user (same checks for every upload) */
         parseIssues(parsed) {
             const out = [];

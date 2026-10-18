@@ -1,5 +1,5 @@
 // batch-prediction.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { AppState, displayModelName, escapeHtml, probabilityLabel } from './core.js';
+import { AppState, displayModelName, prepTypicality, escapeHtml, probabilityLabel } from './core.js';
 import { thresholdedOutput } from './cv-tuning.js';
 import { DOM } from './shell.js';
 import { validateOnLabelledCohort } from './external-validation.js';
@@ -76,6 +76,10 @@ async function executeBatchPrediction() {
     const rowRangeLists = rows.map(() => []);
     const xMatrix = rows.map((r, i) => DataEngine.transformSingleRow(r, prep, rowIssueLists[i], rowRangeLists[i]));
     const rowsOutOfRange = rowRangeLists.filter(l => l.length).length;
+    // Patients whose combination of values is unlike the training patients (see DataEngine.fitTypicality)
+    const typ = prepTypicality(prep);
+    const typLevels = xMatrix.map(x => { const t = DataEngine.typicality(x, typ); return t ? t.level : null; });
+    const rowsUnusual = typLevels.filter(l => l && l !== 'typical').length;
     // Asynchronous, chunked prediction keeps the page responsive for large files
     let outputs = [];
     if (rows.length) {
@@ -115,6 +119,7 @@ async function executeBatchPrediction() {
         rowCopy[`Probability_Type`] = prep.isClassification ? probabilityLabel(predRes.probabilityType).title : 'N/A (continuous outcome)';
         rowCopy[`Imputed_Inputs`] = rowIssues.length > 0 ? rowIssues.map(i => `${i.column}:${i.kind}`).join('; ') : '';
         rowCopy[`Outside_Training_Range`] = rowRangeLists[rowIdx].map(o => `${o.column}=${o.value} (training ${o.min}-${o.max})`).join('; ');
+        rowCopy[`Unusual_Combination`] = typLevels[rowIdx] && typLevels[rowIdx] !== 'typical' ? typLevels[rowIdx] : '';
         rowCopy[`Model`] = batchModelName;
         rowCopy[`Model_Seed`] = activeSeed;
         results.push(rowCopy);
@@ -129,6 +134,7 @@ async function executeBatchPrediction() {
             (absentCols.length > 0 ? `• Columns missing from the file (filled for every row): ${absentCols.join(', ')}\n` : '') +
             (rowsWithImputation > 0 ? `• ${rowsWithImputation} of ${results.length} row(s) had ${totalImputedCells} blank or unrecognised predictor value(s) replaced with training-cohort values (see the 'Imputed_Inputs' column).\n` : '') +
             (rowsOutOfRange > 0 ? `• ${rowsOutOfRange} row(s) have values outside the range of the training patients (see 'Outside_Training_Range'): check for typing errors; otherwise those predictions are extrapolations.\n` : '') +
+            (rowsUnusual > 0 ? `• ${rowsUnusual} row(s) have an unusual combination of values compared with the training patients (see 'Unusual_Combination'): the model has seen few patients like them, so treat those predictions with caution.\n` : '') +
             `Predictions for these rows are less reliable.`);
     }
 

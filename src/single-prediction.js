@@ -1,5 +1,5 @@
 // single-prediction.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { AppState, displayModelName, escapeHtml, probabilityLabel, actionAttrs } from './core.js';
+import { AppState, displayModelName, prepTypicality, escapeHtml, probabilityLabel, actionAttrs } from './core.js';
 import { thresholdedOutput } from './cv-tuning.js';
 import { renderPatientExplanation } from './panels.js';
 import { DOM } from './shell.js';
@@ -87,6 +87,14 @@ function runSinglePrediction() {
            </div>`
         : '';
 
+    // A patient whose combination of values is unlike the training patients, even with every value in range
+    const typ = DataEngine.typicality(xVector, prepTypicality(prep));
+    const typicalityHtml = typ && typ.level !== 'typical'
+        ? `<div style="font-size: 11.5px; color: var(--accent-rose); margin-top: 6px; font-weight: 600;">
+                ⚠️ Unusual patient: this combination of predictor values is ${typ.level === 'very unusual' ? 'more atypical than 99.9%' : 'more atypical than 99%'} of the training patients (Mahalanobis distance), even if each value is within range. The model has seen few patients like this, so the prediction may be unreliable.
+           </div>`
+        : '';
+
     DOM.singleResultBanner.style.display = 'flex';
 
     let ensembleDetailsHtml = '';
@@ -134,7 +142,7 @@ function runSinglePrediction() {
                     Active Model: <strong>${escapeHtml(displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel))}</strong> &bull; Target: <em>${escapeHtml(prep.targetCol)}</em>${seedSnippet}
                 </div>
                 ${ensembleDetailsHtml}
-                ${inputWarningHtml}${rangeWarningHtml}
+                ${inputWarningHtml}${rangeWarningHtml}${typicalityHtml}
                 ${renderPatientExplanation(AppState.trainedModel, xVector, prep, inputRow)}
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
                     ${probabilityLabel(result.probabilityType).note}: not a calibrated clinical risk or a measure of certainty (check the calibration panel and Brier score in Step 4 / Step 7). For research and educational use only.${AppState.evalResults && AppState.evalResults.decisionThreshold && Math.abs(AppState.evalResults.decisionThreshold - 0.5) > 1e-9 ? ` Classed with a decision threshold of ${AppState.evalResults.decisionThreshold.toFixed(2)} for the positive outcome.` : ''}
@@ -160,7 +168,7 @@ function runSinglePrediction() {
                     Active Model: <strong>${escapeHtml(displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel))}</strong> &bull; Unit/Scale: <em>${escapeHtml(prep.targetCol)}</em>${seedSnippet}
                 </div>
                 ${ensembleDetailsHtml}
-                ${inputWarningHtml}${rangeWarningHtml}
+                ${inputWarningHtml}${rangeWarningHtml}${typicalityHtml}
                 ${renderPatientExplanation(AppState.trainedModel, xVector, prep, inputRow)}
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">For research and educational use only; not for decisions about an individual patient's care.</div>
             </div>

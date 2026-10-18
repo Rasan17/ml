@@ -1,4 +1,5 @@
 // core.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+/* global DataEngine */
 
 
 // Application State
@@ -254,4 +255,12 @@ function summariseHeldOutSet(ev) {
     return notes;
 }
 
-export { RESEARCH_USE_NOTICE, AppState, MODEL_INFO, ALL_MODEL_IDS, escapeHtml, actionAttrs, trainingMedian, renderExploratoryCutoffTable, PROBABILITY_LABELS, probabilityLabel, displayModelName, parseSeed, fmtValue, fmtR2, describeNNTraining, describeNNTrainingCore, cssEscape, APP_VERSION, RANKING_METRICS, rankingMetricKey, rankingMetricLabel, compareEvalResults, summariseHeldOutSet };
+// How typical the training patients' combinations of values are (DataEngine.fitTypicality), fitted once per
+// model from its training rows, or carried in an imported model file
+function prepTypicality(prep) {
+    if (!prep) return null;
+    if (prep.typicality === undefined) prep.typicality = typeof DataEngine !== 'undefined' ? DataEngine.fitTypicality(prep.X || null) : null;
+    return prep.typicality;
+}
+
+export { prepTypicality, RESEARCH_USE_NOTICE, AppState, MODEL_INFO, ALL_MODEL_IDS, escapeHtml, actionAttrs, trainingMedian, renderExploratoryCutoffTable, PROBABILITY_LABELS, probabilityLabel, displayModelName, parseSeed, fmtValue, fmtR2, describeNNTraining, describeNNTrainingCore, cssEscape, APP_VERSION, RANKING_METRICS, rankingMetricKey, rankingMetricLabel, compareEvalResults, summariseHeldOutSet };

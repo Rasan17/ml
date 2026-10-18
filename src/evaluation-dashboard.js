@@ -5,6 +5,7 @@ import { renderCalibrationPanel, renderExplainPanel, renderOddsRatioPanel, rende
 import { DOM } from './shell.js';
 import { renderSubgroupPanel } from './subgroups.js';
 import { syncRankingSelectors } from './training-actions.js';
+import { renderInterpretation } from './interpretation.js';
 
 // Accuracy interval: the bootstrap interval when one was computed (it resamples patients, not rows, when a
 // patient-ID column is set, so it respects repeated records); otherwise Wilson's interval on the rows
@@ -64,7 +65,7 @@ function renderEvaluationDashboard() {
                             <span>✓</span> Option A: Two-Phase Retraining Protocol &bull; 100% Retrained Models Active
                         </div>
                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 3px;">
-                            Accuracy evaluated on held-out <strong>${testPct}% test split (${testCount} cases)</strong> after fitting on <strong>${trainPct}% (${trainCount} cases)</strong>. Deployed models were then fully retrained on <strong>100% of cohort data (${totalCount} cases)</strong>.
+                            Accuracy evaluated on held-out <strong>${testPct}% test split (${testCount} cases)</strong> after fitting on <strong>${trainPct}% (${trainCount} cases)</strong>. The models were then retrained on <strong>100% of cohort data (${totalCount} cases)</strong> for use in Steps 5 and 6. <strong>The results shown are those of the models fitted on ${trainPct}% and scored on the held-out test cases.</strong> The retrained models have not themselves been tested (no unseen patients remain): their expected performance is taken from this evaluation, and they should be confirmed on new patients.
                         </div>
                     </div>
                     <span class="pill pill-target" style="background: rgba(16, 185, 129, 0.18); color: var(--tag-emerald); border-color: rgba(16, 185, 129, 0.4); font-size: 12px; font-weight: 700;">
@@ -106,6 +107,12 @@ function renderEvaluationDashboard() {
         AppState.lastTestRows, Boolean(evalRes && evalRes.isClassification),
         !isOptionB && AppState.baselineTestRawRows && AppState.lastTestRows && AppState.baselineTestRawRows.length === AppState.lastTestRows.length ? AppState.baselineTestRawRows : null);
 
+    // Plain-language reading of the active model's results
+    renderInterpretation('interpretation-container', {
+        ev: evalRes, prep, name: displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel),
+        design: isOptionB ? 'B' : isOptionC ? 'C' : 'A', dataset: AppState.fileName
+    });
+
     // Calibration and decision-threshold panel (binary outcomes)
     renderCalibrationPanel('calibration-panel-container', isOptionC ? [] :
         (allResults.length ? allResults : [{ modelId: AppState.selectedModelId, evalRes }]).map(r => ({
@@ -123,10 +130,11 @@ function renderEvaluationDashboard() {
             const counts = {};
             prep.y.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
             const minority = Math.min(...Object.values(counts));
-            const nPred = prep.X[0].length;
-            const epv = minority / Math.max(1, nPred);
+            // Parameters: 1 per numerical or ordered predictor, (categories − 1) per unordered categorical one
+            const nPred = Math.max(1, prep.X[0].length - Object.values(prep.featureMetadata || {}).filter(m => m.type === 'nominal' && m.length > 1).length);
+            const epv = minority / nPred;
             if (epv < 10) {
-                notes.push(`⚠️ <strong>Small sample for the number of predictors:</strong> the smaller outcome group has ${minority} patient(s) for ${nPred} encoded predictor column(s) (${epv.toFixed(1)} per predictor; at least 10–20 is a common rule of thumb). Models may overfit; consider fewer predictors or more patients, and treat the results as exploratory.`);
+                notes.push(`⚠️ <strong>Small sample for the number of predictors:</strong> the smaller outcome group has ${minority} patient(s) for ${nPred} predictor parameter(s) (${epv.toFixed(1)} per parameter; at least 10–20 is a common rule of thumb, and see the Riley criteria in Step 4). Models may overfit; consider fewer predictors or more patients, and treat the results as exploratory.`);
             }
         }
         if (evalRes && evalRes.multipleImputation) {
@@ -136,6 +144,21 @@ function renderEvaluationDashboard() {
         if (evalRes && evalRes.multipleImputationSkipped) notes.push(`🧩 ${escapeHtml(evalRes.multipleImputationSkipped)}`);
         if (evalRes && evalRes.cv) {
             notes.push(`Best model chosen by ${evalRes.cv.folds}-fold cross-validation inside the Training set${evalRes.cv.grouped ? ' (each patient\'s records kept in one fold)' : ''}; missing-value filling, encoding and scaling were refitted inside every fold.`);
+        } else if (allResults.length > 1 && !isOptionC) {
+            notes.push(`⚠️ <strong>Exploratory model choice:</strong> the leading model was chosen by its score on the same Testing patients it is reported on, so its test results are optimistic (the best of ${allResults.length} scores is partly luck). For a reportable result, choose "Cross-validation within the Training set" for model selection, so the Testing set is used once, only to evaluate the chosen model.`);
+        }
+        // Who the test metrics rest on: patients, events and non-events, with a warning when they are few
+        if (!isOptionC && evalRes && evalRes.isClassification && Array.isArray(evalRes.actuals) && evalRes.actuals.length) {
+            const n = evalRes.actuals.length, counts = {};
+            evalRes.actuals.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+            const groups = Object.keys(counts).map(k => `${counts[k]} "${escapeHtml(String(prep && prep.targetIdxToClass ? prep.targetIdxToClass[k] : k))}"`);
+            const fewest = Math.min(...Object.values(counts)), nGroups = Object.keys(counts).length;
+            const expected = prep && prep.targetClasses ? prep.targetClasses.length : nGroups;
+            let warn = '';
+            if (nGroups < expected) warn = ' <strong>Not every outcome group is present, so AUC and per-group results cannot be estimated.</strong>';
+            else if (fewest < 10) warn = ' <strong>Fewer than 10 patients in the smallest group: AUC, sensitivity, calibration and their intervals are unreliable; treat them as illustrative only.</strong>';
+            else if (fewest < 50) warn = ' With fewer than about 50 patients in the smallest group these estimates are imprecise (see the 95% intervals); calibration needs about 100 in each group.';
+            notes.push(`${fewest < 50 || nGroups < expected ? '⚠️ ' : ''}<strong>Testing set:</strong> ${n} ${isOptionB ? 'patients in Dataset (ii)' : 'test records'} (${groups.join(', ')}).${warn}`);
         }
         if (prep && prep.isClassification && prep.positiveClass !== null && prep.positiveClass !== undefined) {
             notes.push(`Positive (event) class for ROC-AUC, Brier score, sensitivity and TP/FN: <strong>${escapeHtml(prep.positiveClass)}</strong>. Change it in Step 2 (target card) if this is not the outcome of interest.`);
@@ -546,7 +569,7 @@ function renderEvaluationDashboard() {
             DOM.evaluationDetailContainer.innerHTML = `
                 ${regCmHtml}
                 <p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">
-                    Model validated on ${cohortDesc} with R² = ${fmtR2(evalRes.r2)} and Mean Absolute Error = ${evalRes.mae}. ${isOptionB ? `Fitted strictly on 100% of Training Dataset (i) (${trainCount} patients).` : (evalRes.retrainOn100 ? `Active model was then retrained on 100% of data (${totalCount} patients).` : `Active model maintained strictly on ${trainPct}% training split (${trainCount} patients; 100% retraining declined).`)}
+                    Model validated on ${cohortDesc} with R² = ${fmtR2(evalRes.r2)} and Mean Absolute Error = ${evalRes.mae}. ${isOptionB ? `Fitted strictly on 100% of Training Dataset (i) (${trainCount} patients).` : (evalRes.retrainOn100 ? `Active model was then retrained on 100% of data (${totalCount} patients); the results shown are from the split-trained model on the test patients, and the retrained model itself has not been tested.` : `Active model maintained strictly on ${trainPct}% training split (${trainCount} patients; 100% retraining declined).`)}
                 </p>
                 <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 6px;">
                     💡 <em>R², RMSE and MAE are the primary performance measures for a continuous outcome. If the outcome has a prespecified clinical decision threshold, analyse it as a binary outcome (Nominal) instead of relying on the exploratory split above.</em>

@@ -310,3 +310,30 @@ test('a tampered model file is refused before anything is installed; Clear sessi
     await expect(page.locator('#model-export-btn')).toBeDisabled();
     expect(errors).toEqual([]);
 });
+
+test('network audit: during a full analysis every request is a download of the app\'s own files (nothing is sent out)', async ({ page }) => {
+    test.setTimeout(400000);
+    const errors = watch(page);
+    const requests = [];
+    page.on('request', r => requests.push({ url: r.url(), method: r.method(), body: r.postData() }));
+    await page.goto('/index.html');
+    const origin = new URL(page.url()).origin;
+    await toStep4(page);
+    await page.locator('.model-card[data-model-id="glm"]').click({ position: { x: 12, y: 12 } });
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText(/Deployed|Complete/, { timeout: 170000 });
+    await expect(page.locator('#interpretation-container')).toContainText('In plain language');
+    await page.click('button.step-tab[data-step="5"]');
+    await page.click('#run-single-predict-btn');
+    await expect(page.locator('#single-result-banner')).toBeVisible();
+    await page.click('button.step-tab[data-step="6"]');
+    await page.setInputFiles('#batch-file-input', path.join(ROOT, 'medical_shunt_validation_cohort.csv'));
+    await page.click('#run-batch-predict-btn');
+    await expect(page.locator('#external-validation-container')).toContainText('ROC-AUC', { timeout: 60000 });
+    const outside = requests.filter(r => !r.url.startsWith(origin + '/') && !r.url.startsWith('blob:') && !r.url.startsWith('data:'));
+    const sending = requests.filter(r => r.method !== 'GET' || r.body);
+    expect(outside, `requests to other addresses: ${outside.map(r => r.url).join(', ')}`).toEqual([]);
+    expect(sending, `requests sending data: ${sending.map(r => `${r.method} ${r.url}`).join(', ')}`).toEqual([]);
+    expect(requests.length).toBeGreaterThan(5);
+    expect(errors).toEqual([]);
+});

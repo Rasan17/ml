@@ -1951,3 +1951,9 @@ body.comparison-running { overflow: hidden; }
 .analysis-summary[hidden] { display: none; }
 .analysis-summary-title { font-weight: 700; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; }
 .analysis-summary-item .k { color: var(--text-muted); }
+
+/* Plain-language interpretation of the active model */
+.interp-list { margin: 8px 0 0; display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 6px 14px; font-size: 13px; }
+.interp-list dt { font-weight: 700; color: var(--text-primary); }
+.interp-list dd { margin: 0; color: var(--text-secondary); line-height: 1.5; }
+@media (max-width: 640px) { .interp-list { grid-template-columns: 1fr; } .interp-list dd { margin-bottom: 6px; } }
