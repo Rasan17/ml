@@ -203,14 +203,17 @@ test('multiple imputation is done once: reused for a second model, and saved and
     expect(await page.evaluate(() => window.__miRounds)).toBe(0);
     await expect(page.locator('body')).toContainText('Multiple imputation:');
     // Saved imputed data lets a later session skip the imputation
+    await page.click('button.step-tab[data-step="3"]'); // the imputed-data buttons are in the Step 3 imputation pane
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#mi-save-btn')]);
     expect(dl.suggestedFilename()).toContain('PATIENT-DATA');
     const saved = await dl.path();
     await page.goto('/index.html');
     await toStep4(page);
     await chooseMI(page, 'mice5');
+    await page.click('button.step-tab[data-step="3"]');
     await page.setInputFiles('#mi-file-input', saved);
     await expect(page.locator('#mi-file-status')).toContainText('Loaded');
+    await page.click('button.step-tab[data-step="4"]');
     await page.evaluate(() => {
         window.__miRounds = 0;
         new MutationObserver(() => { if (/Multiple imputation of .*(round \d+\/\d+|% of rounds done)/.test(document.getElementById('train-status').textContent)) window.__miRounds++; })
