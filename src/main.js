@@ -91,6 +91,31 @@ function start() {
     // Firefox restores buttons' enabled state on reload: set the data-dependent ones from the (empty) page state
     updateModelExportButton();
     ['settings-save-btn', 'run-batch-predict-btn'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = true; });
+    // Interface level (remembered in this browser): settings hidden at a level are reset to their defaults, so
+    // nothing the user cannot see changes the analysis
+    const levelSel = document.getElementById('ui-level-select');
+    const applyLevel = (level, reset) => {
+        document.body.dataset.uiLevel = level;
+        if (!reset) return;
+        const hidden = [...document.querySelectorAll('[data-level], .hyperparam-box')].filter(el => getComputedStyle(el).display === 'none' && (el.matches('.hyperparam-box') || (level === 'beginner') || el.dataset.level === 'advanced'));
+        hidden.forEach(box => box.querySelectorAll('input, select').forEach(el => {
+            let changed = false;
+            if (el.type === 'checkbox' || el.type === 'radio') { if (el.checked !== el.defaultChecked) { el.checked = el.defaultChecked; changed = true; } }
+            else if (el.tagName === 'SELECT') { const d = [...el.options].find(o => o.defaultSelected) || el.options[0]; if (d && el.value !== d.value) { el.value = d.value; changed = true; } }
+            else if (el.value !== el.defaultValue) { el.value = el.defaultValue; changed = true; }
+            if (changed) el.dispatchEvent(new Event('change', { bubbles: true }));
+        }));
+    };
+    let savedLevel = 'advanced';
+    try { savedLevel = localStorage.getItem('ummp-ui-level') || 'advanced'; } catch (e) { /* storage unavailable */ }
+    if (levelSel) {
+        levelSel.value = ['beginner', 'intermediate', 'advanced'].includes(savedLevel) ? savedLevel : 'advanced';
+        applyLevel(levelSel.value, levelSel.value !== 'advanced');
+        levelSel.addEventListener('change', () => {
+            applyLevel(levelSel.value, true);
+            try { localStorage.setItem('ummp-ui-level', levelSel.value); } catch (e) { /* storage unavailable */ }
+        });
+    }
     // Start page task choice
     document.getElementById('task-develop')?.addEventListener('click', () => {
         const input = document.getElementById('csv-file-input');

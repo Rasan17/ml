@@ -8,11 +8,11 @@
          import map and the file:// loader), so injected scripts and inline event handlers are blocked. Inline styles are
          still permitted (the interface uses them). 'unsafe-eval' is needed because TensorFlow.js evaluates
          Function("return this") at start-up; without it the neural network silently falls back to a linear model. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-UA6xYVzUdujcDHg0FWC5vEBseev7GPCC78AYrX1Ef20=' 'sha256-dcvmDuIEkzY2iblgHOFlvrUw6d48JwHGLLgUp5A4PnA=' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-u4P/KYI1o001JggYYSt/fVoaS6sI/1GrJlo1J0GqlMY=' 'sha256-dcvmDuIEkzY2iblgHOFlvrUw6d48JwHGLLgUp5A4PnA=' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
     <title>Universal Medical ML/NeuralNet Predictor | Clinical Machine Learning & Neural Networks</title>
     <meta name="description" content="Universal in-browser client-side Machine Learning and Neural Network Predictor for Clinical Medicine. Features automated variable typing, multi-strategy missing data imputation, neural networks, random forests, single & batch inference.">
     <meta name="author" content="Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)">
-    <link rel="stylesheet" href="style.css?h=6efc9c912a">
+    <link rel="stylesheet" href="style.css?h=69e7190339">
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -113,10 +113,19 @@
         <main id="main-content">
             <section class="step-content active" data-step="1" id="step-1-content">
                 <div class="task-chooser" role="group" aria-label="What would you like to do?">
-                    <span class="task-chooser-label">What would you like to do?</span>
+                    <span class="task-chooser-label">What would you like to do?
+                        <label class="ui-level-label">Interface:
+                            <select id="ui-level-select" class="control-select" aria-label="Interface level" style="width: auto; display: inline-block;">
+                                <option value="beginner">Beginner: recommended defaults, fewer choices</option>
+                                <option value="intermediate">Intermediate: validation and metric choices</option>
+                                <option value="advanced" selected>Advanced: every setting</option>
+                            </select>
+                        </label>
+                    </span>
                     <button type="button" class="task-choice" id="task-develop"><strong>🛠️ Develop a model</strong><span>from my own data: upload a CSV below, then follow Steps 2–4</span></button>
                     <button type="button" class="task-choice" id="task-validate"><strong>🧪 Validate an existing model</strong><span>import a model file, then score a labelled cohort in Step 6</span></button>
                     <button type="button" class="task-choice" id="task-demo"><strong>🧠 Explore a demo</strong><span>load the simulated 420-patient iNPH shunt cohort</span></button>
+                    <p class="autotune-hint ui-level-note" style="width: 100%; margin: 0;">Simplified view: expert settings (model hyperparameters, automatic tuning, custom seeds and, for Beginner, the decision threshold, recalibration, ranking metric and model-selection method) are hidden and use their recommended defaults: cross-validated model selection, threshold 0.5, no recalibration, default seed 42. Choose "Advanced" to see and change them.</p>
                     <p id="task-hint" class="autotune-hint" style="display: none; width: 100%; margin: 0;" aria-live="polite"></p>
                     <p class="autotune-hint" style="width: 100%; margin: 0;">🔒 Use real patient data only as your approvals allow, on a managed computer (ideally encrypted and offline, see the ethics pack); not on shared or public computers. Remove identifiers before loading, store any exported file that contains patient values like the original data, and use <strong>🧹 Clear session</strong> or close the tab when finished.</p>
                 </div>
@@ -245,7 +254,7 @@
                                     </select>
                                 </label>
                                 <span class="autotune-hint" style="margin: 0;">One choice for the whole analysis. <strong>Single imputation</strong> fills each gap once with the per-variable method chosen in the table below (median, k-NN, …). <strong>Multiple imputation (MICE)</strong> replaces those methods everywhere: the table then shows MICE for every incomplete predictor, and MICE, starting from the original missing values, is used for the final models, inside every cross-validation fold (tuning, model selection, recalibration) and inside every bootstrap resample (Option C). "MICE 5" and "MICE 10" mean 5 or 10 completed datasets, each built over 10 rounds of chained equations.</span>
-                                <label class="autotune-label" id="mi-quick-cv-row" style="display: none; margin: 0;"><input type="checkbox" id="mi-quick-cv"> Quick approximation for very large datasets: use a plain fill (median / most frequent) instead of MICE inside cross-validation folds and bootstrap resamples. The final models still use MICE. Off by default, because the validation then no longer assesses exactly the final procedure.</label>
+                                <label class="autotune-label" data-level="advanced" id="mi-quick-cv-row" style="display: none; margin: 0;"><input type="checkbox" id="mi-quick-cv"> Quick approximation for very large datasets: use a plain fill (median / most frequent) instead of MICE inside cross-validation folds and bootstrap resamples. The final models still use MICE. Off by default, because the validation then no longer assesses exactly the final procedure.</label>
                                 <span id="mi-estimate" class="autotune-hint" style="margin: 0; display: none;" aria-live="polite"></span>
                                 <span class="mi-file-actions">
                                     <button type="button" id="mi-save-btn" class="btn btn-secondary btn-sm" disabled>💾 Save imputed data</button>
@@ -342,7 +351,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: var(--text-secondary);">
+                        <div data-level="intermediate" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: var(--text-secondary);">
                             <label for="ranking-metric-select" style="font-weight: 600;">Primary ranking metric (prespecify to match your study objective):</label>
                             <select id="ranking-metric-select" class="control-select ranking-metric-select" style="max-width: 260px;">
                                     <optgroup label="Categorical outcome (classification)">
@@ -647,7 +656,7 @@
                     <div class="card" style="padding: 18px; background: var(--bg-surface-elevated);">
                         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
                             <h3 style="font-size: 14px; font-weight: 700;">Training Configuration &amp; Fine-Tuning Hyperparameters</h3>
-                            <div style="display: flex; align-items: center; gap: 8px;">
+                            <div data-level="advanced" style="display: flex; align-items: center; gap: 8px;">
                                 <span style="font-size: 11.5px; color: var(--text-muted);">Tune Parameters for:</span>
                                 <select id="active-hyperparam-select" aria-label="Model whose settings are shown" class="control-select" style="font-size: 12px; padding: 4px 10px;">
                                     <option value="nn" selected>Neural Network (MLP)</option>
@@ -761,7 +770,7 @@
                                             <label for="test-pct-input" style="font-size: 11px; text-transform: uppercase;">Testing Percentage (%)</label>
                                             <input type="number" id="test-pct-input" class="control-input" value="20" min="5" max="50" step="1">
                                         </div>
-                                        <div class="param-group" style="flex: 1; min-width: 170px;">
+                                        <div data-level="advanced" class="param-group" style="flex: 1; min-width: 170px;">
                                             <span class="group-label" id="group-label-split-seed-mode" style="font-size: 11px; text-transform: uppercase;">Split Seed (Reproducibility)</span>
                                             <div role="radiogroup" aria-labelledby="group-label-split-seed-mode" style="display: flex; gap: 6px; align-items: center; margin-bottom: 4px;">
                                                 <label class="seed-mode-pill" style="font-size: 10px; padding: 2px 6px;">
@@ -1274,19 +1283,19 @@
 
                         <!-- Model selection and automatic tuning (k-fold cross-validation inside the Training set) -->
                         <div class="autotune-box">
-                            <div class="selection-row" role="radiogroup" aria-labelledby="selection-mode-label">
+                            <div data-level="intermediate" class="selection-row" role="radiogroup" aria-labelledby="selection-mode-label">
                                 <span id="selection-mode-label" class="selection-label">🏁 When several models are trained, choose the best one by:</span>
                                 <label class="selection-option"><input type="radio" name="selection-mode" id="selection-mode-cv" value="cv" checked> Cross-validation within the Training set <span class="selection-tag">recommended</span></label>
                                 <label class="selection-option"><input type="radio" name="selection-mode" id="selection-mode-test" value="test"> Testing-set results <span class="selection-tag selection-tag-muted">faster, but optimistic</span></label>
                             </div>
                             <p class="autotune-hint" style="margin-top: 4px;">With <strong>cross-validation</strong>, each model is scored on parts of the Training set it did not learn from (missing-value filling and scaling are redone inside each part), and the best model is picked on those scores. The Testing set is then used only once, as an honest final check. Picking the winner on the <strong>Testing set</strong> is quicker, but the winner's test score is then too optimistic, because it won on those same patients.</p>
-                            <div class="threshold-row">
+                            <div data-level="intermediate" class="threshold-row">
                                 <label for="decision-threshold" class="autotune-folds-label">🎚️ Decision threshold (two-outcome predictions):
                                     <input type="number" id="decision-threshold" class="control-input" value="0.5" min="0.05" max="0.95" step="0.05" style="width: 80px; display: inline-block;">
                                 </label>
                                 <span class="autotune-hint" style="margin: 0;">A patient is classed as the positive outcome when its predicted probability is at or above this value. 0.5 is the usual default; use a lower value if missing a case is worse than a false alarm. Decide it on clinical grounds <strong>before</strong> looking at the results; do not adjust it to improve the Testing-set score.</span>
                             </div>
-                            <div class="threshold-row">
+                            <div data-level="intermediate" class="threshold-row">
                                 <label for="recalibration-select" class="autotune-folds-label">📐 Recalibrate two-outcome probabilities:
                                     <select id="recalibration-select" class="control-select" style="width: auto; display: inline-block;">
                                         <option value="none" selected>No (use the model's own probabilities)</option>
@@ -1296,7 +1305,7 @@
                                 </label>
                                 <span class="autotune-hint" style="margin: 0;">Adjusts the predicted percentages so they better match observed risks, using cross-validation predictions from the Training set only (the Testing set is never used). The calibration panel then shows the results before and after. It does not change how well the model ranks patients (AUC) for Platt scaling. With bootstrap validation (Option C) the recalibration is refitted inside every resample, so the optimism-corrected results include it.</span>
                             </div>
-                            <div class="autotune-row" style="margin-top: 10px;">
+                            <div data-level="advanced" class="autotune-row" style="margin-top: 10px;">
                                 <label class="autotune-label">
                                     <input type="checkbox" id="autotune-check">
                                     🎯 Automatically tune each selected model's key settings on the Training set
@@ -1930,13 +1939,13 @@
                                 <label class="selection-option"><input type="radio" name="pipeline-selection-mode" id="pipeline-selection-mode-test" value="test"> Testing-set results <span class="selection-tag selection-tag-muted">faster, but optimistic</span></label>
                             </div>
                             <p class="autotune-hint" style="margin-top: 4px;">With <strong>cross-validation</strong>, each of the models is scored on parts of the real Training patients it did not learn from (SMOTENC and scaling are redone inside each part) and the best is picked on those scores; the Testing set is then used only once, as an honest final check. Picking the winner on the Testing set is quicker, but its test score is then too optimistic.</p>
-                            <div class="threshold-row">
+                            <div data-level="intermediate" class="threshold-row">
                                 <label for="pipeline-decision-threshold" class="autotune-folds-label">🎚️ Decision threshold (two-outcome predictions):
                                     <input type="number" id="pipeline-decision-threshold" class="form-input" value="0.5" min="0.05" max="0.95" step="0.05" style="width: 80px; display: inline-block;">
                                 </label>
                                 <span class="autotune-hint" style="margin: 0;">Probability of the positive outcome at or above which a patient is classed as positive (default 0.5). Choose it on clinical grounds before seeing the results; never tune it on the Testing set.</span>
                             </div>
-                            <div class="threshold-row">
+                            <div data-level="intermediate" class="threshold-row">
                                 <label for="pipeline-recalibration-select" class="autotune-folds-label">📐 Recalibrate two-outcome probabilities:
                                     <select id="pipeline-recalibration-select" class="form-select" style="width: auto; display: inline-block;">
                                         <option value="none" selected>No (use the model's own probabilities)</option>
@@ -1946,7 +1955,7 @@
                                 </label>
                                 <span class="autotune-hint" style="margin: 0;">Adjusts the predicted percentages so they better match observed risks, using cross-validation predictions from the Training set only (the Testing set is never used). The calibration panel then shows the results before and after. It does not change how well the model ranks patients (AUC) for Platt scaling.</span>
                             </div>
-                            <div class="autotune-row" style="margin-top: 10px;">
+                            <div data-level="advanced" class="autotune-row" style="margin-top: 10px;">
                                 <label class="autotune-label">
                                     <input type="checkbox" id="pipeline-autotune-check">
                                     🎯 Auto-tune model settings on the Training set (optional; off = protocol default settings)
@@ -2087,9 +2096,9 @@
     <!-- Application controller: ES modules (src/); when opened directly from disk (file://), where browsers
          block modules, the generated single-file bundle is used instead (node tools/build.js). -->
     <!-- IMPORTMAP:START (generated by tools/build.js) -->
-    <script type="importmap">{"imports":{"./src/analysis-summary.js":"./src/analysis-summary.js?h=fb8706eabd","./src/batch-prediction.js":"./src/batch-prediction.js?h=8cc0428d7c","./src/compute.js":"./src/compute.js?h=65d87514ce","./src/core.js":"./src/core.js?h=655550795c","./src/cv-tuning.js":"./src/cv-tuning.js?h=b01cc4c2c5","./src/evaluation-dashboard.js":"./src/evaluation-dashboard.js?h=26dd766d93","./src/external-validation.js":"./src/external-validation.js?h=9159e56731","./src/html-report.js":"./src/html-report.js?h=0ae18dace1","./src/imputation.js":"./src/imputation.js?h=e5328f338a","./src/ingest.js":"./src/ingest.js?h=1c740525aa","./src/interpretation.js":"./src/interpretation.js?h=26e41fef6a","./src/main.js":"./src/main.js?h=4ac1224e38","./src/model-io.js":"./src/model-io.js?h=dbe7319f4e","./src/multiple-imputation.js":"./src/multiple-imputation.js?h=e4e9205c85","./src/navigation.js":"./src/navigation.js?h=f34c3f571d","./src/panels.js":"./src/panels.js?h=cec2caf49f","./src/pipeline-balance.js":"./src/pipeline-balance.js?h=fcaba72cc4","./src/pipeline-results.js":"./src/pipeline-results.js?h=e443534b1e","./src/pipeline-screening.js":"./src/pipeline-screening.js?h=04ca0be1fa","./src/pipeline-step1.js":"./src/pipeline-step1.js?h=35caf1bf6d","./src/pipeline-train.js":"./src/pipeline-train.js?h=f6484d628c","./src/pipeline.js":"./src/pipeline.js?h=df0e9cc102","./src/predictor-budget.js":"./src/predictor-budget.js?h=b11d08dd9b","./src/reports.js":"./src/reports.js?h=424452ce1a","./src/settings.js":"./src/settings.js?h=4108f7ea78","./src/shell.js":"./src/shell.js?h=2a6a855469","./src/single-prediction.js":"./src/single-prediction.js?h=50e616c691","./src/standard-training.js":"./src/standard-training.js?h=01fcf09624","./src/subgroups.js":"./src/subgroups.js?h=86a3169f53","./src/survival.js":"./src/survival.js?h=ad3728e5f7","./src/training-actions.js":"./src/training-actions.js?h=cf27b96639","./src/training-setup.js":"./src/training-setup.js?h=6a59f09f91","./src/tripod.js":"./src/tripod.js?h=a225f101fa","./src/validation-core.js":"./src/validation-core.js?h=959821f81d","./src/variables.js":"./src/variables.js?h=f31268ef23","./src/watchdog.js":"./src/watchdog.js?h=582f5a6b6e","./data-engine.js":"./data-engine.js?h=6aec61b484","./models.js":"./models.js?h=826ffcf6d3","./compute-worker.js":"./compute-worker.js?h=54a9c51fb3","./dist/validation-core.worker.js":"./dist/validation-core.worker.js?h=b31a42a90e"}}</script>
+    <script type="importmap">{"imports":{"./src/analysis-summary.js":"./src/analysis-summary.js?h=fb8706eabd","./src/batch-prediction.js":"./src/batch-prediction.js?h=8cc0428d7c","./src/compute.js":"./src/compute.js?h=65d87514ce","./src/core.js":"./src/core.js?h=655550795c","./src/cv-tuning.js":"./src/cv-tuning.js?h=b01cc4c2c5","./src/evaluation-dashboard.js":"./src/evaluation-dashboard.js?h=26dd766d93","./src/external-validation.js":"./src/external-validation.js?h=9159e56731","./src/html-report.js":"./src/html-report.js?h=0ae18dace1","./src/imputation.js":"./src/imputation.js?h=e5328f338a","./src/ingest.js":"./src/ingest.js?h=1c740525aa","./src/interpretation.js":"./src/interpretation.js?h=26e41fef6a","./src/main.js":"./src/main.js?h=7ef5995f88","./src/model-io.js":"./src/model-io.js?h=dbe7319f4e","./src/multiple-imputation.js":"./src/multiple-imputation.js?h=e4e9205c85","./src/navigation.js":"./src/navigation.js?h=f34c3f571d","./src/panels.js":"./src/panels.js?h=cec2caf49f","./src/pipeline-balance.js":"./src/pipeline-balance.js?h=fcaba72cc4","./src/pipeline-results.js":"./src/pipeline-results.js?h=e443534b1e","./src/pipeline-screening.js":"./src/pipeline-screening.js?h=04ca0be1fa","./src/pipeline-step1.js":"./src/pipeline-step1.js?h=35caf1bf6d","./src/pipeline-train.js":"./src/pipeline-train.js?h=f6484d628c","./src/pipeline.js":"./src/pipeline.js?h=df0e9cc102","./src/predictor-budget.js":"./src/predictor-budget.js?h=b11d08dd9b","./src/reports.js":"./src/reports.js?h=424452ce1a","./src/settings.js":"./src/settings.js?h=69e9549a22","./src/shell.js":"./src/shell.js?h=2a6a855469","./src/single-prediction.js":"./src/single-prediction.js?h=50e616c691","./src/standard-training.js":"./src/standard-training.js?h=01fcf09624","./src/subgroups.js":"./src/subgroups.js?h=86a3169f53","./src/survival.js":"./src/survival.js?h=ad3728e5f7","./src/training-actions.js":"./src/training-actions.js?h=cf27b96639","./src/training-setup.js":"./src/training-setup.js?h=6a59f09f91","./src/tripod.js":"./src/tripod.js?h=a225f101fa","./src/validation-core.js":"./src/validation-core.js?h=959821f81d","./src/variables.js":"./src/variables.js?h=f31268ef23","./src/watchdog.js":"./src/watchdog.js?h=582f5a6b6e","./data-engine.js":"./data-engine.js?h=6aec61b484","./models.js":"./models.js?h=826ffcf6d3","./compute-worker.js":"./compute-worker.js?h=54a9c51fb3","./dist/validation-core.worker.js":"./dist/validation-core.worker.js?h=b31a42a90e"}}</script>
     <!-- IMPORTMAP:END -->
-    <script type="module" src="src/main.js?h=4ac1224e38"></script>
+    <script type="module" src="src/main.js?h=7ef5995f88"></script>
     <script>if (location.protocol === 'file:') document.write('<script src="dist/app.bundle.js"><\/script>');</script>
 </body>
 </html>

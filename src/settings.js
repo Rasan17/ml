@@ -276,6 +276,10 @@ function applySettings(settings) {
     AppState.pendingPipelineEvalSeed = pipe.evalSeed !== undefined && pipe.evalSeed !== '' ? String(pipe.evalSeed)
         : (DOM.pipelineEvalSeedInput && DOM.pipelineEvalSeedInput.value ? DOM.pipelineEvalSeedInput.value : null);
 
+    // Restored settings may include expert choices: show every setting so nothing that affects the analysis is hidden
+    const lvl = document.getElementById('ui-level-select');
+    if (lvl && lvl.value !== 'advanced') { lvl.value = 'advanced'; document.body.dataset.uiLevel = 'advanced'; try { localStorage.setItem('ummp-ui-level', 'advanced'); } catch (e) { /* storage unavailable */ } }
+
     // Earlier results no longer match the restored choices
     AppState.imputedData = null;
     if (DOM.toStep4Btn) DOM.toStep4Btn.disabled = true;

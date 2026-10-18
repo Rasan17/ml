@@ -1959,3 +1959,14 @@ body.comparison-running { overflow: hidden; }
 @media (max-width: 640px) { .interp-list { grid-template-columns: 1fr; } .interp-list dd { margin-bottom: 6px; } }
 
 .mice-diag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 8px; }
+
+/* Interface levels: Beginner hides intermediate and advanced settings, Intermediate hides advanced ones
+   (hidden settings are reset to their recommended defaults when hidden, see main.js) */
+body[data-ui-level="beginner"] [data-level="intermediate"],
+body[data-ui-level="beginner"] [data-level="advanced"],
+body[data-ui-level="intermediate"] [data-level="advanced"],
+body[data-ui-level="beginner"] .hyperparam-box,
+body[data-ui-level="intermediate"] .hyperparam-box { display: none !important; }
+.ui-level-label { float: right; font-weight: 600; font-size: 12.5px; color: var(--text-secondary); display: inline-flex; gap: 6px; align-items: center; }
+.ui-level-note { display: none; }
+body[data-ui-level="beginner"] .ui-level-note, body[data-ui-level="intermediate"] .ui-level-note { display: block; }

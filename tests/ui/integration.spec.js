@@ -425,3 +425,29 @@ test('7-step pipeline with multiple imputation: pooled models for all seven, the
     await expect(page.locator('#single-result-banner')).toBeVisible();
     expect(errors).toEqual([]);
 });
+
+test('interface levels: Beginner and Intermediate hide expert settings and reset them to defaults', async ({ page }) => {
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await toStep4(page);
+    await page.check('#autotune-check');
+    await page.selectOption('#recalibration-select', 'isotonic');
+    await page.click('button.step-tab[data-step="1"]');
+    await page.selectOption('#ui-level-select', 'intermediate');
+    await page.click('button.step-tab[data-step="4"]');
+    await expect(page.locator('#autotune-check')).toBeHidden();
+    await expect(page.locator('#recalibration-select')).toBeVisible();
+    await expect(page.locator('#autotune-check')).not.toBeChecked(); // hidden, so reset to the default
+    await expect(page.locator('#recalibration-select')).toHaveValue('isotonic'); // still visible, so kept
+    await page.click('button.step-tab[data-step="1"]');
+    await page.selectOption('#ui-level-select', 'beginner');
+    await page.click('button.step-tab[data-step="4"]');
+    await expect(page.locator('#recalibration-select')).toBeHidden();
+    await expect(page.locator('#recalibration-select')).toHaveValue('none');
+    await expect(page.locator('#decision-threshold')).toBeHidden();
+    await expect(page.locator('input[name="validation-mode"][value="split"]')).toBeAttached(); // validation choices stay
+    await page.reload(); // the level is remembered in this browser
+    await expect(page.locator('#ui-level-select')).toHaveValue('beginner');
+    await page.selectOption('#ui-level-select', 'advanced');
+    expect(errors).toEqual([]);
+});
