@@ -158,11 +158,14 @@ function updateImputationEstimate() {
     const m = readMultipleImputation();
     const rows = AppState.parsedData && AppState.parsedData.rows ? AppState.parsedData.rows.length : 0;
     const nPred = AppState.columnConfigs ? Object.keys(AppState.columnConfigs).filter(c => AppState.columnConfigs[c].role === 'feature').length : 0;
-    if (!m || !rows || !nPred) { box.style.display = 'none'; return; }
+    if (!m || !rows || !nPred) { box.style.display = 'none'; const q = document.getElementById('mi-quick-cv-row'); if (q) q.style.display = m ? 'flex' : 'none'; return; }
     const est = estimateImputationSeconds(rows, nPred, m);
+    const quick = document.getElementById('mi-quick-cv-row');
+    if (quick) quick.style.display = m ? 'flex' : 'none';
     const t = s => (s < 10 ? 'a few seconds' : s < 60 ? `about ${Math.round(s / 5) * 5} seconds` : `about ${Math.round(s / 60)} minute${Math.round(s / 60) === 1 ? '' : 's'}`);
     box.style.display = 'block';
-    box.innerHTML = `⏱️ For ${rows.toLocaleString('en-GB')} patients and ${nPred} predictors, the imputation step takes ${t(est)} (twice with Option A when the final model is retrained on all patients; done once: training other models later on the same patients with the same settings reuses the imputed datasets), and each selected model is trained ${m} times. It runs in the background: the page stays usable and Force Stop works. Keep this window in front while it runs: browsers slow down background work in hidden or minimised windows.`;
+    const foldRows = Math.round(rows * 0.8 * 0.8), foldSec = estimateImputationSeconds(foldRows, nPred, m), bootSec = estimateImputationSeconds(rows, nPred, 1);
+    box.innerHTML = `⏱️ For ${rows.toLocaleString('en-GB')} patients and ${nPred} predictors, the imputation takes ${t(est)} for the final models (twice with Option A when they are retrained on all patients), and each selected model is trained ${m} times. When cross-validation is used (tuning, model selection, recalibration) MICE is repeated in each of the 5 folds (${t(foldSec)} each, once for all models); with bootstrap validation (Option C) one MICE run is added to every resample (${t(bootSec)} each, for example ${t(bootSec * 200)} for 200 resamples per model). It runs in the background: the page stays usable and Force Stop works. Keep this window in front while it runs.`;
 }
 
 export { clearImputationCache, loadImputedDataFile, saveImputedData, updateImputedDataButtons, updateImputationEstimate, readMultipleImputation, prepareMultipleImputation, fitPooledModel, estimateImputationSeconds };

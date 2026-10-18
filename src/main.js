@@ -8,7 +8,7 @@ import { initDOM, setupEventListeners } from './shell.js';
 import './navigation.js';
 import { createEmptyPipelineState } from './ingest.js';
 import { renderVariableIncludeSummary } from './variables.js';
-import './imputation.js';
+import { executeImputation, renderImputationTable } from './imputation.js';
 import './training-setup.js';
 import { renderSampleSizePanel } from './panels.js';
 import './subgroups.js';
@@ -71,7 +71,14 @@ function start() {
     document.getElementById('standard-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('standard'));
     window.downloadValidationReport = downloadValidationReport;
     document.getElementById('pipeline-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('pipeline'));
-    document.getElementById('mi-select')?.addEventListener('change', updateImputationEstimate);
+    document.getElementById('mi-select')?.addEventListener('change', () => {
+        updateImputationEstimate();
+        // The table and the Step 3 result follow the single / multiple imputation choice
+        if (AppState.parsedData && AppState.columnAnalysis) {
+            renderImputationTable();
+            if (AppState.imputedData) executeImputation();
+        }
+    });
     document.getElementById('mi-save-btn')?.addEventListener('click', saveImputedData);
     document.getElementById('mi-load-btn')?.addEventListener('click', () => document.getElementById('mi-file-input')?.click());
     document.getElementById('mi-file-input')?.addEventListener('change', (e) => {

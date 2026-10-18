@@ -2,7 +2,7 @@
 import { bootstrapRun, fitModel } from './compute.js';
 import { estimateImputationSeconds, fitPooledModel, prepareMultipleImputation, readMultipleImputation } from './multiple-imputation.js';
 import { AppState, MODEL_INFO, RANKING_METRICS, compareEvalResults, describeNNTraining, escapeHtml, fmtR2, parseSeed, rankingMetricKey, rankingMetricLabel, trainingMedian } from './core.js';
-import { TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, cvSummaryFrom, fitRecalibrator, optionBTrainRawRows, readDecisionThreshold, readRecalibration, recalibrateAndEvaluate, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV, testPatientGroups } from './cv-tuning.js';
+import { TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, cvSummaryFrom, fitRecalibrator, miceQuickApproximation, plainFillConfigs, optionBTrainRawRows, readDecisionThreshold, readRecalibration, recalibrateAndEvaluate, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV, testPatientGroups } from './cv-tuning.js';
 import { renderEvaluationDashboard } from './evaluation-dashboard.js';
 import { saveSettingsToBrowser } from './settings.js';
 import { DOM } from './shell.js';
@@ -86,14 +86,17 @@ async function startModelTraining() {
                 }
             };
         };
+        // How the cross-validation folds were imputed (reported with the results)
+        const foldImputationLabel = () => (AppState.completeCase ? 'complete cases' : readMultipleImputation() ? (miceQuickApproximation() ? 'plain fill (quick approximation of MICE)' : `MICE (${readMultipleImputation()} completed datasets, pooled models) refitted in each fold`) : 'the Step 3 single imputation refitted in each fold');
         const foldCache = {};
         const foldsFor = async (rawTrainRows, k, label, i) => {
             if (!foldCache[k]) {
+                const miFolds = !AppState.completeCase && readMultipleImputation() && !miceQuickApproximation();
                 foldCache[k] = await buildStandardRowFolds(rawTrainRows, k, prep.isClassification, splitSeedForCV(), (f, nf) => {
-                    const msg = `🎯 Preparing ${nf} cross-validation folds (imputation and scaling refitted inside each fold): fold ${f}/${nf}...`;
+                    const msg = `🎯 Preparing ${nf} cross-validation folds (${miFolds ? 'multiple imputation (MICE)' : 'imputation'} and scaling refitted inside each fold): fold ${f}/${nf}...`;
                     DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">${msg}</span>`;
                     if (watchdog) watchdog.tick(i + 1, msg);
-                });
+                }, () => Boolean(watchdog && watchdog.aborted));
             }
             return foldCache[k];
         };
@@ -148,6 +151,17 @@ async function startModelTraining() {
             // and every model is fast enough to be cross-validated there
             const repeatSelection = selectByCV && modelsToTest.length > 1 && !modelsToTest.some(slowModel);
             const innerK = Math.min(tuneFolds, INNER_TUNE_MAX_FOLDS);
+            // Multiple imputation chosen: the final models are pooled MICE models fitted on all patients, and MICE
+            // (one completed dataset) is refitted inside every resample and inner fold ("resample, then impute")
+            const miC = !AppState.completeCase ? readMultipleImputation() : 0;
+            const miceInside = miC && !miceQuickApproximation() ? 1 : 0;
+            let miAll = null, miAllX = null, miAllY = null;
+            if (miC) {
+                miAll = await prepareMultipleImputation(allRaw, AppState.columnConfigs, miC, seedC, miProgress('all patients', allRaw.length, miC));
+                prep = miAll.prep;
+                const t = DataEngine.prepareTestingDataset(allRaw, prep);
+                miAllX = t.X; miAllY = t.y;
+            }
             const runs = [];
             for (let i = 0; i < modelsToTest.length; i++) {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
@@ -159,8 +173,10 @@ async function startModelTraining() {
                 const isAborted = () => Boolean(watchdog && watchdog.aborted);
                 const heartbeat = (a, b) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training on all ${prep.X.length} patients...`); };
                 DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">🚀 [${i + 1}/${modelsToTest.length}] Training ${mInfo.name} on all ${prep.X.length} patients...</span>`;
-                const model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, prep.X, prep.y, { isAborted, onProgress: heartbeat });
-                const evalRes = await ModelEngine.evaluateAsync(model, prep.X, prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
+                const model = miAll
+                    ? await fitPooledModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, miAll.sets, { isAborted, onProgress: heartbeat })
+                    : await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, prep.X, prep.y, { isAborted, onProgress: heartbeat });
+                const evalRes = await ModelEngine.evaluateAsync(model, miAll ? miAllX : prep.X, miAll ? miAllY : prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
                 const wasTuned = autoTune && TUNABLE_MODELS.has(mId);
                 const tuneInside = wasTuned && !slowModel(mId);
                 const inner = (tuneInside || repeatSelection)
@@ -172,9 +188,10 @@ async function startModelTraining() {
                 say(`🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample 1/${Bm}${what}...`);
                 // The whole loop runs in the background worker (on the page if workers are unavailable)
                 const run = await bootstrapRun({
-                    rows: allRaw, boots, maxResamples: Bm, configs: AppState.columnConfigs, analysis: AppState.columnAnalysis,
+                    rows: allRaw, boots, maxResamples: Bm, analysis: AppState.columnAnalysis,
                     isClassification: prep.isClassification, modelId: mId, hp: tuneInside ? baseHp : hp, evalOptions: evalOptsC, keys,
-                    tune: inner
+                    tune: inner, miceM: miceInside, seed: seedC,
+                    configs: miC && !miceInside ? plainFillConfigs(AppState.columnConfigs) : AppState.columnConfigs
                 }, {
                     isAborted,
                     onInnerProgress: (b, n, c, nc, f, nf) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: resample ${b}/${n}, ${tuneInside ? `combination ${c}/${nc}, ` : ''}fold ${f}/${nf}`); },
@@ -217,7 +234,7 @@ async function startModelTraining() {
                     tuning: !wasTuned ? 'none' : (tuneInside ? 'repeated' : 'once'), innerFolds: inner ? innerK : null, sameSettingsShare
                 };
                 evalRes.protocol = 'option-c';
-                if (readMultipleImputation()) evalRes.multipleImputationSkipped = 'Multiple imputation is not combined with bootstrap internal validation (it would multiply the work in every resample); single imputation (the Step 3 choices) was refitted inside each resample. Use Option A or B for multiple imputation.';
+                if (miAll) evalRes.multipleImputation = { m: miC, imputedColumns: miAll.imputedColumns, rows: allRaw.length, insideResamples: miceInside ? 'MICE (one completed dataset per resample and inner fold)' : 'plain fill (quick approximation)' };
                 evalRes.accuracyCI = null; // a CI of the apparent accuracy would be misleading
                 evalRes.ci = null;
                 evalRes.trainCount = prep.X.length;
@@ -226,7 +243,7 @@ async function startModelTraining() {
                 evalRes.splitSeed = seedC;
                 if (groupColC) evalRes.bootstrapGroupCol = groupColC;
                 evalRes.seed = hp.seed;
-                if (tuned.cv) evalRes.cv = tuned.cv;
+                if (tuned.cv) evalRes.cv = { ...tuned.cv, imputation: foldImputationLabel() };
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration is not combined with bootstrap internal validation (it would need to be repeated inside every resample); use Option A or B to recalibrate.';
                 if (model.trainingInfo) evalRes.nnNote = describeNNTraining(model.trainingInfo);
@@ -377,7 +394,7 @@ async function startModelTraining() {
                 evalRes.protocol = 'option-a';
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed, testPatientGroups(testData.validRows, 'standard'));
                 evalRes.splitInfo = rowSplit.info;
-                if (tuned.cv) evalRes.cv = tuned.cv;
+                if (tuned.cv) evalRes.cv = { ...tuned.cv, imputation: foldImputationLabel() };
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 evalRes.testImputedCells = testImp.audit.filter(a => a.type === 'impute_column').reduce((acc, a) => acc + a.imputedCount, 0);
                 evalRes.testDroppedRows = miM ? 0 : rowSplit.testX.length - testImp.imputedRows.length;
@@ -557,7 +574,7 @@ async function startModelTraining() {
                 evalRes.protocol = 'option-b';
                 if (miB) evalRes.multipleImputation = { m: miMB, imputedColumns: miB.imputedColumns };
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed, testPatientGroups(testPrep.validRows, 'standard'));
-                if (tuned.cv) evalRes.cv = tuned.cv;
+                if (tuned.cv) evalRes.cv = { ...tuned.cv, imputation: foldImputationLabel() };
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 evalRes.retrainOn100 = false;
                 evalRes.trainCount = prep.X.length;

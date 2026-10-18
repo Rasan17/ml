@@ -2,6 +2,7 @@
 import { AppState, cssEscape, escapeHtml, fmtValue } from './core.js';
 import { DOM } from './shell.js';
 import { renderCompleteCaseBox } from './variables.js';
+import { readMultipleImputation } from './multiple-imputation.js';
 
 
 // =========================================================================
@@ -26,6 +27,15 @@ function renderImputationTable() {
         }
     });
     renderCompleteCaseBox(rows, activeCols);
+    // One choice governs the analysis: complete-case analysis leaves nothing to impute, so multiple imputation is
+    // not offered with it; with multiple imputation, MICE fills every incomplete predictor (no per-variable methods)
+    const miEl = document.getElementById('mi-select');
+    if (miEl) {
+        if (AppState.completeCase && miEl.value !== 'single') { miEl.value = 'single'; miEl.dispatchEvent(new Event('change', { bubbles: true })); }
+        miEl.disabled = Boolean(AppState.completeCase);
+        miEl.title = AppState.completeCase ? 'Complete-case analysis is on: there is nothing to impute' : '';
+    }
+    const mice = !AppState.completeCase && readMultipleImputation() > 0;
 
     let rowsHtml = '';
     let missingColCount = 0;
@@ -81,6 +91,18 @@ function renderImputationTable() {
             `;
         }
 
+        if (mice) {
+            rowsHtml += `
+            <tr>
+                <td style="font-weight: 600;">${escapeHtml(col)}</td>
+                <td><span class="pill pill-${cfg.role}">${cfg.role}</span></td>
+                <td><span class="pill pill-${cfg.type}">${cfg.type}</span></td>
+                <td><span class="pill pill-missing">${a.missingCount} / ${a.total} (${a.missingPercent}%)</span></td>
+                <td colspan="2"><span class="pill pill-feature">MICE (multiple imputation)</span></td>
+            </tr>`;
+            return;
+        }
+
         rowsHtml += `
             <tr>
                 <td style="font-weight: 600;">${escapeHtml(col)}</td>
@@ -104,7 +126,7 @@ function renderImputationTable() {
         const complete = missingColCount === 0;
         DOM.applyImputationBtn.dataset.mode = complete ? 'complete' : 'impute';
         DOM.applyImputationBtn.textContent = complete ? '✓ Full data | Move Next'
-            : (AppState.completeCase ? '⚡ Remove Incomplete Rows & Validate Dataset' : '⚡ Apply Imputation & Validate Dataset');
+            : (AppState.completeCase ? '⚡ Remove Incomplete Rows & Validate Dataset' : mice ? '⚡ Continue with Multiple Imputation (MICE)' : '⚡ Apply Imputation & Validate Dataset');
     }
 
     if (missingColCount === 0) {
@@ -143,8 +165,23 @@ function renderImputationTable() {
 function executeImputation() {
     try {
         const { rows } = AppState.parsedData;
-        const res = DataEngine.imputeDataset(rows, AppState.columnConfigs, AppState.columnAnalysis);
+        const m = AppState.completeCase ? 0 : readMultipleImputation();
+        // With multiple imputation nothing is filled now: MICE runs when models are trained (and inside every
+        // cross-validation fold and bootstrap resample). A plain fill is kept only for the Step 4 counts and
+        // sample-size panel, never for training; it keeps every patient ("drop rows" does not apply to MICE)
+        const cfgs = m ? Object.fromEntries(Object.entries(AppState.columnConfigs).map(([c, v]) => [c, v.imputationStrategy === 'drop' || v.imputationStrategy === 'knn' ? { ...v, imputationStrategy: v.type === 'continuous' ? 'median' : 'mode' } : v])) : AppState.columnConfigs;
+        const res = DataEngine.imputeDataset(rows, cfgs, AppState.columnAnalysis);
         AppState.imputedData = res;
+        if (m) {
+            const cells = res.audit.filter(x => x.type !== 'drop_rows').reduce((a, x) => a + (x.imputedCount || 0), 0);
+            DOM.imputeAuditBox.innerHTML = `
+            <div style="background: var(--bg-surface-elevated); border: 1px solid var(--accent-emerald); border-radius: var(--radius-md); padding: 16px;">
+                <h4 style="color: var(--accent-emerald);">✓ Multiple imputation selected: ${rows.length} records kept</h4>
+                <p style="margin: 8px 0 0; font-size: 13px; color: var(--text-secondary);">${cells} missing value(s) in ${res.audit.filter(x => x.type !== 'drop_rows').length} predictor(s) will be filled by MICE when the models are trained (${m} completed datasets, each built over 10 rounds), from the training patients only and without the outcome. The same procedure is repeated inside every cross-validation fold and bootstrap resample; no single-imputation method is used.</p>
+            </div>`;
+            DOM.toStep4Btn.disabled = false;
+            return;
+        }
 
         let auditHtml = `
             <div style="background: var(--bg-surface-elevated); border: 1px solid var(--accent-emerald); border-radius: var(--radius-md); padding: 16px;">

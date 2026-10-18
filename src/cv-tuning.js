@@ -2,6 +2,8 @@
 import { fitAndScore, fitModel } from './compute.js';
 import { TUNE_MAX_ROWS, TUNABLE_MODELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildFolds, buildRowFolds, runTuningCore } from './validation-core.js';
 import { AppState, MODEL_INFO, RANKING_METRICS, escapeHtml, parseSeed, rankingMetricKey } from './core.js';
+import { fitPooledModel, prepareMultipleImputation, readMultipleImputation } from './multiple-imputation.js';
+/* global DataEngine, ModelEngine */
 // =========================================================================
 // AUTOMATIC TUNING (standard workflow, Step 4): k-fold cross-validation inside the Training set
 // =========================================================================
@@ -17,12 +19,42 @@ const TUNE_LABELS = {
 
 // Leak-free folds for the standard workflow: imputation, encoding and scaling are fitted on each fold's
 // learning rows only and then applied to that fold's validation rows (as for the final Testing set)
-async function buildStandardRowFolds(rawTrainRows, k, isClassification, seed, onFold) {
+// With multiple imputation chosen (Step 3), each fold repeats the final procedure: MICE fitted on the fold's
+// learning rows (m completed datasets), one model per dataset with pooled predictions, and the fold's validation
+// rows imputed with the fold's chains. The quick approximation instead uses a plain fill (median / most frequent).
+async function buildStandardRowFolds(rawTrainRows, k, isClassification, seed, onFold, isAborted = null) {
     const targetCol = Object.keys(AppState.columnConfigs).find(c => AppState.columnConfigs[c].role === 'target');
-    return buildRowFolds(rawTrainRows, k, {
+    const o = {
         configs: AppState.columnConfigs, analysis: AppState.columnAnalysis, isClassification, targetCol, seed,
         groupOf: splitGroupFunction(), decisionThreshold: readDecisionThreshold('decision-threshold')
+    };
+    const m = AppState.completeCase ? 0 : readMultipleImputation();
+    if (!m) return buildRowFolds(rawTrainRows, k, o, onFold);
+    if (miceQuickApproximation()) return buildRowFolds(rawTrainRows, k, { ...o, configs: plainFillConfigs(AppState.columnConfigs) }, onFold);
+    const res = await buildFolds(rawTrainRows, k, o, async (tr, va, f) => {
+        const mi = await prepareMultipleImputation(tr, AppState.columnConfigs, m, (seed + 104729 * (f + 1)) >>> 0, { isAborted });
+        const te = DataEngine.prepareTestingDataset(va, mi.prep);
+        return { set: { Xtr: mi.sets[0].X, ytr: mi.sets[0].y, Xva: te.X, yva: te.y, targetClasses: mi.prep.targetClasses, mi: mi.sets }, unknownClassCount: te.unknownClassCount };
     }, onFold);
+    return { sets: res.sets, rowsUsed: res.rowsUsed, rowsTotal: res.rowsTotal, sampled: res.sampled, grouped: res.grouped, decisionThreshold: o.decisionThreshold, requestedFolds: res.requestedFolds, multipleImputation: m };
+}
+
+// Quick approximation (Step 3 option, for very large datasets): plain fill inside folds and resamples
+function miceQuickApproximation() { return Boolean(document.getElementById('mi-quick-cv')?.checked); }
+function plainFillConfigs(configs) {
+    return Object.fromEntries(Object.entries(configs).map(([c, v]) => [c, v.role === 'feature' ? { ...v, imputationStrategy: v.type === 'continuous' ? 'median' : 'mode' } : v]));
+}
+
+// Scores one fold: a multiply imputed fold trains one model per completed dataset and scores their pooled
+// predictions (validation rows carry one encoded version per imputation chain); other folds as usual
+async function fitAndScoreAny(mId, isClassification, numClasses, hp, fold, evalOptions, opts = {}) {
+    if (!fold.mi) return fitAndScore(mId, isClassification, numClasses, hp, fold, evalOptions, opts);
+    const model = await fitPooledModel(mId, isClassification, numClasses, hp, fold.mi, opts);
+    try {
+        return await ModelEngine.evaluateAsync(model, fold.Xva, fold.yva, isClassification, fold.targetClasses, evalOptions);
+    } finally {
+        if (model.dispose) model.dispose();
+    }
 }
 
 // Compare the grid by mean cross-validated ranking metric over pre-built folds (see validation-core.js)
@@ -30,7 +62,7 @@ async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, w
     return runTuningCore(mId, baseHp, fd, isClassification, numClasses, {
         metricKey: rankingMetricKey(isClassification),
         metricDefs: isClassification ? RANKING_METRICS.classification : RANKING_METRICS.regression,
-        fitAndScore, isAborted: () => Boolean(watchdog && watchdog.aborted), progress, ownOnly
+        fitAndScore: fitAndScoreAny, isAborted: () => Boolean(watchdog && watchdog.aborted), progress, ownOnly
     });
 }
 
@@ -350,4 +382,4 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
         </div>`;
 }
 
-export { testPatientGroups, ciScopeNote, readRecalibration, fitRecalibrator, recalibrateAndEvaluate, TUNE_MAX_ROWS, TUNABLE_MODELS, TUNE_LABELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildStandardRowFolds, runTuningOnFolds, optionBTrainRawRows, splitSeedForCV, splitSpec, splitGroupFunction, pipelineGroupFunction, splitRowsForWorkflow, describeSplit, populateSplitColumnSelects, updateSplitMethodVisibility, bootstrapFor, ciSpan, readDecisionThreshold, thresholdedOutput, formatCvScore, cvSummaryFrom, selectTop70InFold, buildPipelineFolds, applyHyperparamsToForm, fmtTuneValue, renderTuningReport };
+export { miceQuickApproximation, plainFillConfigs, testPatientGroups, ciScopeNote, readRecalibration, fitRecalibrator, recalibrateAndEvaluate, TUNE_MAX_ROWS, TUNABLE_MODELS, TUNE_LABELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildStandardRowFolds, runTuningOnFolds, optionBTrainRawRows, splitSeedForCV, splitSpec, splitGroupFunction, pipelineGroupFunction, splitRowsForWorkflow, describeSplit, populateSplitColumnSelects, updateSplitMethodVisibility, bootstrapFor, ciSpan, readDecisionThreshold, thresholdedOutput, formatCvScore, cvSummaryFrom, selectTop70InFold, buildPipelineFolds, applyHyperparamsToForm, fmtTuneValue, renderTuningReport };

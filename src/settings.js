@@ -124,7 +124,8 @@ function collectSettings() {
             rankingMetricReg: AppState.rankingMetricReg || 'r2',
             form: collectFormState('#step-4-content'),
             // The imputation choice sits in Step 3 (one pane for single and multiple imputation)
-            multipleImputation: document.getElementById('mi-select')?.value || 'single'
+            multipleImputation: document.getElementById('mi-select')?.value || 'single',
+            miceQuickApproximation: Boolean(document.getElementById('mi-quick-cv')?.checked)
         },
         pipeline: {
             form: collectFormState('#step-pipeline-content'),
@@ -264,6 +265,8 @@ function applySettings(settings) {
     const miVal = ['single', 'mice5', 'mice10'].find(v => v === (std.multipleImputation || (std.form || {})['mi-select']));
     const miEl = document.getElementById('mi-select');
     if (miEl && miVal && miEl.value !== miVal) { miEl.value = miVal; miEl.dispatchEvent(new Event('change', { bubbles: true })); }
+    const quickEl = document.getElementById('mi-quick-cv');
+    if (quickEl) quickEl.checked = std.miceQuickApproximation === true;
 
     // 7-step pipeline
     const pipe = settings.pipeline || {};

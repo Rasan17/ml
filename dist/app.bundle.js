@@ -896,11 +896,33 @@ async function buildFolds(rawRows, k, o, prepareFold, onFold) {
     return { sets, metas, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), requestedFolds };
 }
 
+// Imputation and encoding fitted on learning rows only. Single imputation uses the Step 3 per-variable methods;
+// with miceM (multiple imputation chosen) MICE is fitted on the learning rows instead and one completed dataset is
+// used: across folds or bootstrap resamples this carries the imputation uncertainty ("resample, then impute";
+// Schomaker & Heumann 2018), and applying the fitted chains to other rows imputes them the same way.
+function imputeAndEncode(learnRows, configs, analysis, miceM, seed) {
+    if (miceM) {
+        const mi = DataEngine.miceFit(learnRows, configs, { m: 1, seed });
+        const prep = DataEngine.prepareFeaturesAndTarget(mi.datasets[0], configs);
+        prep.imputation = { configs, mice: mi.imputer };
+        return prep;
+    }
+    const imp = DataEngine.imputeDataset(learnRows, configs, analysis);
+    const prep = DataEngine.prepareFeaturesAndTarget(imp.imputedRows, configs);
+    prep.imputation = { configs, plan: imp.plan };
+    return prep;
+}
+
 // Standard workflow folds: the Step 3 imputation, encoding and scaling are fitted on each fold's learning
 // rows only and then applied to that fold's validation rows
 async function buildRowFolds(rawRows, k, o, onFold) {
-    const { configs, analysis, decisionThreshold = null } = o;
-    const res = await buildFolds(rawRows, k, o, (tr, va) => {
+    const { configs, analysis, decisionThreshold = null, miceM = 0, seed = 0 } = o;
+    const res = await buildFolds(rawRows, k, o, (tr, va, f) => {
+        if (miceM) {
+            const prep = imputeAndEncode(tr, configs, analysis, miceM, (seed + 104729 * (f + 1)) >>> 0);
+            const te = DataEngine.prepareTestingDataset(va, prep);
+            return { set: { Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses }, unknownClassCount: te.unknownClassCount };
+        }
         const trImp = DataEngine.imputeDataset(tr, configs, analysis);
         const vaImp = DataEngine.imputeDataset(va, configs, analysis, trImp.plan);
         const prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, configs);
@@ -1036,7 +1058,7 @@ function bootstrapResamplesGrouped(keys, B, seed) {
  * Returns per-resample scores (for model-selection correction) and the mean optimism per measure.
  */
 async function bootstrapOptimism(o) {
-    const { rows, boots, configs, analysis, isClassification, modelId, hp, evalOptions, keys, fitAndScoreMulti, tune = null, isAborted = null, onResample = null } = o;
+    const { rows, boots, configs, analysis, isClassification, modelId, hp, evalOptions, keys, fitAndScoreMulti, tune = null, isAborted = null, onResample = null, miceM = 0, seed = 0 } = o;
     const Bm = Math.min(boots.length, o.maxResamples || boots.length);
     const targetCol = Object.keys(configs).find(c => configs[c].role === 'target');
     const nClassesAll = isClassification ? new Set(rows.map(r => String(r[targetCol]).trim())).size : 0;
@@ -1050,10 +1072,9 @@ async function bootstrapOptimism(o) {
         if (isAborted && isAborted()) throw new Error("Training aborted by user.");
         const rowsB = boots[b].map(ix => rows[ix]);
         if (isClassification && new Set(rowsB.map(r => String(r[targetCol]).trim())).size !== nClassesAll) continue; // an outcome class missing
-        const impB = DataEngine.imputeDataset(rowsB, configs, analysis);
-        const prepB = DataEngine.prepareFeaturesAndTarget(impB.imputedRows, configs);
+        // Imputation refitted inside the resample: single imputation, or MICE when multiple imputation is chosen
+        const prepB = imputeAndEncode(rowsB, configs, analysis, miceM, (seed + 7919 * (b + 1)) >>> 0);
         if (!prepB.X.length) continue;
-        prepB.imputation = { configs, plan: impB.plan };
         const numClasses = prepB.targetClasses.length || 2;
         let hpB = hp, innerScore;
         if (tune) {
@@ -1061,7 +1082,7 @@ async function bootstrapOptimism(o) {
             const userGroup = tune.groupOf || null;
             const groupOf = userGroup || (r => idOf.get(r));
             const fd = await buildRowFolds(rowsB, tune.k, {
-                configs, analysis, isClassification, targetCol, seed: (tune.seed + 7919 * (b + 1)) >>> 0,
+                configs, analysis, isClassification, targetCol, seed: (tune.seed + 7919 * (b + 1)) >>> 0, miceM,
                 groupOf, stratifyGroups: !userGroup, decisionThreshold: evalOptions.decisionThreshold ?? null
             });
             const t = await runTuningCore(modelId, hp, fd, isClassification, numClasses, {
@@ -2752,6 +2773,7 @@ function setMissingIndicators(on) {
 
 
 
+
 // =========================================================================
 // STEP 3: MISSING DATA IMPUTATION
 // =========================================================================
@@ -2774,6 +2796,15 @@ function renderImputationTable() {
         }
     });
     renderCompleteCaseBox(rows, activeCols);
+    // One choice governs the analysis: complete-case analysis leaves nothing to impute, so multiple imputation is
+    // not offered with it; with multiple imputation, MICE fills every incomplete predictor (no per-variable methods)
+    const miEl = document.getElementById('mi-select');
+    if (miEl) {
+        if (AppState.completeCase && miEl.value !== 'single') { miEl.value = 'single'; miEl.dispatchEvent(new Event('change', { bubbles: true })); }
+        miEl.disabled = Boolean(AppState.completeCase);
+        miEl.title = AppState.completeCase ? 'Complete-case analysis is on: there is nothing to impute' : '';
+    }
+    const mice = !AppState.completeCase && readMultipleImputation() > 0;
 
     let rowsHtml = '';
     let missingColCount = 0;
@@ -2829,6 +2860,18 @@ function renderImputationTable() {
             `;
         }
 
+        if (mice) {
+            rowsHtml += `
+            <tr>
+                <td style="font-weight: 600;">${escapeHtml(col)}</td>
+                <td><span class="pill pill-${cfg.role}">${cfg.role}</span></td>
+                <td><span class="pill pill-${cfg.type}">${cfg.type}</span></td>
+                <td><span class="pill pill-missing">${a.missingCount} / ${a.total} (${a.missingPercent}%)</span></td>
+                <td colspan="2"><span class="pill pill-feature">MICE (multiple imputation)</span></td>
+            </tr>`;
+            return;
+        }
+
         rowsHtml += `
             <tr>
                 <td style="font-weight: 600;">${escapeHtml(col)}</td>
@@ -2852,7 +2895,7 @@ function renderImputationTable() {
         const complete = missingColCount === 0;
         DOM.applyImputationBtn.dataset.mode = complete ? 'complete' : 'impute';
         DOM.applyImputationBtn.textContent = complete ? '✓ Full data | Move Next'
-            : (AppState.completeCase ? '⚡ Remove Incomplete Rows & Validate Dataset' : '⚡ Apply Imputation & Validate Dataset');
+            : (AppState.completeCase ? '⚡ Remove Incomplete Rows & Validate Dataset' : mice ? '⚡ Continue with Multiple Imputation (MICE)' : '⚡ Apply Imputation & Validate Dataset');
     }
 
     if (missingColCount === 0) {
@@ -2891,8 +2934,23 @@ function renderImputationTable() {
 function executeImputation() {
     try {
         const { rows } = AppState.parsedData;
-        const res = DataEngine.imputeDataset(rows, AppState.columnConfigs, AppState.columnAnalysis);
+        const m = AppState.completeCase ? 0 : readMultipleImputation();
+        // With multiple imputation nothing is filled now: MICE runs when models are trained (and inside every
+        // cross-validation fold and bootstrap resample). A plain fill is kept only for the Step 4 counts and
+        // sample-size panel, never for training; it keeps every patient ("drop rows" does not apply to MICE)
+        const cfgs = m ? Object.fromEntries(Object.entries(AppState.columnConfigs).map(([c, v]) => [c, v.imputationStrategy === 'drop' || v.imputationStrategy === 'knn' ? { ...v, imputationStrategy: v.type === 'continuous' ? 'median' : 'mode' } : v])) : AppState.columnConfigs;
+        const res = DataEngine.imputeDataset(rows, cfgs, AppState.columnAnalysis);
         AppState.imputedData = res;
+        if (m) {
+            const cells = res.audit.filter(x => x.type !== 'drop_rows').reduce((a, x) => a + (x.imputedCount || 0), 0);
+            DOM.imputeAuditBox.innerHTML = `
+            <div style="background: var(--bg-surface-elevated); border: 1px solid var(--accent-emerald); border-radius: var(--radius-md); padding: 16px;">
+                <h4 style="color: var(--accent-emerald);">✓ Multiple imputation selected: ${rows.length} records kept</h4>
+                <p style="margin: 8px 0 0; font-size: 13px; color: var(--text-secondary);">${cells} missing value(s) in ${res.audit.filter(x => x.type !== 'drop_rows').length} predictor(s) will be filled by MICE when the models are trained (${m} completed datasets, each built over 10 rounds), from the training patients only and without the outcome. The same procedure is repeated inside every cross-validation fold and bootstrap resample; no single-imputation method is used.</p>
+            </div>`;
+            DOM.toStep4Btn.disabled = false;
+            return;
+        }
 
         let auditHtml = `
             <div style="background: var(--bg-surface-elevated); border: 1px solid var(--accent-emerald); border-radius: var(--radius-md); padding: 16px;">
@@ -3879,7 +3937,7 @@ function renderOptimismPanel(containerId, results) {
     const anyRepeated = items.some(r => r.evalRes.optimismCorrection.tuning === 'repeated');
     box.innerHTML = `<div class="cal-panel">
         <div class="tune-title">🔁 Bootstrap internal validation (Option C)</div>
-        <p class="tune-muted"><strong>Apparent</strong> performance is measured on the same patients the model learned from, so it is too optimistic. Each bootstrap resample draws patients with replacement and repeats the modelling steps on them: imputation, encoding and scaling are refitted${anyRepeated ? ', and the automatic tuning is run again' : ''}. The refitted model is scored on its resample and on the original patients, and the average difference is the <strong>optimism</strong>. Subtracting it gives the <strong>optimism-corrected</strong> estimate of how the model would perform on new patients from the same population. Models that can memorise their training patients (Random Forest, boosted trees, k-NN, neural networks) are instead reported with the <strong>.632+</strong> estimate, which scores each bootstrap model only on the patients it did not see (Efron &amp; Tibshirani, 1997); Harrell's correction is too small for them. Choices you made by hand (which predictors to include, how to encode them) are not repeated. The corrected calibration slope estimates how much the predictions should be shrunk (values below 1 mean overfitting).</p>
+        <p class="tune-muted"><strong>Apparent</strong> performance is measured on the same patients the model learned from, so it is too optimistic. Each bootstrap resample draws patients with replacement and repeats the modelling steps on them: imputation (MICE when multiple imputation is chosen), encoding and scaling are refitted${anyRepeated ? ', and the automatic tuning is run again' : ''}. The refitted model is scored on its resample and on the original patients, and the average difference is the <strong>optimism</strong>. Subtracting it gives the <strong>optimism-corrected</strong> estimate of how the model would perform on new patients from the same population. Models that can memorise their training patients (Random Forest, boosted trees, k-NN, neural networks) are instead reported with the <strong>.632+</strong> estimate, which scores each bootstrap model only on the patients it did not see (Efron &amp; Tibshirani, 1997); Harrell's correction is too small for them. Choices you made by hand (which predictors to include, how to encode them) are not repeated. The corrected calibration slope estimates how much the predictions should be shrunk (values below 1 mean overfitting).</p>
         ${blocks}
         ${selBlock}
     </div>`;
@@ -4213,11 +4271,14 @@ function updateImputationEstimate() {
     const m = readMultipleImputation();
     const rows = AppState.parsedData && AppState.parsedData.rows ? AppState.parsedData.rows.length : 0;
     const nPred = AppState.columnConfigs ? Object.keys(AppState.columnConfigs).filter(c => AppState.columnConfigs[c].role === 'feature').length : 0;
-    if (!m || !rows || !nPred) { box.style.display = 'none'; return; }
+    if (!m || !rows || !nPred) { box.style.display = 'none'; const q = document.getElementById('mi-quick-cv-row'); if (q) q.style.display = m ? 'flex' : 'none'; return; }
     const est = estimateImputationSeconds(rows, nPred, m);
+    const quick = document.getElementById('mi-quick-cv-row');
+    if (quick) quick.style.display = m ? 'flex' : 'none';
     const t = s => (s < 10 ? 'a few seconds' : s < 60 ? `about ${Math.round(s / 5) * 5} seconds` : `about ${Math.round(s / 60)} minute${Math.round(s / 60) === 1 ? '' : 's'}`);
     box.style.display = 'block';
-    box.innerHTML = `⏱️ For ${rows.toLocaleString('en-GB')} patients and ${nPred} predictors, the imputation step takes ${t(est)} (twice with Option A when the final model is retrained on all patients; done once: training other models later on the same patients with the same settings reuses the imputed datasets), and each selected model is trained ${m} times. It runs in the background: the page stays usable and Force Stop works. Keep this window in front while it runs: browsers slow down background work in hidden or minimised windows.`;
+    const foldRows = Math.round(rows * 0.8 * 0.8), foldSec = estimateImputationSeconds(foldRows, nPred, m), bootSec = estimateImputationSeconds(rows, nPred, 1);
+    box.innerHTML = `⏱️ For ${rows.toLocaleString('en-GB')} patients and ${nPred} predictors, the imputation takes ${t(est)} for the final models (twice with Option A when they are retrained on all patients), and each selected model is trained ${m} times. When cross-validation is used (tuning, model selection, recalibration) MICE is repeated in each of the 5 folds (${t(foldSec)} each, once for all models); with bootstrap validation (Option C) one MICE run is added to every resample (${t(bootSec)} each, for example ${t(bootSec * 200)} for 200 resamples per model). It runs in the background: the page stays usable and Force Stop works. Keep this window in front while it runs.`;
 }
 
 // ---- src/cv-tuning.js ----
@@ -4225,6 +4286,8 @@ function updateImputationEstimate() {
 
 
 
+
+/* global DataEngine, ModelEngine */
 // =========================================================================
 // AUTOMATIC TUNING (standard workflow, Step 4): k-fold cross-validation inside the Training set
 // =========================================================================
@@ -4240,12 +4303,42 @@ const TUNE_LABELS = {
 
 // Leak-free folds for the standard workflow: imputation, encoding and scaling are fitted on each fold's
 // learning rows only and then applied to that fold's validation rows (as for the final Testing set)
-async function buildStandardRowFolds(rawTrainRows, k, isClassification, seed, onFold) {
+// With multiple imputation chosen (Step 3), each fold repeats the final procedure: MICE fitted on the fold's
+// learning rows (m completed datasets), one model per dataset with pooled predictions, and the fold's validation
+// rows imputed with the fold's chains. The quick approximation instead uses a plain fill (median / most frequent).
+async function buildStandardRowFolds(rawTrainRows, k, isClassification, seed, onFold, isAborted = null) {
     const targetCol = Object.keys(AppState.columnConfigs).find(c => AppState.columnConfigs[c].role === 'target');
-    return buildRowFolds(rawTrainRows, k, {
+    const o = {
         configs: AppState.columnConfigs, analysis: AppState.columnAnalysis, isClassification, targetCol, seed,
         groupOf: splitGroupFunction(), decisionThreshold: readDecisionThreshold('decision-threshold')
+    };
+    const m = AppState.completeCase ? 0 : readMultipleImputation();
+    if (!m) return buildRowFolds(rawTrainRows, k, o, onFold);
+    if (miceQuickApproximation()) return buildRowFolds(rawTrainRows, k, { ...o, configs: plainFillConfigs(AppState.columnConfigs) }, onFold);
+    const res = await buildFolds(rawTrainRows, k, o, async (tr, va, f) => {
+        const mi = await prepareMultipleImputation(tr, AppState.columnConfigs, m, (seed + 104729 * (f + 1)) >>> 0, { isAborted });
+        const te = DataEngine.prepareTestingDataset(va, mi.prep);
+        return { set: { Xtr: mi.sets[0].X, ytr: mi.sets[0].y, Xva: te.X, yva: te.y, targetClasses: mi.prep.targetClasses, mi: mi.sets }, unknownClassCount: te.unknownClassCount };
     }, onFold);
+    return { sets: res.sets, rowsUsed: res.rowsUsed, rowsTotal: res.rowsTotal, sampled: res.sampled, grouped: res.grouped, decisionThreshold: o.decisionThreshold, requestedFolds: res.requestedFolds, multipleImputation: m };
+}
+
+// Quick approximation (Step 3 option, for very large datasets): plain fill inside folds and resamples
+function miceQuickApproximation() { return Boolean(document.getElementById('mi-quick-cv')?.checked); }
+function plainFillConfigs(configs) {
+    return Object.fromEntries(Object.entries(configs).map(([c, v]) => [c, v.role === 'feature' ? { ...v, imputationStrategy: v.type === 'continuous' ? 'median' : 'mode' } : v]));
+}
+
+// Scores one fold: a multiply imputed fold trains one model per completed dataset and scores their pooled
+// predictions (validation rows carry one encoded version per imputation chain); other folds as usual
+async function fitAndScoreAny(mId, isClassification, numClasses, hp, fold, evalOptions, opts = {}) {
+    if (!fold.mi) return fitAndScore(mId, isClassification, numClasses, hp, fold, evalOptions, opts);
+    const model = await fitPooledModel(mId, isClassification, numClasses, hp, fold.mi, opts);
+    try {
+        return await ModelEngine.evaluateAsync(model, fold.Xva, fold.yva, isClassification, fold.targetClasses, evalOptions);
+    } finally {
+        if (model.dispose) model.dispose();
+    }
 }
 
 // Compare the grid by mean cross-validated ranking metric over pre-built folds (see validation-core.js)
@@ -4253,7 +4346,7 @@ async function runTuningOnFolds(mId, baseHp, fd, isClassification, numClasses, w
     return runTuningCore(mId, baseHp, fd, isClassification, numClasses, {
         metricKey: rankingMetricKey(isClassification),
         metricDefs: isClassification ? RANKING_METRICS.classification : RANKING_METRICS.regression,
-        fitAndScore, isAborted: () => Boolean(watchdog && watchdog.aborted), progress, ownOnly
+        fitAndScore: fitAndScoreAny, isAborted: () => Boolean(watchdog && watchdog.aborted), progress, ownOnly
     });
 }
 
@@ -4661,14 +4754,17 @@ async function startModelTraining() {
                 }
             };
         };
+        // How the cross-validation folds were imputed (reported with the results)
+        const foldImputationLabel = () => (AppState.completeCase ? 'complete cases' : readMultipleImputation() ? (miceQuickApproximation() ? 'plain fill (quick approximation of MICE)' : `MICE (${readMultipleImputation()} completed datasets, pooled models) refitted in each fold`) : 'the Step 3 single imputation refitted in each fold');
         const foldCache = {};
         const foldsFor = async (rawTrainRows, k, label, i) => {
             if (!foldCache[k]) {
+                const miFolds = !AppState.completeCase && readMultipleImputation() && !miceQuickApproximation();
                 foldCache[k] = await buildStandardRowFolds(rawTrainRows, k, prep.isClassification, splitSeedForCV(), (f, nf) => {
-                    const msg = `🎯 Preparing ${nf} cross-validation folds (imputation and scaling refitted inside each fold): fold ${f}/${nf}...`;
+                    const msg = `🎯 Preparing ${nf} cross-validation folds (${miFolds ? 'multiple imputation (MICE)' : 'imputation'} and scaling refitted inside each fold): fold ${f}/${nf}...`;
                     DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">${msg}</span>`;
                     if (watchdog) watchdog.tick(i + 1, msg);
-                });
+                }, () => Boolean(watchdog && watchdog.aborted));
             }
             return foldCache[k];
         };
@@ -4723,6 +4819,17 @@ async function startModelTraining() {
             // and every model is fast enough to be cross-validated there
             const repeatSelection = selectByCV && modelsToTest.length > 1 && !modelsToTest.some(slowModel);
             const innerK = Math.min(tuneFolds, INNER_TUNE_MAX_FOLDS);
+            // Multiple imputation chosen: the final models are pooled MICE models fitted on all patients, and MICE
+            // (one completed dataset) is refitted inside every resample and inner fold ("resample, then impute")
+            const miC = !AppState.completeCase ? readMultipleImputation() : 0;
+            const miceInside = miC && !miceQuickApproximation() ? 1 : 0;
+            let miAll = null, miAllX = null, miAllY = null;
+            if (miC) {
+                miAll = await prepareMultipleImputation(allRaw, AppState.columnConfigs, miC, seedC, miProgress('all patients', allRaw.length, miC));
+                prep = miAll.prep;
+                const t = DataEngine.prepareTestingDataset(allRaw, prep);
+                miAllX = t.X; miAllY = t.y;
+            }
             const runs = [];
             for (let i = 0; i < modelsToTest.length; i++) {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
@@ -4734,8 +4841,10 @@ async function startModelTraining() {
                 const isAborted = () => Boolean(watchdog && watchdog.aborted);
                 const heartbeat = (a, b) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training on all ${prep.X.length} patients...`); };
                 DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">🚀 [${i + 1}/${modelsToTest.length}] Training ${mInfo.name} on all ${prep.X.length} patients...</span>`;
-                const model = await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, prep.X, prep.y, { isAborted, onProgress: heartbeat });
-                const evalRes = await ModelEngine.evaluateAsync(model, prep.X, prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
+                const model = miAll
+                    ? await fitPooledModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, miAll.sets, { isAborted, onProgress: heartbeat })
+                    : await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, prep.X, prep.y, { isAborted, onProgress: heartbeat });
+                const evalRes = await ModelEngine.evaluateAsync(model, miAll ? miAllX : prep.X, miAll ? miAllY : prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
                 const wasTuned = autoTune && TUNABLE_MODELS.has(mId);
                 const tuneInside = wasTuned && !slowModel(mId);
                 const inner = (tuneInside || repeatSelection)
@@ -4747,9 +4856,10 @@ async function startModelTraining() {
                 say(`🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample 1/${Bm}${what}...`);
                 // The whole loop runs in the background worker (on the page if workers are unavailable)
                 const run = await bootstrapRun({
-                    rows: allRaw, boots, maxResamples: Bm, configs: AppState.columnConfigs, analysis: AppState.columnAnalysis,
+                    rows: allRaw, boots, maxResamples: Bm, analysis: AppState.columnAnalysis,
                     isClassification: prep.isClassification, modelId: mId, hp: tuneInside ? baseHp : hp, evalOptions: evalOptsC, keys,
-                    tune: inner
+                    tune: inner, miceM: miceInside, seed: seedC,
+                    configs: miC && !miceInside ? plainFillConfigs(AppState.columnConfigs) : AppState.columnConfigs
                 }, {
                     isAborted,
                     onInnerProgress: (b, n, c, nc, f, nf) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: resample ${b}/${n}, ${tuneInside ? `combination ${c}/${nc}, ` : ''}fold ${f}/${nf}`); },
@@ -4792,7 +4902,7 @@ async function startModelTraining() {
                     tuning: !wasTuned ? 'none' : (tuneInside ? 'repeated' : 'once'), innerFolds: inner ? innerK : null, sameSettingsShare
                 };
                 evalRes.protocol = 'option-c';
-                if (readMultipleImputation()) evalRes.multipleImputationSkipped = 'Multiple imputation is not combined with bootstrap internal validation (it would multiply the work in every resample); single imputation (the Step 3 choices) was refitted inside each resample. Use Option A or B for multiple imputation.';
+                if (miAll) evalRes.multipleImputation = { m: miC, imputedColumns: miAll.imputedColumns, rows: allRaw.length, insideResamples: miceInside ? 'MICE (one completed dataset per resample and inner fold)' : 'plain fill (quick approximation)' };
                 evalRes.accuracyCI = null; // a CI of the apparent accuracy would be misleading
                 evalRes.ci = null;
                 evalRes.trainCount = prep.X.length;
@@ -4801,7 +4911,7 @@ async function startModelTraining() {
                 evalRes.splitSeed = seedC;
                 if (groupColC) evalRes.bootstrapGroupCol = groupColC;
                 evalRes.seed = hp.seed;
-                if (tuned.cv) evalRes.cv = tuned.cv;
+                if (tuned.cv) evalRes.cv = { ...tuned.cv, imputation: foldImputationLabel() };
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration is not combined with bootstrap internal validation (it would need to be repeated inside every resample); use Option A or B to recalibrate.';
                 if (model.trainingInfo) evalRes.nnNote = describeNNTraining(model.trainingInfo);
@@ -4952,7 +5062,7 @@ async function startModelTraining() {
                 evalRes.protocol = 'option-a';
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed, testPatientGroups(testData.validRows, 'standard'));
                 evalRes.splitInfo = rowSplit.info;
-                if (tuned.cv) evalRes.cv = tuned.cv;
+                if (tuned.cv) evalRes.cv = { ...tuned.cv, imputation: foldImputationLabel() };
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 evalRes.testImputedCells = testImp.audit.filter(a => a.type === 'impute_column').reduce((acc, a) => acc + a.imputedCount, 0);
                 evalRes.testDroppedRows = miM ? 0 : rowSplit.testX.length - testImp.imputedRows.length;
@@ -5132,7 +5242,7 @@ async function startModelTraining() {
                 evalRes.protocol = 'option-b';
                 if (miB) evalRes.multipleImputation = { m: miMB, imputedColumns: miB.imputedColumns };
                 evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed, testPatientGroups(testPrep.validRows, 'standard'));
-                if (tuned.cv) evalRes.cv = tuned.cv;
+                if (tuned.cv) evalRes.cv = { ...tuned.cv, imputation: foldImputationLabel() };
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 evalRes.retrainOn100 = false;
                 evalRes.trainCount = prep.X.length;
@@ -5594,11 +5704,11 @@ function renderEvaluationDashboard() {
         }
         if (evalRes && evalRes.multipleImputation) {
             const mi = evalRes.multipleImputation;
-            notes.push(`🧩 <strong>Multiple imputation:</strong> missing predictor values${mi.imputedColumns && mi.imputedColumns.length ? ` (${mi.imputedColumns.map(escapeHtml).join(', ')})` : ''} were imputed ${mi.m} times by chained equations with predictive mean matching, fitted on the Training patients only and without the outcome. One model was trained on each completed dataset and the predictions are averaged; Testing and new patients with missing values are imputed in the same way.${evalRes.cv ? ' Model selection and tuning used single imputation inside the cross-validation folds.' : ''}`);
+            notes.push(`🧩 <strong>Multiple imputation:</strong> missing predictor values${mi.imputedColumns && mi.imputedColumns.length ? ` (${mi.imputedColumns.map(escapeHtml).join(', ')})` : ''} were imputed ${mi.m} times by chained equations with predictive mean matching, fitted on the Training patients only and without the outcome. One model was trained on each completed dataset and the predictions are averaged; Testing and new patients with missing values are imputed in the same way.${evalRes.cv && evalRes.cv.imputation ? ` Cross-validation folds (model selection, tuning, recalibration): ${escapeHtml(evalRes.cv.imputation)}.` : ''}${mi.insideResamples ? ` Bootstrap resamples: ${escapeHtml(mi.insideResamples)}.` : ''}`);
         }
         if (evalRes && evalRes.multipleImputationSkipped) notes.push(`🧩 ${escapeHtml(evalRes.multipleImputationSkipped)}`);
         if (evalRes && evalRes.cv) {
-            notes.push(`Best model chosen by ${evalRes.cv.folds}-fold cross-validation inside the Training set${evalRes.cv.grouped ? ' (each patient\'s records kept in one fold)' : ''}; missing-value filling, encoding and scaling were refitted inside every fold.`);
+            notes.push(`Best model chosen by ${evalRes.cv.folds}-fold cross-validation inside the Training set${evalRes.cv.grouped ? ' (each patient\'s records kept in one fold)' : ''}; missing-value filling (${escapeHtml(evalRes.cv.imputation || 'Step 3 methods')}), encoding and scaling were refitted inside every fold.`);
         } else if (allResults.length > 1 && !isOptionC) {
             notes.push(`⚠️ <strong>Exploratory model choice:</strong> the leading model was chosen by its score on the same Testing patients it is reported on, so its test results are optimistic (the best of ${allResults.length} scores is partly luck). For a reportable result, choose "Cross-validation within the Training set" for model selection, so the Testing set is used once, only to evaluate the chosen model.`);
         }
@@ -10107,7 +10217,8 @@ function collectSettings() {
             rankingMetricReg: AppState.rankingMetricReg || 'r2',
             form: collectFormState('#step-4-content'),
             // The imputation choice sits in Step 3 (one pane for single and multiple imputation)
-            multipleImputation: document.getElementById('mi-select')?.value || 'single'
+            multipleImputation: document.getElementById('mi-select')?.value || 'single',
+            miceQuickApproximation: Boolean(document.getElementById('mi-quick-cv')?.checked)
         },
         pipeline: {
             form: collectFormState('#step-pipeline-content'),
@@ -10247,6 +10358,8 @@ function applySettings(settings) {
     const miVal = ['single', 'mice5', 'mice10'].find(v => v === (std.multipleImputation || (std.form || {})['mi-select']));
     const miEl = document.getElementById('mi-select');
     if (miEl && miVal && miEl.value !== miVal) { miEl.value = miVal; miEl.dispatchEvent(new Event('change', { bubbles: true })); }
+    const quickEl = document.getElementById('mi-quick-cv');
+    if (quickEl) quickEl.checked = std.miceQuickApproximation === true;
 
     // 7-step pipeline
     const pipe = settings.pipeline || {};
@@ -10571,7 +10684,14 @@ function start() {
     document.getElementById('standard-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('standard'));
     window.downloadValidationReport = downloadValidationReport;
     document.getElementById('pipeline-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('pipeline'));
-    document.getElementById('mi-select')?.addEventListener('change', updateImputationEstimate);
+    document.getElementById('mi-select')?.addEventListener('change', () => {
+        updateImputationEstimate();
+        // The table and the Step 3 result follow the single / multiple imputation choice
+        if (AppState.parsedData && AppState.columnAnalysis) {
+            renderImputationTable();
+            if (AppState.imputedData) executeImputation();
+        }
+    });
     document.getElementById('mi-save-btn')?.addEventListener('click', saveImputedData);
     document.getElementById('mi-load-btn')?.addEventListener('click', () => document.getElementById('mi-file-input')?.click());
     document.getElementById('mi-file-input')?.addEventListener('change', (e) => {

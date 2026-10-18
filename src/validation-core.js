@@ -135,11 +135,33 @@ async function buildFolds(rawRows, k, o, prepareFold, onFold) {
     return { sets, metas, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), requestedFolds };
 }
 
+// Imputation and encoding fitted on learning rows only. Single imputation uses the Step 3 per-variable methods;
+// with miceM (multiple imputation chosen) MICE is fitted on the learning rows instead and one completed dataset is
+// used: across folds or bootstrap resamples this carries the imputation uncertainty ("resample, then impute";
+// Schomaker & Heumann 2018), and applying the fitted chains to other rows imputes them the same way.
+function imputeAndEncode(learnRows, configs, analysis, miceM, seed) {
+    if (miceM) {
+        const mi = DataEngine.miceFit(learnRows, configs, { m: 1, seed });
+        const prep = DataEngine.prepareFeaturesAndTarget(mi.datasets[0], configs);
+        prep.imputation = { configs, mice: mi.imputer };
+        return prep;
+    }
+    const imp = DataEngine.imputeDataset(learnRows, configs, analysis);
+    const prep = DataEngine.prepareFeaturesAndTarget(imp.imputedRows, configs);
+    prep.imputation = { configs, plan: imp.plan };
+    return prep;
+}
+
 // Standard workflow folds: the Step 3 imputation, encoding and scaling are fitted on each fold's learning
 // rows only and then applied to that fold's validation rows
 async function buildRowFolds(rawRows, k, o, onFold) {
-    const { configs, analysis, decisionThreshold = null } = o;
-    const res = await buildFolds(rawRows, k, o, (tr, va) => {
+    const { configs, analysis, decisionThreshold = null, miceM = 0, seed = 0 } = o;
+    const res = await buildFolds(rawRows, k, o, (tr, va, f) => {
+        if (miceM) {
+            const prep = imputeAndEncode(tr, configs, analysis, miceM, (seed + 104729 * (f + 1)) >>> 0);
+            const te = DataEngine.prepareTestingDataset(va, prep);
+            return { set: { Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses }, unknownClassCount: te.unknownClassCount };
+        }
         const trImp = DataEngine.imputeDataset(tr, configs, analysis);
         const vaImp = DataEngine.imputeDataset(va, configs, analysis, trImp.plan);
         const prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, configs);
@@ -275,7 +297,7 @@ function bootstrapResamplesGrouped(keys, B, seed) {
  * Returns per-resample scores (for model-selection correction) and the mean optimism per measure.
  */
 async function bootstrapOptimism(o) {
-    const { rows, boots, configs, analysis, isClassification, modelId, hp, evalOptions, keys, fitAndScoreMulti, tune = null, isAborted = null, onResample = null } = o;
+    const { rows, boots, configs, analysis, isClassification, modelId, hp, evalOptions, keys, fitAndScoreMulti, tune = null, isAborted = null, onResample = null, miceM = 0, seed = 0 } = o;
     const Bm = Math.min(boots.length, o.maxResamples || boots.length);
     const targetCol = Object.keys(configs).find(c => configs[c].role === 'target');
     const nClassesAll = isClassification ? new Set(rows.map(r => String(r[targetCol]).trim())).size : 0;
@@ -289,10 +311,9 @@ async function bootstrapOptimism(o) {
         if (isAborted && isAborted()) throw new Error("Training aborted by user.");
         const rowsB = boots[b].map(ix => rows[ix]);
         if (isClassification && new Set(rowsB.map(r => String(r[targetCol]).trim())).size !== nClassesAll) continue; // an outcome class missing
-        const impB = DataEngine.imputeDataset(rowsB, configs, analysis);
-        const prepB = DataEngine.prepareFeaturesAndTarget(impB.imputedRows, configs);
+        // Imputation refitted inside the resample: single imputation, or MICE when multiple imputation is chosen
+        const prepB = imputeAndEncode(rowsB, configs, analysis, miceM, (seed + 7919 * (b + 1)) >>> 0);
         if (!prepB.X.length) continue;
-        prepB.imputation = { configs, plan: impB.plan };
         const numClasses = prepB.targetClasses.length || 2;
         let hpB = hp, innerScore;
         if (tune) {
@@ -300,7 +321,7 @@ async function bootstrapOptimism(o) {
             const userGroup = tune.groupOf || null;
             const groupOf = userGroup || (r => idOf.get(r));
             const fd = await buildRowFolds(rowsB, tune.k, {
-                configs, analysis, isClassification, targetCol, seed: (tune.seed + 7919 * (b + 1)) >>> 0,
+                configs, analysis, isClassification, targetCol, seed: (tune.seed + 7919 * (b + 1)) >>> 0, miceM,
                 groupOf, stratifyGroups: !userGroup, decisionThreshold: evalOptions.decisionThreshold ?? null
             });
             const t = await runTuningCore(modelId, hp, fd, isClassification, numClasses, {

@@ -346,3 +346,37 @@ test('network audit: during a full analysis every request is a download of the a
     expect(requests.length).toBeGreaterThan(5);
     expect(errors).toEqual([]);
 });
+
+test('one imputation choice: with MICE the Step 3 table shows MICE only, folds and bootstrap resamples repeat MICE', async ({ page }) => {
+    test.setTimeout(400000);
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await page.click('#sample-shunt-large-btn');
+    await expect(page.locator('#data-stats-grid')).toContainText('420');
+    await page.click('button.step-tab[data-step="3"]');
+    await expect(page.locator('.impute-strat-select').first()).toBeVisible();
+    await page.selectOption('#mi-select', 'mice5');
+    await expect(page.locator('.impute-strat-select')).toHaveCount(0); // no per-variable methods with MICE
+    await expect(page.locator('#impute-table-body')).toContainText('MICE (multiple imputation)');
+    await expect(page.locator('#apply-imputation-btn')).toContainText('Multiple Imputation');
+    await page.click('#apply-imputation-btn');
+    await expect(page.locator('#impute-audit-box')).toContainText('no single-imputation method is used');
+    await page.click('button.step-tab[data-step="4"]');
+    // cross-validated selection of two models: MICE inside the folds
+    await page.evaluate(async () => { const { AppState } = await import('./src/core.js'); AppState.applyModelSelection('multi', ['glm', 'nb']); });
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText(/Complete/, { timeout: 170000 });
+    await expect(page.locator('#retrain-status-banner')).toContainText('MICE (5 completed datasets, pooled models) refitted in each fold');
+    // bootstrap validation: MICE inside every resample, pooled MICE final model
+    await page.check('#val-mode-c', { force: true });
+    await page.selectOption('#bootstrap-reps', { index: 0 });
+    await page.evaluate(async () => { const { AppState } = await import('./src/core.js'); AppState.applyModelSelection('single', ['glm']); });
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText(/Complete/, { timeout: 300000 });
+    await expect(page.locator('#retrain-status-banner')).toContainText('Bootstrap resamples: MICE (one completed dataset per resample');
+    // back to single imputation: the per-variable methods return
+    await page.click('button.step-tab[data-step="3"]');
+    await page.selectOption('#mi-select', 'single');
+    await expect(page.locator('.impute-strat-select').first()).toBeVisible();
+    expect(errors).toEqual([]);
+});
