@@ -156,7 +156,7 @@ function deployTestedModel(modelId) {
         renderSinglePredictionForm();
     }
 
-    showSeedToast(`✓ Deployed "${displayModelName(modelId, targetItem.model)}" as the active predictor for Steps 5 & 6`);
+    showSeedToast(`✓ "${displayModelName(modelId, targetItem.model)}" is now the active research model for Steps 5 & 6`);
 }
 
 // A Step 4 (standard workflow) model is now active: record that, and restore the encoding it was

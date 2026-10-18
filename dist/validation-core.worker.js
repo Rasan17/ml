@@ -101,8 +101,13 @@ function effectiveFolds(rows, k, isClassification, targetCol, groupOf = null) {
     if (!isClassification) return k;
     const members = {};
     rows.forEach((r, i) => { const v = String(r[targetCol]).trim(); (members[v] = members[v] || new Set()).add(groupOf ? groupOf(r) : i); });
-    const minority = Math.min(...Object.values(members).map(s => s.size));
-    return Math.max(2, Math.min(k, minority));
+    const sizes = Object.entries(members).map(([v, s]) => [v, s.size]).sort((a, b) => a[1] - b[1]);
+    const minority = sizes.length ? sizes[0][1] : 0;
+    // With one patient in an outcome group, some fold would train without that outcome: not estimable
+    if (sizes.length < 2 || minority < 2) {
+        throw new Error(`Cross-validation is not possible: ${sizes.length < 2 ? 'the training rows contain only one outcome group' : `only ${minority} ${groupOf ? 'patient' : 'record'} in the outcome group "${sizes[0][0]}"`}. At least 2 are needed (and far more for meaningful results); switch off automatic tuning, cross-validated model selection and recalibration, or use more patients.`);
+    }
+    return Math.min(k, minority);
 }
 
 // Leak-free folds from raw rows: imputation, encoding and scaling are fitted on each fold's learning
@@ -121,6 +126,7 @@ async function buildRowFolds(rawRows, k, o, onFold) {
         const vaImp = DataEngine.imputeDataset(va, configs, analysis, trImp.plan);
         const prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, configs);
         const te = DataEngine.prepareTestingDataset(vaImp.imputedRows, prep);
+        if (isClassification && te.unknownClassCount) throw new Error(`Cross-validation is not possible: fold ${f + 1} has an outcome group that its training rows lack. Use fewer folds or more patients.`);
         sets.push({ Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses });
         if (onFold) onFold(f + 1, k);
         await ModelEngine.yieldToBrowser();

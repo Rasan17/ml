@@ -2729,15 +2729,29 @@
 
         async deserializeModel(obj) {
             if (!obj) return null;
+            // A model file is untrusted input: only plain data is restored. Typed arrays come from a fixed list
+            // of constructors (never a name looked up globally), and no field may replace a method of the model
+            // or touch the object's prototype, so a crafted file cannot install code
+            const TYPED = { Float64Array, Float32Array, Int32Array, Uint32Array, Int16Array, Uint16Array, Int8Array, Uint8Array, Uint8ClampedArray };
+            const FORBIDDEN = new Set(['__proto__', 'constructor', 'prototype']);
             const restore = (proto, state) => {
+                if (state !== undefined && (state === null || typeof state !== 'object' || Array.isArray(state))) throw new Error('Invalid model file: model state is not an object.');
                 const m = Object.create(proto);
                 Object.keys(state || {}).forEach(k => {
+                    if (FORBIDDEN.has(k) || typeof proto[k] === 'function') throw new Error(`Invalid model file: field "${k}" is not allowed.`);
                     const v = state[k];
-                    m[k] = v && v.__typed ? new globalThis[v.__typed](v.data) : v;
+                    if (v && typeof v === 'object' && v.__typed !== undefined) {
+                        const T = Object.prototype.hasOwnProperty.call(TYPED, v.__typed) ? TYPED[v.__typed] : null;
+                        if (!T || !Array.isArray(v.data) || !v.data.every(x => typeof x === 'number')) throw new Error(`Invalid model file: field "${k}" is not a numeric array.`);
+                        m[k] = new T(v.data);
+                    } else {
+                        m[k] = v;
+                    }
                 });
                 m.rng = createPRNG(m.seed);
                 return m;
             };
+            if (typeof obj !== 'object' || typeof obj.type !== 'string') throw new Error('Invalid model file: unknown model type.');
             if (obj.type === 'rf') {
                 const m = restore(RandomForest.prototype, obj.state);
                 m.trees = obj.trees.map(t => { const tr = restore(DecisionTree.prototype, t.state); tr.root = t.root; return tr; });
@@ -2940,13 +2954,21 @@
          * and the others are up-weighted to represent them.
          */
         ipcwBrier(time, event, survAtTau, tau, censKM) {
+            // Not estimable (null) when a patient who should contribute has no censoring support (weight 1/0):
+            // leaving them out would silently bias the score, possibly to 0. Also null when nobody contributes.
             const gTau = this.kmAt(censKM, tau);
-            let sum = 0;
+            let sum = 0, contributors = 0;
             for (let i = 0; i < time.length; i++) {
-                if (time[i] <= tau && event[i] === 1) { const g = this.kmAt(censKM, time[i]); if (g > 0) sum += (survAtTau[i] ** 2) / g; }
-                else if (time[i] > tau && gTau > 0) sum += ((1 - survAtTau[i]) ** 2) / gTau;
+                if (time[i] <= tau && event[i] === 1) {
+                    const g = this.kmAt(censKM, time[i]);
+                    if (!(g > 0)) return null;
+                    sum += (survAtTau[i] ** 2) / g; contributors++;
+                } else if (time[i] > tau) {
+                    if (!(gTau > 0)) return null;
+                    sum += ((1 - survAtTau[i]) ** 2) / gTau; contributors++;
+                }
             }
-            return time.length ? sum / time.length : null;
+            return time.length && contributors ? sum / time.length : null;
         },
         createCox(config) { return new CoxModel(config); },
 
@@ -2961,9 +2983,16 @@
         /** Isotonic regression (pool-adjacent-violators) of the outcome on p: a non-decreasing step function */
         fitIsotonic(y, p) {
             const idx = p.map((v, i) => i).sort((a, b) => p[a] - p[b]);
-            const blocks = []; // {sumY, w, xMin, xMax}
+            // Patients with the same predicted probability are pooled first (as scikit-learn does), so the fit
+            // does not depend on the order of tied rows (common with forest vote shares and k-NN)
+            const tied = [];
             idx.forEach(i => {
-                blocks.push({ sumY: y[i] === 1 ? 1 : 0, w: 1, xMin: p[i], xMax: p[i] });
+                const last = tied[tied.length - 1];
+                if (last && last.x === p[i]) { last.sumY += y[i] === 1 ? 1 : 0; last.w++; } else tied.push({ x: p[i], sumY: y[i] === 1 ? 1 : 0, w: 1 });
+            });
+            const blocks = []; // {sumY, w, xMin, xMax}
+            tied.forEach(t => {
+                blocks.push({ sumY: t.sumY, w: t.w, xMin: t.x, xMax: t.x });
                 while (blocks.length > 1 && blocks[blocks.length - 2].sumY / blocks[blocks.length - 2].w >= blocks[blocks.length - 1].sumY / blocks[blocks.length - 1].w) {
                     const b2 = blocks.pop(), b1 = blocks.pop();
                     blocks.push({ sumY: b1.sumY + b2.sumY, w: b1.w + b2.w, xMin: b1.xMin, xMax: b2.xMax });

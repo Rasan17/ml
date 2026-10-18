@@ -51,6 +51,7 @@ function handleTestFileUpload(file) {
 function processTestingCSVContent(csvText, fileName) {
     try {
         const parsed = DataEngine.parseCSV(csvText);
+        DataEngine.parseIssues(parsed).forEach(msg => alert(msg));
         const rows = parsed && parsed.rows ? parsed.rows : null;
         if (!rows || rows.length === 0) {
             alert("The uploaded testing CSV appears to be empty or unparseable.");

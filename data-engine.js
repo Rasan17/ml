@@ -151,7 +151,9 @@
 
             // Unquoted fields are trimmed; quoted fields keep their exact content (RFC 4180), with only
             // whitespace outside the quotes discarded
+            let malformedQuoteCount = 0; // text between a closing quote and the next delimiter (kept, reported)
             const finishField = () => {
+                if (fieldQuoted && afterQuote.trim()) malformedQuoteCount++;
                 const value = fieldQuoted ? currentField + afterQuote.trim() : currentField.trim();
                 currentRow.push(value);
                 currentField = '';
@@ -202,6 +204,9 @@
                 }
             }
 
+            if (inQuotes) {
+                throw new Error('The file has a quotation mark (") that is never closed, so the rest of the file would be read as one value. Please check the quoting (e.g. re-save the file as CSV from the spreadsheet).');
+            }
             if (currentField.length > 0 || fieldQuoted || currentRow.length > 0) {
                 finishField();
                 if (currentRow.some(val => val.length > 0)) {
@@ -217,16 +222,22 @@
             // Deduplicate headers if any (renames are reported to the user via renamedHeaders)
             const seenHeaders = {};
             const renamedHeaders = [];
+            // A new name never collides with any other header in the file (e.g. "a, a, a_2" gives a, a_3, a_2),
+            // and names that would alter the row objects themselves are renamed
+            const reserved = new Set(rawHeaders.map((h, idx) => (h || `Column_${idx + 1}`).trim()));
+            const used = new Set();
+            const UNSAFE = new Set(['__proto__', 'constructor', 'prototype']);
             const headers = rawHeaders.map((h, idx) => {
-                let name = (h || `Column_${idx + 1}`).trim();
-                if (seenHeaders[name]) {
-                    seenHeaders[name]++;
-                    const renamed = `${name}_${seenHeaders[name]}`;
-                    renamedHeaders.push({ column: idx + 1, from: name, to: renamed });
-                    name = renamed;
-                } else {
-                    seenHeaders[name] = 1;
+                const original = (h || `Column_${idx + 1}`).trim();
+                let name = original;
+                if (used.has(name) || UNSAFE.has(name)) {
+                    let k = seenHeaders[original] = (seenHeaders[original] || 1) + 1;
+                    while (used.has(`${original}_${k}`) || reserved.has(`${original}_${k}`)) k++;
+                    seenHeaders[original] = k;
+                    name = `${original}_${k}`;
+                    renamedHeaders.push({ column: idx + 1, from: original, to: name });
                 }
+                used.add(name);
                 return name;
             });
 
@@ -250,8 +261,18 @@
                 totalRows: dataRows.length,
                 totalCols: headers.length,
                 raggedRowCount,
-                renamedHeaders
+                renamedHeaders,
+                malformedQuoteCount
             };
+        },
+
+        /** Problems found while reading a CSV file, as messages for the user (same checks for every upload) */
+        parseIssues(parsed) {
+            const out = [];
+            if (parsed.renamedHeaders && parsed.renamedHeaders.length) out.push(`Duplicate column name(s) were renamed so every column is unique:\n${parsed.renamedHeaders.map(r => `• column ${r.column}: "${r.from}" → "${r.to}"`).join('\n')}`);
+            if (parsed.malformedQuoteCount > 0) out.push(`${parsed.malformedQuoteCount} cell(s) have text after a closing quotation mark (e.g. "abc"def). The text was kept as part of the value; please check the file's quoting.`);
+            if (parsed.raggedRowCount > 0) out.push(`${parsed.raggedRowCount} row(s) have a different number of cells from the header row. Short rows were padded with blanks (treated as missing) and extra cells were ignored. Please check the file's delimiters and quoting.`);
+            return out;
         },
 
         /**
@@ -262,7 +283,11 @@
             const str = String(val).trim();
             if (str === '') return true;
             const lower = str.toLowerCase();
-            return lower === 'na' || lower === 'nan' || lower === 'null' || lower === 'none' || lower === '?' || lower === '.' || lower === 'n/a';
+            if (lower === 'na' || lower === 'nan' || lower === 'null' || lower === 'none' || lower === '?' || lower === '.' || lower === 'n/a') return true;
+            // Infinite numbers ("Infinity", "-inf", "1e999") cannot be used in any calculation: treated as missing
+            if (/^[+-]?inf(inity)?$/.test(lower)) return true;
+            const n = Number(str);
+            return typeof val === 'number' ? !isFinite(val) : (!isNaN(n) && !isFinite(n));
         },
 
         /**

@@ -103,6 +103,7 @@ function executePipelineStep1() {
 
     // Save pipeline state
     AppState.pipeline.trainRows = trainTransformed.rows;
+    AppState.pipeline.trainRawRows = trainRaw; // same patients and order, before imputation (for leak-free CV folds)
     AppState.pipeline.testRows = testTransformed.rows;
     AppState.pipeline.imputer = imputer;
     AppState.pipeline.featureCols = featureCols;

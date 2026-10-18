@@ -38,6 +38,7 @@ async function loadSampleBatchDataset() {
 function processBatchCSV(csvText, name) {
     try {
         const parsed = DataEngine.parseCSV(csvText);
+        DataEngine.parseIssues(parsed).forEach(msg => alert(msg));
         AppState.batchData = parsed;
         AppState.batchFileName = name;
         DOM.runBatchPredictBtn.disabled = false;
@@ -168,20 +169,14 @@ function downloadBatchCSV() {
     if (!AppState.batchPredictions || AppState.batchPredictions.length === 0) return;
 
     const headers = Object.keys(AppState.batchPredictions[0]);
-    const lines = [headers.map(h => (/[",\r\n]/.test(h) ? `"${h.replace(/"/g, '""')}"` : h)).join(',')];
-
-    AppState.batchPredictions.forEach(row => {
-        const line = headers.map(h => {
-            let val = String(row[h] !== undefined ? row[h] : '');
-            // Prevent spreadsheet formula execution from cell contents
-            if (/^[=+\-@\t\r]/.test(val) && isNaN(Number(val))) val = `'${val}`;
-            if (/[",\r\n]/.test(val)) {
-                val = `"${val.replace(/"/g, '""')}"`;
-            }
-            return val;
-        }).join(',');
-        lines.push(line);
-    });
+    // Every cell, headers included: text a spreadsheet would run as a formula gets a leading apostrophe
+    const cell = raw => {
+        let val = String(raw !== undefined ? raw : '');
+        if (/^[=+\-@\t\r]/.test(val) && isNaN(Number(val))) val = `'${val}`;
+        return /[",\r\n]/.test(val) ? `"${val.replace(/"/g, '""')}"` : val;
+    };
+    const lines = [headers.map(cell).join(',')];
+    AppState.batchPredictions.forEach(row => { lines.push(headers.map(h => cell(row[h])).join(',')); });
 
     const csvString = lines.join('\r\n');
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });

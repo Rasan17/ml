@@ -2,6 +2,7 @@
 import { AppState, actionAttrs, escapeHtml } from './core.js';
 import { DOM } from './shell.js';
 import { renderPredictorBudget } from './predictor-budget.js';
+import { pipelineGroupFunction } from './cv-tuning.js';
 
 // =========================================================================
 // STEP 2: Continuous Variable Correlation Check (Pearson vs. Spearman)
@@ -335,7 +336,7 @@ function renderPipelineBudget() {
     const ticked = cbs.length ? cbs.filter(cb => cb.checked).map(cb => cb.dataset.feature).filter(Boolean) : P.featureCols.filter(c => !P.droppedFeatures.has(c));
     renderPredictorBudget('pipeline-budget-container', {
         rows: P.trainRows, featureCols: ticked, targetCol: P.targetCol, columnConfigs: P.columnConfigs,
-        trainLabel: 'the pipeline Training set', candidateCols: P.featureCols
+        trainLabel: 'the pipeline Training set', candidateCols: P.featureCols, groupOf: pipelineGroupFunction()
     });
 }
 

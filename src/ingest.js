@@ -5,6 +5,8 @@ import { goToPipelineSubstep, initPipelineUI } from './pipeline.js';
 import { offerStoredSettings } from './settings.js';
 import { DOM } from './shell.js';
 import { disposeModels } from './training-actions.js';
+import { cancelAll } from './compute.js';
+import { clearImputationCache } from './multiple-imputation.js';
 // Known built-in cohorts and their matching validation (testing) files
 const SAMPLE_COHORTS = {
     'universal_medical_cohort.csv': { id: 'cardio', testFile: 'universal_medical_test_cohort.csv', testLabel: 'Cardiometabolic Risk Test Cohort' },
@@ -33,6 +35,7 @@ function createEmptyPipelineState(seed = 42) {
         evalSeed: seed,
         imputeStrategy: 'median',
         trainRows: null,
+        trainRawRows: null,
         testRows: null,
         balancedTrainRows: null,
         imputer: null,
@@ -60,6 +63,8 @@ function createEmptyPipelineState(seed = 42) {
 
 // Clears every result derived from a previous dataset so nothing stale can be trained or predicted on
 function resetDerivedState() {
+    // Identifies the loaded dataset: a training run started on an earlier dataset never installs its results
+    AppState.datasetRun = (AppState.datasetRun || 0) + 1;
     // Free GPU memory of every model from the previous dataset (including the deployed one)
     const oldModels = [
         ...((AppState.allTestedResults || []).map(r => r.model)),
@@ -79,6 +84,22 @@ function resetDerivedState() {
     AppState.deployedSource = null;
     AppState.deployedPipelineModel = null;
     AppState.baselinePrepMeta = null;
+    // Patient rows from other files and results computed on them (batch file, separate validation cohort,
+    // external validation, odds-ratio and permutation inputs) belong to the previous analysis too
+    AppState.batchData = null;
+    AppState.batchFileName = null;
+    AppState.externalValidation = null;
+    AppState.separateTestRawRows = null;
+    AppState.separateTestFileName = null;
+    AppState.lastTestRows = null;
+    AppState.baselineTestRawRows = null;
+    AppState.orRawRows = null;
+    AppState.importedModelInfo = null;
+    AppState.deployedModelId = null;
+    AppState.tuningReport = null;
+    cancelAll('A new dataset was loaded.');
+    clearImputationCache();
+    { const ev = document.getElementById('external-validation-container'); if (ev) ev.innerHTML = ''; }
     AppState.completeCase = false;
     AppState.missingIndicators = false;
     const pipelineCC = document.getElementById('pipeline-complete-case');
@@ -109,7 +130,7 @@ function resetDerivedState() {
     if (DOM.singlePredictProvenanceBar) DOM.singlePredictProvenanceBar.style.display = 'none';
     if (DOM.batchPredictProvenanceBar) DOM.batchPredictProvenanceBar.style.display = 'none';
     if (DOM.pipelineActiveDeploymentStatus) {
-        DOM.pipelineActiveDeploymentStatus.innerHTML = 'Select any model from the leaderboard to deploy for real-time patient predictions.';
+        DOM.pipelineActiveDeploymentStatus.innerHTML = 'Choose a model from the leaderboard to use for research predictions in Steps 5 and 6.';
     }
     if (DOM.stepTabs) DOM.stepTabs.forEach(t => t.classList.remove('completed'));
 }
@@ -121,13 +142,7 @@ function processCSVContent(csvText, name) {
         AppState.sampleCohortFile = null; // set again by loadSampleDataset for built-in cohorts
         AppState.parsedData = parsed;
         AppState.fileName = name;
-        if (parsed.renamedHeaders && parsed.renamedHeaders.length > 0) {
-            alert(`Duplicate column name(s) were renamed so every column is unique:\n` +
-                parsed.renamedHeaders.map(r => `• column ${r.column}: "${r.from}" → "${r.to}"`).join('\n'));
-        }
-        if (parsed.raggedRowCount > 0) {
-            alert(`${parsed.raggedRowCount} row(s) have a different number of cells from the header row. Short rows were padded with blanks (treated as missing) and extra cells were ignored. Please check the file's delimiters and quoting.`);
-        }
+        DataEngine.parseIssues(parsed).forEach(msg => alert(msg));
 
         const analysis = DataEngine.analyzeColumns(parsed.headers, parsed.rows);
         AppState.columnAnalysis = analysis;

@@ -17,6 +17,7 @@ async function startModelTraining() {
     }
 
     const watchdog = AppState.watchdogs ? AppState.watchdogs.step4 : null;
+    const runDataset = AppState.datasetRun; // results are installed only if the same dataset is still loaded
 
     try {
         DOM.trainModelBtn.disabled = true;
@@ -583,6 +584,7 @@ async function startModelTraining() {
         // Sort tested models by out-of-sample performance (macro-F1 then AUC for classification; R² for regression)
         testedResults.sort((a, b) => compareEvalResults(a.evalRes, b.evalRes, prep.isClassification));
 
+        if (AppState.datasetRun !== runDataset) throw new Error('A different dataset was loaded while the models were training, so these results were discarded.');
         const previousResults = AppState.allTestedResults;
         AppState.allTestedResults = testedResults;
         // Designate top-performing model as champion
@@ -617,7 +619,7 @@ async function startModelTraining() {
             DOM.trainStatus.innerHTML = `
                 <div style="display: flex; flex-direction: column; gap: 3px;">
                     <span style="color: var(--accent-emerald); font-weight: 700;">
-                        ✓ Successfully Evaluated &amp; Deployed ${champion.info.name}!
+                        ✓ Evaluation Complete: ${champion.info.name} is the active research model
                     </span>
                     <span style="font-size: 11.5px; color: var(--text-secondary);">
                         Reported Benchmark: <strong>${accText}</strong> &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px;">🌱 ${champion.evalRes.seed !== null ? champion.evalRes.seed : 'Auto'}</code> &bull; Active Predictor: <strong>${champion.info.name} (${champion.retrained ? '100% Cohort Retrained' : (isOptionA ? `${singleRes.trainPct}% Split Model` : 'Dataset i Fitted')})</strong>

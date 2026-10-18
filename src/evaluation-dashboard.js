@@ -6,6 +6,14 @@ import { DOM } from './shell.js';
 import { renderSubgroupPanel } from './subgroups.js';
 import { syncRankingSelectors } from './training-actions.js';
 
+// Accuracy interval: the bootstrap interval when one was computed (it resamples patients, not rows, when a
+// patient-ID column is set, so it respects repeated records); otherwise Wilson's interval on the rows
+function accuracyInterval(ev) {
+    if (ev && ev.ci && Array.isArray(ev.ci.accuracy) && ev.ci.accuracy.length === 2) return { ci: ev.ci.accuracy, label: ev.ci.clustered ? 'bootstrap over patients' : 'bootstrap' };
+    if (ev && Array.isArray(ev.accuracyCI) && ev.accuracyCI.length === 2) return { ci: ev.accuracyCI, label: 'Wilson' };
+    return null;
+}
+
 function renderEvaluationDashboard() {
     const evalRes = AppState.evalResults;
     const prep = AppState.prepMeta;
@@ -196,7 +204,7 @@ function renderEvaluationDashboard() {
 
                 const rankBadge = isChampion ? '🥇 #1' : (idx === 1 ? '🥈 #2' : (idx === 2 ? '🥉 #3' : `#${idx + 1}`));
                 const scoreDisplay = rEval.isClassification 
-                    ? `<strong style="color: var(--accent-cyan); font-size: 14.5px;">${(rEval.accuracy * 100).toFixed(1)}%</strong>${Array.isArray(rEval.accuracyCI) && rEval.accuracyCI.length === 2 ? `<div style="font-size: 10px; color: var(--text-muted);">95% CI ${(rEval.accuracyCI[0] * 100).toFixed(0)}–${(rEval.accuracyCI[1] * 100).toFixed(0)}%</div>` : ''}`
+                    ? `<strong style="color: var(--accent-cyan); font-size: 14.5px;">${(rEval.accuracy * 100).toFixed(1)}%</strong>${accuracyInterval(rEval) ? `<div style="font-size: 10px; color: var(--text-muted);">95% CI ${(accuracyInterval(rEval).ci[0] * 100).toFixed(0)}–${(accuracyInterval(rEval).ci[1] * 100).toFixed(0)}%</div>` : ''}`
                     : `<strong style="color: var(--accent-cyan); font-size: 14.5px;">R²: ${fmtR2(rEval.r2)}</strong>${ciSpan(rEval, 'r2')}`;
 
                 const rocAucDisplay = rEval.isClassification 
@@ -224,8 +232,8 @@ function renderEvaluationDashboard() {
                     : `<span style="font-size: 11px; color: var(--text-muted); font-family: monospace;">N/A</span>`;
 
                 const deployBtn = isDeployed
-                    ? `<span class="pill pill-target" style="background: rgba(16, 185, 129, 0.2); color: var(--tag-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.4);">✓ Active Predictor</span>`
-                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="padding: 4px 10px; font-size: 11px; cursor: pointer;">Deploy Model</button>`;
+                    ? `<span class="pill pill-target" style="background: rgba(16, 185, 129, 0.2); color: var(--tag-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.4);">✓ Active research model</span>`
+                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="padding: 4px 10px; font-size: 11px; cursor: pointer;" title="Make this the active research model for Steps 5 and 6">Use this model</button>`;
 
                 lbRows += `
                     <tr style="${isDeployed ? 'background: rgba(6, 182, 212, 0.05);' : ''}">
@@ -441,7 +449,7 @@ function renderEvaluationDashboard() {
                 <div class="metric-pill-card">
                     <span class="m-title">${testAccLabel}</span>
                     <span class="m-val">${(evalRes.accuracy * 100).toFixed(1)}%</span>
-                    ${Array.isArray(evalRes.accuracyCI) && evalRes.accuracyCI.length === 2 ? `<span style="font-size: 11px; color: var(--text-muted);">95% CI ${(evalRes.accuracyCI[0] * 100).toFixed(1)}–${(evalRes.accuracyCI[1] * 100).toFixed(1)}% (Wilson)</span>` : ''}
+                    ${accuracyInterval(evalRes) ? `<span style="font-size: 11px; color: var(--text-muted);">95% CI ${(accuracyInterval(evalRes).ci[0] * 100).toFixed(1)}–${(accuracyInterval(evalRes).ci[1] * 100).toFixed(1)}% (${accuracyInterval(evalRes).label})</span>` : ''}
                 </div>
                 ${typeof evalRes.balancedAccuracy === 'number' ? `
                 <div class="metric-pill-card">

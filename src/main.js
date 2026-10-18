@@ -2,7 +2,7 @@
 // Loads every module, initialises the shared state and starts the interface once the page is ready.
 import { AppState } from './core.js';
 import './watchdog.js';
-import './compute.js';
+import { cancelAll } from './compute.js';
 import './validation-core.js';
 import { initDOM, setupEventListeners } from './shell.js';
 import './navigation.js';
@@ -12,7 +12,7 @@ import './imputation.js';
 import './training-setup.js';
 import { renderSampleSizePanel } from './panels.js';
 import './subgroups.js';
-import { loadImputedDataFile, saveImputedData, updateImputationEstimate, updateImputedDataButtons } from './multiple-imputation.js';
+import { clearImputationCache, loadImputedDataFile, saveImputedData, updateImputationEstimate, updateImputedDataButtons } from './multiple-imputation.js';
 import './cv-tuning.js';
 import './standard-training.js';
 import './training-actions.js';
@@ -39,11 +39,16 @@ AppState.pipeline = createEmptyPipelineState(42);
 window.addEventListener('error', (e) => handleUnexpectedError(e.error || e.message));
 window.addEventListener('unhandledrejection', (e) => handleUnexpectedError(e.reason));
 
-// Delegated handling of controls marked with data-action (see actionAttrs in core.js): window[fn] is called
-// with the stored arguments, then the selected index (for a change) and the event. No inline handlers.
+// Delegated handling of controls marked with data-action (see actionAttrs in core.js): the named action is
+// called with the stored arguments, then the selected index (for a change) and the event. No inline handlers.
+// Only the actions listed here can run, whatever a page element names (never an arbitrary global function).
+const ACTIONS = new Set(['copySeedToClipboard', 'deployPipelineModel', 'deployTestedModel', 'goToStep', 'launch7StepPipeline',
+    'pipelineDropFeature', 'pipelineDropFeatureStep4', 'pipelineKeepBothPairs', 'pipelineRestoreFeatureStep4', 'pipelineToggleReinstateFeature', 'renderCalibrationChoice', 'runMiceOddsRatios',
+    'runPermutationImportance', 'switchToBaselineModel', 'switchToPipelineModel', 'trainStandardBaselineFromPipeline']);
 function runAction(e, kind) {
     const el = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
     if (!el || (el.dataset.event || 'click') !== kind) return;
+    if (!ACTIONS.has(el.dataset.action)) return;
     const fn = window[el.dataset.action];
     if (typeof fn !== 'function') return;
     let args = [];
@@ -73,6 +78,27 @@ function start() {
         e.target.value = '';
     });
     updateImputedDataButtons();
+    // Start page task choice
+    document.getElementById('task-develop')?.addEventListener('click', () => {
+        const input = document.getElementById('csv-file-input');
+        document.getElementById('step-1-content')?.querySelector('.card')?.scrollIntoView({ behavior: 'smooth' });
+        if (input) input.click();
+    });
+    document.getElementById('task-validate')?.addEventListener('click', () => {
+        // The file dialog opens straight away (a dialog box first would block it in some browsers); the steps are shown below
+        document.getElementById('model-import-btn')?.click();
+        const hint = document.getElementById('task-hint');
+        if (hint) { hint.style.display = 'block'; hint.textContent = 'Validating a shared model: 1) choose the model file in the window that opened (or click "📥 Import trained model"); 2) in Step 6, upload a CSV of your patients that includes the outcome column. You get discrimination, calibration and clinical usefulness on your patients, with a printable validation report; no patient data leave your computer.'; }
+    });
+    document.getElementById('task-demo')?.addEventListener('click', () => document.getElementById('sample-shunt-large-btn')?.click());
+    // Clear session: stops background work and reloads the page, which discards every dataset, result, model and
+    // cached imputation held in memory. Browser storage holds only saved settings (choices and column names).
+    document.getElementById('clear-session-btn')?.addEventListener('click', () => {
+        if (!confirm('Remove all data from this page?\n\nEvery loaded dataset, result, trained model and cached imputation is discarded (files you saved are not affected). Saved analysis settings remembered in this browser contain no patient values and are kept.')) return;
+        cancelAll('Session cleared.');
+        clearImputationCache();
+        location.reload();
+    });
     // Keep the sample-size check in step with the chosen split and validation protocol
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
         const el = document.getElementById(id);

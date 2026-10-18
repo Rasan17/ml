@@ -44,6 +44,15 @@ const vm = require('vm');
 const bundlePath = path.join(__dirname, '..', 'dist', 'app.bundle.js');
 try { new vm.Script(fs.readFileSync(bundlePath, 'utf8'), { filename: 'dist/app.bundle.js' }); } catch (e) { problems.push(`dist/app.bundle.js does not compile (${e.message}): rename the clashing top-level name and run node tools/build.js`); }
 
+// Every data-action used in the modules or the page must be in main.js's list of allowed actions
+{
+    const allowed = new Set((fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8').match(/const ACTIONS = new Set\(\[([\s\S]*?)\]\)/) || [, ''])[1].match(/'[^']+'/g)?.map(x => x.slice(1, -1)) || []);
+    const used = new Set();
+    files.forEach(f => { for (const mm of mod[f].code.matchAll(/actionAttrs\('([^']+)'/g)) used.add(mm[1]); });
+    for (const mm of fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8').matchAll(/data-action="([^"]+)"/g)) used.add(mm[1]);
+    used.forEach(a => { if (!allowed.has(a)) problems.push(`data-action "${a}" is not in the ACTIONS list of src/main.js, so it would not run`); });
+}
+
 if (problems.length) {
     console.log(problems.join('\n'));
     console.log(`\n${problems.length} module problem(s)`);

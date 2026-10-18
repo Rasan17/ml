@@ -178,7 +178,7 @@ function cssEscape(value) {
 }
 
 // Software version recorded in exported reports and settings files
-const APP_VERSION = '2026.10.17';
+const APP_VERSION = '2026.10.18';
 // Stamped on every exported report, model file and checklist
 const RESEARCH_USE_NOTICE = 'Investigational research and education use only. Not a certified medical device; not validated for individual clinical decisions.';
 
@@ -852,8 +852,13 @@ function effectiveFolds(rows, k, isClassification, targetCol, groupOf = null) {
     if (!isClassification) return k;
     const members = {};
     rows.forEach((r, i) => { const v = String(r[targetCol]).trim(); (members[v] = members[v] || new Set()).add(groupOf ? groupOf(r) : i); });
-    const minority = Math.min(...Object.values(members).map(s => s.size));
-    return Math.max(2, Math.min(k, minority));
+    const sizes = Object.entries(members).map(([v, s]) => [v, s.size]).sort((a, b) => a[1] - b[1]);
+    const minority = sizes.length ? sizes[0][1] : 0;
+    // With one patient in an outcome group, some fold would train without that outcome: not estimable
+    if (sizes.length < 2 || minority < 2) {
+        throw new Error(`Cross-validation is not possible: ${sizes.length < 2 ? 'the training rows contain only one outcome group' : `only ${minority} ${groupOf ? 'patient' : 'record'} in the outcome group "${sizes[0][0]}"`}. At least 2 are needed (and far more for meaningful results); switch off automatic tuning, cross-validated model selection and recalibration, or use more patients.`);
+    }
+    return Math.min(k, minority);
 }
 
 // Leak-free folds from raw rows: imputation, encoding and scaling are fitted on each fold's learning
@@ -872,6 +877,7 @@ async function buildRowFolds(rawRows, k, o, onFold) {
         const vaImp = DataEngine.imputeDataset(va, configs, analysis, trImp.plan);
         const prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, configs);
         const te = DataEngine.prepareTestingDataset(vaImp.imputedRows, prep);
+        if (isClassification && te.unknownClassCount) throw new Error(`Cross-validation is not possible: fold ${f + 1} has an outcome group that its training rows lack. Use fewer folds or more patients.`);
         sets.push({ Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses });
         if (onFold) onFold(f + 1, k);
         await ModelEngine.yieldToBrowser();
@@ -1890,6 +1896,7 @@ function handleTestFileUpload(file) {
 function processTestingCSVContent(csvText, fileName) {
     try {
         const parsed = DataEngine.parseCSV(csvText);
+        DataEngine.parseIssues(parsed).forEach(msg => alert(msg));
         const rows = parsed && parsed.rows ? parsed.rows : null;
         if (!rows || rows.length === 0) {
             alert("The uploaded testing CSV appears to be empty or unparseable.");
@@ -2124,6 +2131,8 @@ function handleFileUpload(file) {
 
 
 
+
+
 // Known built-in cohorts and their matching validation (testing) files
 const SAMPLE_COHORTS = {
     'universal_medical_cohort.csv': { id: 'cardio', testFile: 'universal_medical_test_cohort.csv', testLabel: 'Cardiometabolic Risk Test Cohort' },
@@ -2152,6 +2161,7 @@ function createEmptyPipelineState(seed = 42) {
         evalSeed: seed,
         imputeStrategy: 'median',
         trainRows: null,
+        trainRawRows: null,
         testRows: null,
         balancedTrainRows: null,
         imputer: null,
@@ -2179,6 +2189,8 @@ function createEmptyPipelineState(seed = 42) {
 
 // Clears every result derived from a previous dataset so nothing stale can be trained or predicted on
 function resetDerivedState() {
+    // Identifies the loaded dataset: a training run started on an earlier dataset never installs its results
+    AppState.datasetRun = (AppState.datasetRun || 0) + 1;
     // Free GPU memory of every model from the previous dataset (including the deployed one)
     const oldModels = [
         ...((AppState.allTestedResults || []).map(r => r.model)),
@@ -2198,6 +2210,22 @@ function resetDerivedState() {
     AppState.deployedSource = null;
     AppState.deployedPipelineModel = null;
     AppState.baselinePrepMeta = null;
+    // Patient rows from other files and results computed on them (batch file, separate validation cohort,
+    // external validation, odds-ratio and permutation inputs) belong to the previous analysis too
+    AppState.batchData = null;
+    AppState.batchFileName = null;
+    AppState.externalValidation = null;
+    AppState.separateTestRawRows = null;
+    AppState.separateTestFileName = null;
+    AppState.lastTestRows = null;
+    AppState.baselineTestRawRows = null;
+    AppState.orRawRows = null;
+    AppState.importedModelInfo = null;
+    AppState.deployedModelId = null;
+    AppState.tuningReport = null;
+    cancelAll('A new dataset was loaded.');
+    clearImputationCache();
+    { const ev = document.getElementById('external-validation-container'); if (ev) ev.innerHTML = ''; }
     AppState.completeCase = false;
     AppState.missingIndicators = false;
     const pipelineCC = document.getElementById('pipeline-complete-case');
@@ -2228,7 +2256,7 @@ function resetDerivedState() {
     if (DOM.singlePredictProvenanceBar) DOM.singlePredictProvenanceBar.style.display = 'none';
     if (DOM.batchPredictProvenanceBar) DOM.batchPredictProvenanceBar.style.display = 'none';
     if (DOM.pipelineActiveDeploymentStatus) {
-        DOM.pipelineActiveDeploymentStatus.innerHTML = 'Select any model from the leaderboard to deploy for real-time patient predictions.';
+        DOM.pipelineActiveDeploymentStatus.innerHTML = 'Choose a model from the leaderboard to use for research predictions in Steps 5 and 6.';
     }
     if (DOM.stepTabs) DOM.stepTabs.forEach(t => t.classList.remove('completed'));
 }
@@ -2240,13 +2268,7 @@ function processCSVContent(csvText, name) {
         AppState.sampleCohortFile = null; // set again by loadSampleDataset for built-in cohorts
         AppState.parsedData = parsed;
         AppState.fileName = name;
-        if (parsed.renamedHeaders && parsed.renamedHeaders.length > 0) {
-            alert(`Duplicate column name(s) were renamed so every column is unique:\n` +
-                parsed.renamedHeaders.map(r => `• column ${r.column}: "${r.from}" → "${r.to}"`).join('\n'));
-        }
-        if (parsed.raggedRowCount > 0) {
-            alert(`${parsed.raggedRowCount} row(s) have a different number of cells from the header row. Short rows were padded with blanks (treated as missing) and extra cells were ignored. Please check the file's delimiters and quoting.`);
-        }
+        DataEngine.parseIssues(parsed).forEach(msg => alert(msg));
 
         const analysis = DataEngine.analyzeColumns(parsed.headers, parsed.rows);
         AppState.columnAnalysis = analysis;
@@ -2363,6 +2385,7 @@ function renderDataOverview() {
 
 // ---- src/variables.js ----
 // variables.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+
 
 
 
@@ -2546,7 +2569,8 @@ function renderVariableIncludeSummary() {
     renderPredictorBudget('predictor-budget-container', {
         rows: AppState.parsedData.rows, featureCols: headers.filter(h => cfgs[h].role === 'feature'), targetCol: target, columnConfigs: cfgs,
         trainFraction: mode === 'split' ? pct / 100 : 1,
-        trainLabel: mode === 'split' ? `the ${pct}% Training set of Option A; Options B and C train on all loaded patients` : (mode === 'bootstrap' ? 'all patients, Option C' : 'all loaded patients, Option B')
+        trainLabel: mode === 'split' ? `the ${pct}% Training set of Option A; Options B and C train on all loaded patients` : (mode === 'bootstrap' ? 'all patients, Option C' : 'all loaded patients, Option B'),
+        groupOf: splitGroupFunction()
     });
 }
 
@@ -4391,7 +4415,10 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const targetCol = p.targetCol;
     const isClassification = p.columnConfigs[targetCol]?.type !== 'continuous';
     const groupOf = pipelineGroupFunction();
-    const cap = capRows(trainRows, isClassification, targetCol, seed, groupOf);
+    // Folds are built from the raw (not yet imputed) training records, and the Step 1 imputation is refitted on
+    // each fold's learning rows, so a fold's validation patients never influence the values filled in
+    const raw = p.trainRawRows && p.trainRawRows.length === trainRows.length ? p.trainRawRows : null;
+    const cap = capRows(raw || trainRows, isClassification, targetCol, seed, groupOf);
     const rows = cap.rows;
     const sampled = cap.sampled;
     const requestedFolds = k;
@@ -4403,8 +4430,14 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const sets = [];
     const selections = [];
     for (let f = 0; f < k; f++) {
-        const tr = rows.filter((_, i) => fold[i] !== f);
-        const va = rows.filter((_, i) => fold[i] === f);
+        let tr = rows.filter((_, i) => fold[i] !== f);
+        let va = rows.filter((_, i) => fold[i] === f);
+        let foldImputer = p.imputer;
+        if (raw) {
+            foldImputer = DataEngine.fitStrictImputer(tr, p.featureCols, targetCol, p.columnConfigs, p.imputeStrategy || 'median');
+            tr = DataEngine.transformWithStrictImputer(tr, foldImputer, p.columnConfigs).rows;
+            va = DataEngine.transformWithStrictImputer(va, foldImputer, p.columnConfigs).rows;
+        }
         const balanced = DataEngine.applySMOTENC(tr, cols, targetCol, p.columnConfigs, seed).balancedRows;
         let foldCols = cols, foldCfg = cfg;
         if (inFoldSelection) {
@@ -4416,13 +4449,13 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
             foldCfg[targetCol] = p.columnConfigs[targetCol];
         }
         const prep = DataEngine.prepareDataset(balanced, foldCfg, foldCols, targetCol);
-        prep.fillValues = { ...(p.imputer ? p.imputer.fillValues : {}) };
+        prep.fillValues = { ...(foldImputer ? foldImputer.fillValues : {}) };
         const te = DataEngine.prepareTestingDataset(va, prep);
         sets.push({ Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses });
         if (onFold) onFold(f + 1, k);
         await ModelEngine.yieldToBrowser(); // keep the page responsive between folds
     }
-    return { sets, rowsUsed: rows.length, rowsTotal: trainRows.length, sampled, grouped: Boolean(groupOf), selections: inFoldSelection ? selections : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds };
+    return { sets, rowsUsed: rows.length, rowsTotal: trainRows.length, sampled, grouped: Boolean(groupOf), imputationRefitted: Boolean(raw), selections: inFoldSelection ? selections : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds };
 }
 
 // Show the chosen settings in the model's settings panel (so they are visible and saved with Save settings)
@@ -4509,6 +4542,7 @@ async function startModelTraining() {
     }
 
     const watchdog = AppState.watchdogs ? AppState.watchdogs.step4 : null;
+    const runDataset = AppState.datasetRun; // results are installed only if the same dataset is still loaded
 
     try {
         DOM.trainModelBtn.disabled = true;
@@ -5075,6 +5109,7 @@ async function startModelTraining() {
         // Sort tested models by out-of-sample performance (macro-F1 then AUC for classification; R² for regression)
         testedResults.sort((a, b) => compareEvalResults(a.evalRes, b.evalRes, prep.isClassification));
 
+        if (AppState.datasetRun !== runDataset) throw new Error('A different dataset was loaded while the models were training, so these results were discarded.');
         const previousResults = AppState.allTestedResults;
         AppState.allTestedResults = testedResults;
         // Designate top-performing model as champion
@@ -5109,7 +5144,7 @@ async function startModelTraining() {
             DOM.trainStatus.innerHTML = `
                 <div style="display: flex; flex-direction: column; gap: 3px;">
                     <span style="color: var(--accent-emerald); font-weight: 700;">
-                        ✓ Successfully Evaluated &amp; Deployed ${champion.info.name}!
+                        ✓ Evaluation Complete: ${champion.info.name} is the active research model
                     </span>
                     <span style="font-size: 11.5px; color: var(--text-secondary);">
                         Reported Benchmark: <strong>${accText}</strong> &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px;">🌱 ${champion.evalRes.seed !== null ? champion.evalRes.seed : 'Auto'}</code> &bull; Active Predictor: <strong>${champion.info.name} (${champion.retrained ? '100% Cohort Retrained' : (isOptionA ? `${singleRes.trainPct}% Split Model` : 'Dataset i Fitted')})</strong>
@@ -5315,7 +5350,7 @@ function deployTestedModel(modelId) {
         renderSinglePredictionForm();
     }
 
-    showSeedToast(`✓ Deployed "${displayModelName(modelId, targetItem.model)}" as the active predictor for Steps 5 & 6`);
+    showSeedToast(`✓ "${displayModelName(modelId, targetItem.model)}" is now the active research model for Steps 5 & 6`);
 }
 
 // A Step 4 (standard workflow) model is now active: record that, and restore the encoding it was
@@ -5366,6 +5401,14 @@ window.copySeedToClipboard = copySeedToClipboard;
 
 
 
+
+// Accuracy interval: the bootstrap interval when one was computed (it resamples patients, not rows, when a
+// patient-ID column is set, so it respects repeated records); otherwise Wilson's interval on the rows
+function accuracyInterval(ev) {
+    if (ev && ev.ci && Array.isArray(ev.ci.accuracy) && ev.ci.accuracy.length === 2) return { ci: ev.ci.accuracy, label: ev.ci.clustered ? 'bootstrap over patients' : 'bootstrap' };
+    if (ev && Array.isArray(ev.accuracyCI) && ev.accuracyCI.length === 2) return { ci: ev.accuracyCI, label: 'Wilson' };
+    return null;
+}
 
 function renderEvaluationDashboard() {
     const evalRes = AppState.evalResults;
@@ -5557,7 +5600,7 @@ function renderEvaluationDashboard() {
 
                 const rankBadge = isChampion ? '🥇 #1' : (idx === 1 ? '🥈 #2' : (idx === 2 ? '🥉 #3' : `#${idx + 1}`));
                 const scoreDisplay = rEval.isClassification 
-                    ? `<strong style="color: var(--accent-cyan); font-size: 14.5px;">${(rEval.accuracy * 100).toFixed(1)}%</strong>${Array.isArray(rEval.accuracyCI) && rEval.accuracyCI.length === 2 ? `<div style="font-size: 10px; color: var(--text-muted);">95% CI ${(rEval.accuracyCI[0] * 100).toFixed(0)}–${(rEval.accuracyCI[1] * 100).toFixed(0)}%</div>` : ''}`
+                    ? `<strong style="color: var(--accent-cyan); font-size: 14.5px;">${(rEval.accuracy * 100).toFixed(1)}%</strong>${accuracyInterval(rEval) ? `<div style="font-size: 10px; color: var(--text-muted);">95% CI ${(accuracyInterval(rEval).ci[0] * 100).toFixed(0)}–${(accuracyInterval(rEval).ci[1] * 100).toFixed(0)}%</div>` : ''}`
                     : `<strong style="color: var(--accent-cyan); font-size: 14.5px;">R²: ${fmtR2(rEval.r2)}</strong>${ciSpan(rEval, 'r2')}`;
 
                 const rocAucDisplay = rEval.isClassification 
@@ -5585,8 +5628,8 @@ function renderEvaluationDashboard() {
                     : `<span style="font-size: 11px; color: var(--text-muted); font-family: monospace;">N/A</span>`;
 
                 const deployBtn = isDeployed
-                    ? `<span class="pill pill-target" style="background: rgba(16, 185, 129, 0.2); color: var(--tag-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.4);">✓ Active Predictor</span>`
-                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="padding: 4px 10px; font-size: 11px; cursor: pointer;">Deploy Model</button>`;
+                    ? `<span class="pill pill-target" style="background: rgba(16, 185, 129, 0.2); color: var(--tag-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.4);">✓ Active research model</span>`
+                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="padding: 4px 10px; font-size: 11px; cursor: pointer;" title="Make this the active research model for Steps 5 and 6">Use this model</button>`;
 
                 lbRows += `
                     <tr style="${isDeployed ? 'background: rgba(6, 182, 212, 0.05);' : ''}">
@@ -5802,7 +5845,7 @@ function renderEvaluationDashboard() {
                 <div class="metric-pill-card">
                     <span class="m-title">${testAccLabel}</span>
                     <span class="m-val">${(evalRes.accuracy * 100).toFixed(1)}%</span>
-                    ${Array.isArray(evalRes.accuracyCI) && evalRes.accuracyCI.length === 2 ? `<span style="font-size: 11px; color: var(--text-muted);">95% CI ${(evalRes.accuracyCI[0] * 100).toFixed(1)}–${(evalRes.accuracyCI[1] * 100).toFixed(1)}% (Wilson)</span>` : ''}
+                    ${accuracyInterval(evalRes) ? `<span style="font-size: 11px; color: var(--text-muted);">95% CI ${(accuracyInterval(evalRes).ci[0] * 100).toFixed(1)}–${(accuracyInterval(evalRes).ci[1] * 100).toFixed(1)}% (${accuracyInterval(evalRes).label})</span>` : ''}
                 </div>
                 ${typeof evalRes.balancedAccuracy === 'number' ? `
                 <div class="metric-pill-card">
@@ -6119,6 +6162,7 @@ async function loadSampleBatchDataset() {
 function processBatchCSV(csvText, name) {
     try {
         const parsed = DataEngine.parseCSV(csvText);
+        DataEngine.parseIssues(parsed).forEach(msg => alert(msg));
         AppState.batchData = parsed;
         AppState.batchFileName = name;
         DOM.runBatchPredictBtn.disabled = false;
@@ -6249,20 +6293,14 @@ function downloadBatchCSV() {
     if (!AppState.batchPredictions || AppState.batchPredictions.length === 0) return;
 
     const headers = Object.keys(AppState.batchPredictions[0]);
-    const lines = [headers.map(h => (/[",\r\n]/.test(h) ? `"${h.replace(/"/g, '""')}"` : h)).join(',')];
-
-    AppState.batchPredictions.forEach(row => {
-        const line = headers.map(h => {
-            let val = String(row[h] !== undefined ? row[h] : '');
-            // Prevent spreadsheet formula execution from cell contents
-            if (/^[=+\-@\t\r]/.test(val) && isNaN(Number(val))) val = `'${val}`;
-            if (/[",\r\n]/.test(val)) {
-                val = `"${val.replace(/"/g, '""')}"`;
-            }
-            return val;
-        }).join(',');
-        lines.push(line);
-    });
+    // Every cell, headers included: text a spreadsheet would run as a formula gets a leading apostrophe
+    const cell = raw => {
+        let val = String(raw !== undefined ? raw : '');
+        if (/^[=+\-@\t\r]/.test(val) && isNaN(Number(val))) val = `'${val}`;
+        return /[",\r\n]/.test(val) ? `"${val.replace(/"/g, '""')}"` : val;
+    };
+    const lines = [headers.map(cell).join(',')];
+    AppState.batchPredictions.forEach(row => { lines.push(headers.map(h => cell(row[h])).join(',')); });
 
     const csvString = lines.join('\r\n');
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
@@ -6477,6 +6515,7 @@ function executePipelineStep1() {
 
     // Save pipeline state
     AppState.pipeline.trainRows = trainTransformed.rows;
+    AppState.pipeline.trainRawRows = trainRaw; // same patients and order, before imputation (for leak-free CV folds)
     AppState.pipeline.testRows = testTransformed.rows;
     AppState.pipeline.imputer = imputer;
     AppState.pipeline.featureCols = featureCols;
@@ -6600,6 +6639,7 @@ function renderPipelineStep1Results(trainMissing = 0, testMissing = 0) {
 
 // ---- src/pipeline-screening.js ----
 // pipeline-screening.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from pipeline.js)
+
 
 
 
@@ -6935,7 +6975,7 @@ function renderPipelineBudget() {
     const ticked = cbs.length ? cbs.filter(cb => cb.checked).map(cb => cb.dataset.feature).filter(Boolean) : P.featureCols.filter(c => !P.droppedFeatures.has(c));
     renderPredictorBudget('pipeline-budget-container', {
         rows: P.trainRows, featureCols: ticked, targetCol: P.targetCol, columnConfigs: P.columnConfigs,
-        trainLabel: 'the pipeline Training set', candidateCols: P.featureCols
+        trainLabel: 'the pipeline Training set', candidateCols: P.featureCols, groupOf: pipelineGroupFunction()
     });
 }
 
@@ -7287,6 +7327,7 @@ function renderRfImportanceChart() {
 // STEP 7: Algorithm-Specific Training & Constraints
 // =========================================================================
 async function executePipelineStep7() {
+    const runDataset = AppState.datasetRun; // results are installed only if the same dataset is still loaded
     if (!AppState.pipeline.rfImportance || AppState.pipeline.rfImportance.length === 0) {
         alert("Please complete Step 6: Random Forest Scout & Feature Ranking first.");
         return;
@@ -7383,7 +7424,7 @@ async function executePipelineStep7() {
         const benchmarkList = [];
 
         // Protocol default settings; optional automatic tuning (cross-validation inside the real
-        // Training rows, SMOTENC re-applied within each fold) may replace them
+        // Training rows, imputation and SMOTENC re-applied within each fold) may replace them
         const evalSeed = AppState.pipeline.evalSeed;
         const pHp = {
             knn: { k: 5, metric: 'euclidean', weighting: 'distance', seed: evalSeed },
@@ -7411,7 +7452,7 @@ async function executePipelineStep7() {
                 const key = `${k}|${inFold ? 'sel' : ''}|${cols.join('␟')}`;
                 if (!foldCache[key]) {
                     foldCache[key] = await buildPipelineFolds(AppState.pipeline.trainRows, cols, k, evalSeed, (f, nf) => {
-                        if (watchdog) watchdog.tick(stepOf(stepId), `🎯 Preparing cross-validation folds for ${label}: fold ${f}/${nf} (SMOTENC, scaling${inFold ? ' and top-70% selection' : ''} inside each fold)...`);
+                        if (watchdog) watchdog.tick(stepOf(stepId), `🎯 Preparing cross-validation folds for ${label}: fold ${f}/${nf} (imputation, SMOTENC, scaling${inFold ? ' and top-70% selection' : ''} inside each fold)...`);
                     }, inFold);
                 }
                 return foldCache[key];
@@ -7557,6 +7598,7 @@ async function executePipelineStep7() {
         }
         // Store ranked best-first, so benchmarkResults[0] is genuinely the top model everywhere it is used
         benchmarkList.sort((a, b) => compareEvalResults(a.eval, b.eval, isClassification));
+        if (AppState.datasetRun !== runDataset) throw new Error('A different dataset was loaded while the models were training, so these results were discarded.');
         disposeModels((AppState.pipeline.benchmarkResults || []).map(b => b.model));
         AppState.pipeline.benchmarkResults = benchmarkList;
         AppState.pipeline.tuningReport = pipeTune ? pipeTuningReport : null;
@@ -7645,8 +7687,8 @@ function renderPipelineLeaderboardOnly() {
                             ✓ Active
                         </span>
                     ` : `
-                        <button class="btn btn-secondary btn-sm" ${actionAttrs('deployPipelineModel', item.id)} title="Deploy this model for live patient inference">
-                            🚀 Deploy
+                        <button class="btn btn-secondary btn-sm" ${actionAttrs('deployPipelineModel', item.id)} title="Make this the active research model for Steps 5 and 6">
+                            Use this model
                         </button>
                     `}
                 </td>
@@ -7995,7 +8037,7 @@ function deployPipelineModel(modelId, showNotice = true, skipRerender = false) {
     }
 
     if (showNotice) {
-        showSeedToast(`✓ Deployed "${targetItem.name}" as the active predictor for Steps 5 & 6`);
+        showSeedToast(`✓ "${targetItem.name}" is now the active research model for Steps 5 & 6`);
     }
 }
 window.deployPipelineModel = deployPipelineModel;
@@ -8011,12 +8053,12 @@ function updatePipelineActiveDeploymentStatus() {
     if (!DOM.pipelineActiveDeploymentStatus) return;
     if (AppState.deployedPipelineModel) {
         DOM.pipelineActiveDeploymentStatus.innerHTML = `
-            Currently Active Deployed Model: <strong style="color: var(--accent-emerald);">${escapeHtml(AppState.deployedPipelineModel.name)}</strong> 
+            Active research model: <strong style="color: var(--accent-emerald);">${escapeHtml(AppState.deployedPipelineModel.name)}</strong> 
             (${escapeHtml(AppState.deployedPipelineModel.eval.featuresUsed)}). 
             ${pipelineProvenanceSummary()} &bull; Ready for single-case and batch predictions (research use).
         `;
     } else {
-        DOM.pipelineActiveDeploymentStatus.innerHTML = `Select any model from the leaderboard to deploy for real-time patient predictions.`;
+        DOM.pipelineActiveDeploymentStatus.innerHTML = `Choose a model from the leaderboard to use for research predictions in Steps 5 and 6.`;
     }
 }
 
@@ -8557,6 +8599,7 @@ function downloadStandardAnalysisReport() {
 
 // ---- src/model-io.js ----
 // model-io.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+/* global DataEngine, ModelEngine */
 
 
 
@@ -8572,20 +8615,27 @@ function downloadStandardAnalysisReport() {
 // included, except where the method needs them (k-NN models and k-NN imputation), which is flagged.
 // =========================================================================
 const MODEL_FILE_FORMAT = 'ummp-trained-model';
+const MODEL_FILE_VERSION = 1;
 
 function sanitizedPrep(prep) {
     const keep = ['featureCols', 'featureMetadata', 'totalDimensions', 'targetCol', 'isClassification', 'targetClasses',
         'targetClassToIdx', 'targetIdxToClass', 'positiveClass', 'fillValues', 'encodedFeatureNames', 'derivedIndicators'];
     const out = {};
     keep.forEach(k => { if (prep[k] !== undefined) out[k] = JSON.parse(JSON.stringify(prep[k])); });
-    let knnImputation = false;
+    let knnImputation = false, knnColumns = [];
     if (prep.imputation && prep.imputation.plan) {
         const cols = prep.imputation.plan.columns || {};
         knnImputation = Object.values(cols).some(c => c && c.strategy === 'knn');
+        // k-NN filling needs, for each training patient, only the predictors it fills and measures distance
+        // on: every other column (identifiers, outcome, excluded variables) is left out of the file
+        const needed = new Set();
+        Object.keys(cols).forEach(c => { if (cols[c] && cols[c].strategy === 'knn') { needed.add(c); (cols[c].numericCols || []).forEach(n => needed.add(n)); } });
+        const refRows = knnImputation ? (prep.imputation.plan.referenceRows || []).map(r => { const o = {}; needed.forEach(c => { if (r[c] !== undefined) o[c] = r[c]; }); return o; }) : [];
         out.imputation = {
             configs: JSON.parse(JSON.stringify(prep.imputation.configs)),
-            plan: { columns: JSON.parse(JSON.stringify(cols)), referenceRows: knnImputation ? JSON.parse(JSON.stringify(prep.imputation.plan.referenceRows || [])) : [] }
+            plan: { columns: JSON.parse(JSON.stringify(cols)), referenceRows: JSON.parse(JSON.stringify(refRows)) }
         };
+        knnColumns = [...needed];
     }
     // Multiple imputation: the fitted imputation models, including their donor values (observed values of
     // training patients, one predictor at a time), are needed to impute new patients
@@ -8594,7 +8644,7 @@ function sanitizedPrep(prep) {
         out.imputation = { ...(out.imputation || { configs: JSON.parse(JSON.stringify(prep.imputation.configs)) }), mice: JSON.parse(JSON.stringify(prep.imputation.mice)) };
         if (prep.multipleImputation) out.multipleImputation = JSON.parse(JSON.stringify(prep.multipleImputation));
     }
-    return { prep: out, knnImputation: knnImputation || miceImputation, miceImputation };
+    return { prep: out, knnImputation: knnImputation || miceImputation, miceImputation, knnFilling: knnImputation, knnColumns };
 }
 
 function evaluationSummary(ev) {
@@ -8605,10 +8655,15 @@ function evaluationSummary(ev) {
     return JSON.parse(JSON.stringify(out));
 }
 
+// Whether a serialised model holds training patients' values: a k-NN model anywhere inside it, including inside
+// recalibrated, multiply imputed (pooled), ensemble or neural-network-fallback wrappers
 function modelContainsKnn(ser) {
-    if (!ser) return false;
+    if (!ser || typeof ser !== 'object') return false;
     if (ser.type === 'knn') return true;
     if (ser.type === 'ensemble') return (ser.models || []).some(it => modelContainsKnn(it.model));
+    if (ser.type === 'mi-pooled') return (ser.models || []).some(modelContainsKnn);
+    if (ser.type === 'calibrated') return modelContainsKnn(ser.base);
+    if (ser.type === 'nn') return modelContainsKnn(ser.fallbackGLM);
     return false;
 }
 
@@ -8619,20 +8674,27 @@ async function exportTrainedModel() {
     try {
         if (btn) btn.disabled = true;
         const ser = await ModelEngine.serializeModel(model);
-        const { prep: cleanPrep, knnImputation, miceImputation } = sanitizedPrep(prep);
-        const containsPatientData = knnImputation || modelContainsKnn(ser);
-        if (containsPatientData && !confirm('This model file will contain the training patients\' predictor values (needed by ' +
-            (modelContainsKnn(ser) ? 'k-Nearest Neighbours' : miceImputation ? 'multiple imputation, which fills a new patient\'s gaps with values observed in similar training patients' : 'k-NN missing-value filling') + '). Share it only where your data-governance rules allow. Continue?')) return;
+        const { prep: cleanPrep, knnImputation, miceImputation, knnFilling, knnColumns } = sanitizedPrep(prep);
+        const knnModel = modelContainsKnn(ser);
+        const containsPatientData = knnImputation || knnModel;
+        // What the file holds, stated exactly (no identifiers or outcomes of individual patients beyond this)
+        const manifest = [];
+        if (knnModel) manifest.push(`• k-Nearest Neighbours model: every training patient's encoded predictor values and outcome (${prep.featureCols.length} predictor(s), outcome "${prep.targetCol}")`);
+        if (knnFilling) manifest.push(`• k-NN missing-value filling: every training patient's values of ${knnColumns.length} predictor(s) (${knnColumns.slice(0, 6).join(', ')}${knnColumns.length > 6 ? ', …' : ''}); no identifiers or outcomes`);
+        if (miceImputation) manifest.push('• Multiple imputation: up to 500 observed values per predictor from training patients (donors), each predictor separately; no identifiers or outcomes');
+        if (containsPatientData && !confirm('This model file will contain patient-level data from the training set:\n\n' + manifest.join('\n') +
+            '\n\nIt also contains the model parameters, preprocessing and summary results (no other patient values). Share it only where your data-governance rules allow. Continue?')) return;
         const name = AppState.deployedSource === '7step' && AppState.deployedPipelineModel ? AppState.deployedPipelineModel.name
             : AppState.deployedSource === 'imported' && AppState.importedModelInfo ? AppState.importedModelInfo.name
             : displayModelName(AppState.deployedModelId || AppState.selectedModelId, model);
         const bundle = {
-            format: MODEL_FILE_FORMAT, formatVersion: 1, notice: RESEARCH_USE_NOTICE,
+            format: MODEL_FILE_FORMAT, formatVersion: MODEL_FILE_VERSION, notice: RESEARCH_USE_NOTICE,
             software: { name: SETTINGS_APP, version: APP_VERSION },
             exportedAt: new Date().toISOString(),
             model: { id: AppState.deployedModelId || AppState.selectedModelId, name, workflow: AppState.deployedSource || 'standard', seed: model.seed ?? null },
             trainingDataset: { name: AppState.fileName || (AppState.importedModelInfo && AppState.importedModelInfo.dataset) || null, outcome: prep.targetCol },
             containsPatientData,
+            patientDataContents: containsPatientData ? manifest.map(m => m.replace(/^• /, '')) : [],
             decisionThreshold: AppState.evalResults ? AppState.evalResults.decisionThreshold ?? null : null,
             evaluation: evaluationSummary(AppState.evalResults),
             preprocessing: cleanPrep,
@@ -8656,13 +8718,47 @@ async function exportTrainedModel() {
     }
 }
 
+// A model file is untrusted input: its preprocessing description is checked before anything is used
+function validateImportedPrep(prep) {
+    const bad = what => { throw new Error(`The file's preprocessing information is invalid (${what}).`); };
+    if (!prep || typeof prep !== 'object') bad('missing');
+    if (!Array.isArray(prep.featureCols) || !prep.featureCols.length || !prep.featureCols.every(c => typeof c === 'string')) bad('predictor names');
+    if (typeof prep.targetCol !== 'string') bad('outcome name');
+    if (typeof prep.isClassification !== 'boolean') bad('outcome type');
+    if (!Number.isInteger(prep.totalDimensions) || prep.totalDimensions < 1 || prep.totalDimensions > 5000) bad('number of encoded columns');
+    if (!prep.featureMetadata || typeof prep.featureMetadata !== 'object') bad('predictor encoding');
+    prep.featureCols.forEach(c => {
+        const md = prep.featureMetadata[c];
+        if (!md || typeof md !== 'object' || !['nominal', 'ordinal', 'continuous'].includes(md.type)) bad(`encoding of "${c}"`);
+        if (!Number.isInteger(md.startIndex) || md.startIndex < 0 || md.startIndex >= prep.totalDimensions) bad(`position of "${c}"`);
+        if (md.type === 'nominal' && (!Array.isArray(md.categories) || !md.categories.every(v => typeof v === 'string'))) bad(`categories of "${c}"`);
+    });
+    if (prep.isClassification && (!Array.isArray(prep.targetClasses) || prep.targetClasses.length < 2)) bad('outcome categories');
+    ['__proto__', 'constructor', 'prototype'].forEach(k => { if (Object.prototype.hasOwnProperty.call(prep, k)) bad(k); });
+}
+
+// The imported model must predict a typical patient (all predictors at their fitted defaults) with valid output
+function checkImportedModel(model, prep) {
+    if (!model || typeof model.predictSingle !== 'function') throw new Error('The file does not contain a usable model.');
+    const row = {};
+    prep.featureCols.forEach(c => { row[c] = ''; });
+    const x = DataEngine.transformSingleRow(row, prep);
+    if (!Array.isArray(x) && !ArrayBuffer.isView(x)) throw new Error('The model\'s preprocessing could not be applied.');
+    const out = model.predictSingle(x);
+    const nums = out && typeof out === 'object' ? [out.pred, ...Object.values(out.probabilities || {})] : [out];
+    if (!nums.every(v => typeof v === 'number' && isFinite(v))) throw new Error('The model gives invalid predictions.');
+}
+
 async function importTrainedModel(file) {
     try {
         const bundle = JSON.parse(await file.text());
         if (!bundle || bundle.format !== MODEL_FILE_FORMAT) throw new Error('This is not a trained-model file exported from this app.');
-        const model = await ModelEngine.deserializeModel(bundle.parameters);
+        if (bundle.formatVersion !== undefined && bundle.formatVersion > MODEL_FILE_VERSION) throw new Error('This model file was made by a newer version of the app; please use the latest version.');
         const prep = bundle.preprocessing;
-        if (!prep || !Array.isArray(prep.featureCols)) throw new Error('The file has no preprocessing information.');
+        validateImportedPrep(prep);
+        const model = await ModelEngine.deserializeModel(bundle.parameters);
+        // Nothing is installed until the model has predicted a typical patient without error
+        checkImportedModel(model, prep);
         AppState.trainedModel = model;
         AppState.prepMeta = prep;
         AppState.evalResults = { ...(bundle.evaluation || {}), decisionThreshold: bundle.decisionThreshold ?? (bundle.evaluation || {}).decisionThreshold, isClassification: prep.isClassification };
@@ -8713,7 +8809,7 @@ function downloadPipelineProtocolReport() {
         target_variable: AppState.pipeline.targetCol,
         reproducibility_seed: AppState.pipeline.evalSeed,
         automatic_tuning: AppState.pipeline.tuningReport ? {
-            method: `${AppState.pipeline.tuningReport.folds}-fold stratified cross-validation within the training set; SMOTENC and encoding/scaling refitted inside each fold; neural network at most 3 folds; test set not used`,
+            method: `${AppState.pipeline.tuningReport.folds}-fold stratified cross-validation within the training set; imputation, SMOTENC and encoding/scaling refitted inside each fold; neural network at most 3 folds; test set not used`,
             ranking_metric: AppState.pipeline.tuningReport.models[0] ? AppState.pipeline.tuningReport.models[0].metricLabel : null,
             small_sample_warning: AppState.pipeline.tuningReport.smallSampleWarning || null,
             models: AppState.pipeline.tuningReport.models.map(t => ({
@@ -9022,7 +9118,7 @@ function renderSurvivalResults() {
             <div class="tune-title">📊 Performance on the test patients</div>
             <div class="cal-stats"><div><strong>Harrell's C-index</strong>: ${r.cIndex !== null ? r.cIndex.toFixed(3) : 'N/A'}${r.cCI ? ` <span class="tune-sd">(95% CI ${r.cCI[0].toFixed(3)}–${r.cCI[1].toFixed(3)})</span>` : ''} &mdash; the probability that, of two comparable patients, the one with the event first had the higher predicted risk (0.5 = chance, 1 = perfect).</div>
             <div><strong>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.tdAuc === 'number' ? r.tdAuc.toFixed(3) : 'N/A'}${r.tdCI ? ` <span class="tune-sd">(95% CI ${r.tdCI[0].toFixed(3)}–${r.tdCI[1].toFixed(3)})</span>` : ''} &mdash; of a patient who had the event by ${escapeHtml(String(r.horizon))} and one still event-free after it, how often the first had the higher predicted risk.</div>
-            <div><strong>Brier score at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.brier === 'number' ? r.brier.toFixed(3) : 'N/A'} (lower is better; giving everyone the overall Kaplan-Meier risk scores ${typeof r.brierNull === 'number' ? r.brierNull.toFixed(3) : 'N/A'})${typeof r.scaledBrier === 'number' ? `; <strong>scaled Brier</strong> ${(r.scaledBrier * 100).toFixed(1)}% (share of that error the model removes; 0% = no better than the overall risk)` : ''}.</div>
+            <div><strong>Brier score at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.brier === 'number' ? r.brier.toFixed(3) : 'not estimable (too little follow-up to weight the patients at this horizon; choose an earlier horizon)'} (lower is better; giving everyone the overall Kaplan-Meier risk scores ${typeof r.brierNull === 'number' ? r.brierNull.toFixed(3) : 'N/A'})${typeof r.scaledBrier === 'number' ? `; <strong>scaled Brier</strong> ${(r.scaledBrier * 100).toFixed(1)}% (share of that error the model removes; 0% = no better than the overall risk)` : ''}.</div>
             <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pctTxt(r.meanPred)} vs observed ${pctTxt(r.obsAll)}${r.obsAllCI ? ` <span class="tune-sd">(95% CI ${pctTxt(r.obsAllCI[0])}–${pctTxt(r.obsAllCI[1])})</span>` : ''} (Kaplan-Meier).</div>
             <div class="tune-muted">The time-dependent AUC and Brier score weight each patient for censoring (inverse probability of censoring weights, with the censoring pattern estimated from the training patients), so patients lost to follow-up before ${escapeHtml(String(r.horizon))} do not bias them.</div></div>
             <div class="cal-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
@@ -9094,6 +9190,7 @@ function downloadSurvivalReport() {
 // machine-learning models need, and compares them with the current selection.
 /* global DataEngine, ModelEngine */
 
+
 // Parameters each predictor adds to a regression model: 1 for a number or an ordered scale, (categories − 1)
 // for an unordered categorical predictor
 function predictorParameters(rows, featureCols, columnConfigs) {
@@ -9106,6 +9203,18 @@ function predictorParameters(rows, featureCols, columnConfigs) {
     });
     return { total: perCol.reduce((a, c) => a + c.df, 0), perCol };
 }
+
+// Outcome counts in independent units: distinct patients when a patient-ID column is set (a patient's
+// records are not independent), otherwise records, which are then assumed to be one per patient
+function outcomeUnits(rows, targetCol, groupOf) {
+    const all = new Set(), by = {};
+    rows.forEach((r, i) => {
+        const u = groupOf ? groupOf(r) : i, k = String(r[targetCol]).trim();
+        all.add(u); (by[k] = by[k] || new Set()).add(u);
+    });
+    return { n: all.size, counts: Object.fromEntries(Object.entries(by).map(([k, v]) => [k, v.size])), unit: groupOf ? 'patients' : 'records' };
+}
+const UNIT_NOTE = 'Counts assume one record per patient; if patients have several records, choose "keep each patient\'s records together" (Step 4) so that patients, not records, are counted.';
 
 // Largest number of parameters for which the Riley criteria are met with nTrain patients (0 if none)
 function rileyMaxParameters(type, nTrain, prevalence) {
@@ -9124,7 +9233,7 @@ function rileyMaxParameters(type, nTrain, prevalence) {
  * describes it; candidateCols (optional): every predictor considered so far, when some were dropped by
  * looking at the data (counts towards overfitting even if not kept).
  */
-function renderPredictorBudget(containerId, { rows, featureCols, targetCol, columnConfigs, trainFraction = 1, trainLabel = '', candidateCols = null }) {
+function renderPredictorBudget(containerId, { rows, featureCols, targetCol, columnConfigs, trainFraction = 1, trainLabel = '', candidateCols = null, groupOf = null }) {
     const box = document.getElementById(containerId);
     if (!box) return;
     if (!rows || !rows.length || !targetCol || !columnConfigs[targetCol]) {
@@ -9133,23 +9242,25 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
     }
     const tcfg = columnConfigs[targetCol];
     const withOutcome = rows.filter(r => !DataEngine.isMissing(r[targetCol]));
-    const n = withOutcome.length;
+    const units = outcomeUnits(withOutcome, targetCol, groupOf);
+    const n = units.n;
     const nTrain = Math.round(n * trainFraction);
     const { total: P, perCol } = predictorParameters(withOutcome, featureCols, columnConfigs);
+    // Predictors dropped after looking at the data still count towards overfitting: the verdict uses them all
+    const candidates = candidateCols ? predictorParameters(withOutcome, candidateCols, columnConfigs).total : null;
+    const Pv = Math.max(P, candidates || 0);
     const isClass = tcfg.type === 'nominal' || tcfg.type === 'ordinal';
     const fmt = v => v.toLocaleString('en-GB');
     const rows4 = []; // [guide, max parameters, note]
     let headline = '', minority = null, minorityLabel = '', status = 'ok';
 
     if (isClass) {
-        const counts = {};
-        withOutcome.forEach(r => { const k = String(r[targetCol]).trim(); counts[k] = (counts[k] || 0) + 1; });
-        const groups = Object.entries(counts).sort((a, b) => a[1] - b[1]);
+        const groups = Object.entries(units.counts).sort((a, b) => a[1] - b[1]);
         if (groups.length < 2) { box.innerHTML = ''; return; }
         [minorityLabel, minority] = groups[0];
         const E = Math.round(minority * trainFraction);
         const binary = groups.length === 2;
-        headline = `<strong>${fmt(nTrain)}</strong> training patients${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}, of whom about <strong>${fmt(E)}</strong> are in the smaller outcome group ("${escapeHtml(minorityLabel)}", ${(minority / n * 100).toFixed(1)}%)${binary ? '' : ` of ${groups.length} groups`}.`;
+        headline = `<strong>${fmt(nTrain)}</strong> training ${units.unit}${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}, of whom about <strong>${fmt(E)}</strong> are in the smaller outcome group ("${escapeHtml(minorityLabel)}", ${(minority / n * 100).toFixed(1)}%)${binary ? '' : ` of ${groups.length} groups`}.`;
         if (binary) {
             const riley = rileyMaxParameters('binary', nTrain, minority / n);
             rows4.push(['Minimum sample-size criteria (Riley et al.; logistic regression)', riley,
@@ -9159,20 +9270,20 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
             ['20 patients in the smaller group per parameter', Math.floor(E / 20), 'more cautious; logistic regression reached stable performance at about 20–50'],
             ['Flexible models (random forest, boosted trees, neural network, k-NN): 200 per parameter', Math.floor(E / 200), 'still unstable at this level in simulations (over 10 times what logistic regression needs); below it, treat these models as exploratory']);
         const main = binary ? Math.min(rows4[0][1], rows4[1][1]) : rows4[0][1];
-        status = P <= main ? 'ok' : P <= Math.floor(E / 10) ? 'caution' : 'over';
+        status = Pv <= main ? 'ok' : Pv <= Math.floor(E / 10) ? 'caution' : 'over';
     } else {
-        headline = `<strong>${fmt(nTrain)}</strong> training patients${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}; numerical outcome.`;
+        headline = `<strong>${fmt(nTrain)}</strong> training ${units.unit}${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}; numerical outcome.`;
         const riley = rileyMaxParameters('continuous', nTrain, null);
         rows4.push(['Minimum sample-size criteria (Riley et al.; linear regression, anticipated R² 0.2)', riley, riley ? 'the recommended standard' : 'not met for any number of predictors'],
             ['Flexible models (random forest, boosted trees, neural network, k-NN)', Math.floor(nTrain / 200), 'rough guide; flexible models need much more data than regression']);
-        status = P <= riley ? 'ok' : P <= riley * 1.5 ? 'caution' : 'over';
+        status = Pv <= riley ? 'ok' : Pv <= riley * 1.5 ? 'caution' : 'over';
     }
 
     const multi = perCol.filter(c => c.levels && c.levels > 2).sort((a, b) => b.df - a.df).slice(0, 3);
-    const candidates = candidateCols ? predictorParameters(withOutcome, candidateCols, columnConfigs).total : null;
+    const counted = candidates !== null && candidates > P ? `the ${candidates} candidate parameters considered` : 'your selection';
     const statusText = {
-        ok: '✓ Your selection is within the recommended number of predictor parameters.',
-        caution: '⚠️ Your selection is above the recommended number but not grossly so: expect some overfitting; penalised (ridge) regression and cross-validated tuning help.',
+        ok: `✓ ${counted === 'your selection' ? 'Your selection meets' : `The ${candidates} candidate parameters considered meet`} these planning criteria for regression models, under the stated assumptions (anticipated R², one record per patient unless patients are grouped). This is a planning guide, not proof that a model will perform well.`,
+        caution: `⚠️ ${counted === 'your selection' ? 'Your selection is' : `The ${candidates} candidate parameters considered are`} above the recommended number but not grossly so: expect some overfitting; penalised (ridge) regression and cross-validated tuning help.`,
         over: '⚠️ <strong>Too many predictor parameters for this sample</strong>: models are likely to overfit (good results in these patients, worse in new ones). Reduce the number of predictors, group rare categories, or add patients.'
     }[status];
 
@@ -9182,8 +9293,9 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
             <p class="tune-muted" style="margin-top: 4px;">${headline} Your selection: <strong>${featureCols.length}</strong> predictor(s) = <strong>${P}</strong> parameter(s)${candidates !== null && candidates > P ? `, from <strong>${candidates}</strong> candidate parameters considered` : ''}.</p>
             <div class="${status === 'ok' ? 'explain-box' : 'tune-warn'}" style="margin-top: 6px;">${statusText}</div>
             <table class="data-table thr-table"><thead><tr><th>Guide</th><th>Largest number of parameters</th><th>Comment</th></tr></thead>
-                <tbody>${rows4.map(([g, v, c]) => `<tr><td>${escapeHtml(g)}</td><td><strong>${v}</strong>${P > v ? ' <span class="tune-sd">(you have ' + P + ')</span>' : ''}</td><td>${escapeHtml(c)}</td></tr>`).join('')}</tbody></table>
+                <tbody>${rows4.map(([g, v, c]) => `<tr><td>${escapeHtml(g)}</td><td><strong>${v}</strong>${Pv > v ? ' <span class="tune-sd">(you have ' + Pv + ')</span>' : ''}</td><td>${escapeHtml(c)}</td></tr>`).join('')}</tbody></table>
             ${multi.length ? `<p class="tune-muted">Categorical predictors use one parameter per category beyond the first: ${multi.map(c => `"${escapeHtml(c.col)}" ${c.levels} categories = ${c.df}`).join('; ')}. Grouping rare categories saves parameters.</p>` : ''}
+            ${groupOf ? '' : `<p class="tune-muted">${escapeHtml(UNIT_NOTE)}</p>`}
             <p class="tune-muted">A parameter is one number the model estimates: 1 for each numerical or ordered predictor, and (categories − 1) for an unordered categorical one. Choose predictors from clinical knowledge and earlier studies before looking at their association with the outcome: selecting them by p-value in the same patients makes the model look better than it is, and every predictor considered counts towards overfitting, not only those kept. SMOTENC and other balancing add no real patients. Riley et al. (BMJ 2020) with the default anticipated R² (15% of the maximum, as in pmsampsize; Step 4 lets you change it); 20–50 and 200 per parameter: van der Ploeg, Austin and Steyerberg, “Modern modelling techniques are data hungry” (BMC Med Res Methodol 2014;14:137).</p>
         </div>`;
 }
@@ -9207,21 +9319,21 @@ const MODEL_NEEDS = {
  * For each selected model: the data it needs for the current predictors, what the Training set has, and a
  * verdict (adequate / borderline / exploratory only).
  */
-function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, columnConfigs, modelIds, trainFraction = 1, trainLabel = '' }) {
+function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, columnConfigs, modelIds, trainFraction = 1, trainLabel = '', candidateCols = null, groupOf = null }) {
     const box = document.getElementById(containerId);
     if (!box) return;
     if (!rows || !rows.length || !targetCol || !columnConfigs[targetCol] || !modelIds || !modelIds.length) { box.innerHTML = ''; return; }
     const tcfg = columnConfigs[targetCol];
     const withOutcome = rows.filter(r => !DataEngine.isMissing(r[targetCol]));
-    const n = withOutcome.length, nTrain = Math.round(n * trainFraction);
-    const P = Math.max(1, predictorParameters(withOutcome, featureCols, columnConfigs).total);
+    const units = outcomeUnits(withOutcome, targetCol, groupOf);
+    const n = units.n, nTrain = Math.round(n * trainFraction);
+    const P = Math.max(1, predictorParameters(withOutcome, featureCols, columnConfigs).total,
+        candidateCols ? predictorParameters(withOutcome, candidateCols, columnConfigs).total : 0);
     const isClass = tcfg.type === 'nominal' || tcfg.type === 'ordinal';
     const fmt = v => Math.round(v).toLocaleString('en-GB');
     let E = nTrain, share = 1, unit = 'patients', binary = false;
     if (isClass) {
-        const counts = {};
-        withOutcome.forEach(r => { const k = String(r[targetCol]).trim(); counts[k] = (counts[k] || 0) + 1; });
-        const groups = Object.values(counts).sort((a, b) => a - b);
+        const groups = Object.values(units.counts).sort((a, b) => a - b);
         if (groups.length < 2) { box.innerHTML = ''; return; }
         share = groups[0] / n;
         E = Math.round(groups[0] * trainFraction);
@@ -9234,12 +9346,12 @@ function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, col
         const needed = need.per * P, better = need.better ? need.better * P : null;
         let verdict, cls;
         if (need.kind === 'flexible') {
-            if (E >= needed) { verdict = '✓ Enough data'; cls = 'ok'; }
+            if (E >= needed) { verdict = '✓ Meets this guide (stability still not assured)'; cls = 'ok'; }
             else if (E >= needed / 4) { verdict = '⚠️ Exploratory only: expect overfitting'; cls = 'warn'; }
             else { verdict = '✗ Far too little data: results unreliable'; cls = 'bad'; }
         } else {
             const rileyOk = id === 'glm' && riley !== null ? P <= riley : true;
-            if (E >= (better || needed) && rileyOk) { verdict = '✓ Enough data'; cls = 'ok'; }
+            if (E >= (better || needed) && rileyOk) { verdict = '✓ Meets these planning criteria'; cls = 'ok'; }
             else if (E >= needed) { verdict = '⚠️ Borderline: fewer predictors would be safer'; cls = 'warn'; }
             else { verdict = '✗ Too little data for this many predictors'; cls = 'bad'; }
         }
@@ -9254,10 +9366,11 @@ function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, col
     box.innerHTML = `
         <div class="cal-panel">
             <div class="tune-title">📏 Enough data for each model?</div>
-            <p class="tune-muted" style="margin-top: 4px;">Training set${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}: <strong>${fmt(nTrain)}</strong> patients, <strong>${fmt(E)}</strong> ${isClass ? 'in the smaller outcome group' : 'in all'}; <strong>${P}</strong> predictor parameter(s).${riley !== null ? ` The Riley criteria allow logistic regression up to <strong>${riley}</strong> parameter(s) here.` : ''}</p>
+            <p class="tune-muted" style="margin-top: 4px;">Training set${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}: <strong>${fmt(nTrain)}</strong> ${units.unit}, <strong>${fmt(E)}</strong> ${isClass ? 'in the smaller outcome group' : 'in all'}; <strong>${P}</strong> predictor parameter(s)${candidateCols ? ' (all candidates considered)' : ''}.${riley !== null ? ` The Riley criteria allow logistic regression up to <strong>${riley}</strong> parameter(s) here.` : ''}</p>
             <table class="data-table thr-table budget-table"><thead><tr><th>Model</th><th>Needed for your ${P} parameter(s)</th><th>Your Training set</th></tr></thead>
                 <tbody>${rowsHtml}</tbody></table>
-            <p class="tune-muted">An "event" is a patient in the smaller outcome group. Flexible models (random forest, boosted trees, neural network, k-NN, ensemble) need roughly ten times the data of logistic regression; with typical clinical cohorts of a few hundred patients they rarely beat penalised logistic regression and overfit more. Training them anyway is fine as a comparison, but judge them by validated results (Option C), not by apparent performance.${isClass ? '' : ' Numerical outcomes: rough guide in patients rather than events.'} Sources: Riley et al. (BMJ 2020); van der Ploeg, Austin and Steyerberg (BMC Med Res Methodol 2014;14:137).</p>
+            ${groupOf ? '' : `<p class="tune-muted">${escapeHtml(UNIT_NOTE)}</p>`}
+            <p class="tune-muted">These are planning guides under stated assumptions, not guarantees. An "event" is a patient in the smaller outcome group. Flexible models (random forest, boosted trees, neural network, k-NN, ensemble) need roughly ten times the data of logistic regression; with typical clinical cohorts of a few hundred patients they rarely beat penalised logistic regression and overfit more. Training them anyway is fine as a comparison, but judge them by validated results (Option C), not by apparent performance.${isClass ? '' : ' Numerical outcomes: rough guide in patients rather than events.'} Sources: Riley et al. (BMJ 2020); van der Ploeg, Austin and Steyerberg (BMC Med Res Methodol 2014;14:137).</p>
         </div>`;
 }
 
@@ -9272,7 +9385,8 @@ function refreshModelSampleGuide() {
         targetCol: headers.find(h => cfgs[h] && cfgs[h].role === 'target'), columnConfigs: cfgs,
         modelIds: AppState.selectedModelIds && AppState.selectedModelIds.length ? AppState.selectedModelIds : [AppState.selectedModelId || 'nn'],
         trainFraction: mode === 'split' ? pct / 100 : 1,
-        trainLabel: mode === 'split' ? `Option A, ${pct}% of patients` : (mode === 'bootstrap' ? 'Option C, all patients' : 'Option B, all loaded patients')
+        trainLabel: mode === 'split' ? `Option A, ${pct}% of patients` : (mode === 'bootstrap' ? 'Option C, all patients' : 'Option B, all loaded patients'),
+        groupOf: splitGroupFunction()
     });
 }
 
@@ -9282,7 +9396,8 @@ function refreshPipelineModelGuide() {
     if (!P || !P.trainRows) return;
     renderModelSampleGuide('pipeline-model-sample-guide', {
         rows: P.trainRows, featureCols: P.featureCols.filter(c => !P.droppedFeatures.has(c)), targetCol: P.targetCol,
-        columnConfigs: P.columnConfigs, modelIds: ALL_MODEL_IDS, trainLabel: '7-step pipeline'
+        columnConfigs: P.columnConfigs, modelIds: ALL_MODEL_IDS, trainLabel: '7-step pipeline',
+        candidateCols: P.featureCols, groupOf: pipelineGroupFunction()
     });
 }
 
@@ -9714,6 +9829,18 @@ const SETTINGS_KEY_PREFIX = 'ummp-settings:';
 const SETTINGS_MAX_STORED = 20;
 const VARIABLE_FIELDS = ['role', 'prevRole', 'type', 'imputationStrategy', 'prevImputationStrategy', 'customImputeVal', 'positiveClass', 'ordinalOrder'];
 
+// A settings file is untrusted input: each saved variable choice must be one the app itself can make
+const ROLES = ['feature', 'target', 'meta'], TYPES = ['continuous', 'ordinal', 'nominal'];
+const STRATEGIES = ['median', 'mean', 'mode', 'constant', 'knn', 'drop'];
+function validVariableField(f, v) {
+    if (f === 'role' || f === 'prevRole') return ROLES.includes(v);
+    if (f === 'type') return TYPES.includes(v);
+    if (f === 'imputationStrategy' || f === 'prevImputationStrategy') return STRATEGIES.includes(v);
+    if (f === 'customImputeVal' || f === 'positiveClass') return (typeof v === 'string' && v.length <= 500) || (typeof v === 'number' && isFinite(v));
+    if (f === 'ordinalOrder') return Array.isArray(v) && v.length <= 1000 && v.every(x => typeof x === 'string' && x.length <= 500);
+    return false;
+}
+
 // Identifies a dataset by its column headers (FNV-1a hash), so a re-loaded or updated file matches
 function datasetSignature(headers) {
     let h = 0x811c9dc5;
@@ -9913,7 +10040,7 @@ function applySettings(settings) {
         const cfg = AppState.columnConfigs[h];
         // Optional choices absent from the saved file must not linger from the current session
         ['prevRole', 'prevImputationStrategy', 'positiveClass', 'ordinalOrder'].forEach(f => { delete cfg[f]; });
-        VARIABLE_FIELDS.forEach(f => { if (saved[f] !== undefined) cfg[f] = Array.isArray(saved[f]) ? saved[f].slice() : saved[f]; });
+        VARIABLE_FIELDS.forEach(f => { if (saved[f] !== undefined && validVariableField(f, saved[f])) cfg[f] = Array.isArray(saved[f]) ? saved[f].slice() : saved[f]; });
     });
     // Exactly one target
     const targets = headers.filter(h => AppState.columnConfigs[h].role === 'target');
@@ -10056,11 +10183,16 @@ AppState.pipeline = createEmptyPipelineState(42);
 window.addEventListener('error', (e) => handleUnexpectedError(e.error || e.message));
 window.addEventListener('unhandledrejection', (e) => handleUnexpectedError(e.reason));
 
-// Delegated handling of controls marked with data-action (see actionAttrs in core.js): window[fn] is called
-// with the stored arguments, then the selected index (for a change) and the event. No inline handlers.
+// Delegated handling of controls marked with data-action (see actionAttrs in core.js): the named action is
+// called with the stored arguments, then the selected index (for a change) and the event. No inline handlers.
+// Only the actions listed here can run, whatever a page element names (never an arbitrary global function).
+const ACTIONS = new Set(['copySeedToClipboard', 'deployPipelineModel', 'deployTestedModel', 'goToStep', 'launch7StepPipeline',
+    'pipelineDropFeature', 'pipelineDropFeatureStep4', 'pipelineKeepBothPairs', 'pipelineRestoreFeatureStep4', 'pipelineToggleReinstateFeature', 'renderCalibrationChoice', 'runMiceOddsRatios',
+    'runPermutationImportance', 'switchToBaselineModel', 'switchToPipelineModel', 'trainStandardBaselineFromPipeline']);
 function runAction(e, kind) {
     const el = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
     if (!el || (el.dataset.event || 'click') !== kind) return;
+    if (!ACTIONS.has(el.dataset.action)) return;
     const fn = window[el.dataset.action];
     if (typeof fn !== 'function') return;
     let args = [];
@@ -10090,6 +10222,27 @@ function start() {
         e.target.value = '';
     });
     updateImputedDataButtons();
+    // Start page task choice
+    document.getElementById('task-develop')?.addEventListener('click', () => {
+        const input = document.getElementById('csv-file-input');
+        document.getElementById('step-1-content')?.querySelector('.card')?.scrollIntoView({ behavior: 'smooth' });
+        if (input) input.click();
+    });
+    document.getElementById('task-validate')?.addEventListener('click', () => {
+        // The file dialog opens straight away (a dialog box first would block it in some browsers); the steps are shown below
+        document.getElementById('model-import-btn')?.click();
+        const hint = document.getElementById('task-hint');
+        if (hint) { hint.style.display = 'block'; hint.textContent = 'Validating a shared model: 1) choose the model file in the window that opened (or click "📥 Import trained model"); 2) in Step 6, upload a CSV of your patients that includes the outcome column. You get discrimination, calibration and clinical usefulness on your patients, with a printable validation report; no patient data leave your computer.'; }
+    });
+    document.getElementById('task-demo')?.addEventListener('click', () => document.getElementById('sample-shunt-large-btn')?.click());
+    // Clear session: stops background work and reloads the page, which discards every dataset, result, model and
+    // cached imputation held in memory. Browser storage holds only saved settings (choices and column names).
+    document.getElementById('clear-session-btn')?.addEventListener('click', () => {
+        if (!confirm('Remove all data from this page?\n\nEvery loaded dataset, result, trained model and cached imputation is discarded (files you saved are not affected). Saved analysis settings remembered in this browser contain no patient values and are kept.')) return;
+        cancelAll('Session cleared.');
+        clearImputationCache();
+        location.reload();
+    });
     // Keep the sample-size check in step with the chosen split and validation protocol
     ['train-pct-input', 'train-ratio-slider', 'val-mode-a', 'val-mode-b'].forEach(id => {
         const el = document.getElementById(id);

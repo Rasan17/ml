@@ -5,6 +5,7 @@
 // machine-learning models need, and compares them with the current selection.
 /* global DataEngine, ModelEngine */
 import { ALL_MODEL_IDS, AppState, MODEL_INFO, escapeHtml } from './core.js';
+import { pipelineGroupFunction, splitGroupFunction } from './cv-tuning.js';
 
 // Parameters each predictor adds to a regression model: 1 for a number or an ordered scale, (categories − 1)
 // for an unordered categorical predictor
@@ -18,6 +19,18 @@ function predictorParameters(rows, featureCols, columnConfigs) {
     });
     return { total: perCol.reduce((a, c) => a + c.df, 0), perCol };
 }
+
+// Outcome counts in independent units: distinct patients when a patient-ID column is set (a patient's
+// records are not independent), otherwise records, which are then assumed to be one per patient
+function outcomeUnits(rows, targetCol, groupOf) {
+    const all = new Set(), by = {};
+    rows.forEach((r, i) => {
+        const u = groupOf ? groupOf(r) : i, k = String(r[targetCol]).trim();
+        all.add(u); (by[k] = by[k] || new Set()).add(u);
+    });
+    return { n: all.size, counts: Object.fromEntries(Object.entries(by).map(([k, v]) => [k, v.size])), unit: groupOf ? 'patients' : 'records' };
+}
+const UNIT_NOTE = 'Counts assume one record per patient; if patients have several records, choose "keep each patient\'s records together" (Step 4) so that patients, not records, are counted.';
 
 // Largest number of parameters for which the Riley criteria are met with nTrain patients (0 if none)
 function rileyMaxParameters(type, nTrain, prevalence) {
@@ -36,7 +49,7 @@ function rileyMaxParameters(type, nTrain, prevalence) {
  * describes it; candidateCols (optional): every predictor considered so far, when some were dropped by
  * looking at the data (counts towards overfitting even if not kept).
  */
-function renderPredictorBudget(containerId, { rows, featureCols, targetCol, columnConfigs, trainFraction = 1, trainLabel = '', candidateCols = null }) {
+function renderPredictorBudget(containerId, { rows, featureCols, targetCol, columnConfigs, trainFraction = 1, trainLabel = '', candidateCols = null, groupOf = null }) {
     const box = document.getElementById(containerId);
     if (!box) return;
     if (!rows || !rows.length || !targetCol || !columnConfigs[targetCol]) {
@@ -45,23 +58,25 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
     }
     const tcfg = columnConfigs[targetCol];
     const withOutcome = rows.filter(r => !DataEngine.isMissing(r[targetCol]));
-    const n = withOutcome.length;
+    const units = outcomeUnits(withOutcome, targetCol, groupOf);
+    const n = units.n;
     const nTrain = Math.round(n * trainFraction);
     const { total: P, perCol } = predictorParameters(withOutcome, featureCols, columnConfigs);
+    // Predictors dropped after looking at the data still count towards overfitting: the verdict uses them all
+    const candidates = candidateCols ? predictorParameters(withOutcome, candidateCols, columnConfigs).total : null;
+    const Pv = Math.max(P, candidates || 0);
     const isClass = tcfg.type === 'nominal' || tcfg.type === 'ordinal';
     const fmt = v => v.toLocaleString('en-GB');
     const rows4 = []; // [guide, max parameters, note]
     let headline = '', minority = null, minorityLabel = '', status = 'ok';
 
     if (isClass) {
-        const counts = {};
-        withOutcome.forEach(r => { const k = String(r[targetCol]).trim(); counts[k] = (counts[k] || 0) + 1; });
-        const groups = Object.entries(counts).sort((a, b) => a[1] - b[1]);
+        const groups = Object.entries(units.counts).sort((a, b) => a[1] - b[1]);
         if (groups.length < 2) { box.innerHTML = ''; return; }
         [minorityLabel, minority] = groups[0];
         const E = Math.round(minority * trainFraction);
         const binary = groups.length === 2;
-        headline = `<strong>${fmt(nTrain)}</strong> training patients${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}, of whom about <strong>${fmt(E)}</strong> are in the smaller outcome group ("${escapeHtml(minorityLabel)}", ${(minority / n * 100).toFixed(1)}%)${binary ? '' : ` of ${groups.length} groups`}.`;
+        headline = `<strong>${fmt(nTrain)}</strong> training ${units.unit}${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}, of whom about <strong>${fmt(E)}</strong> are in the smaller outcome group ("${escapeHtml(minorityLabel)}", ${(minority / n * 100).toFixed(1)}%)${binary ? '' : ` of ${groups.length} groups`}.`;
         if (binary) {
             const riley = rileyMaxParameters('binary', nTrain, minority / n);
             rows4.push(['Minimum sample-size criteria (Riley et al.; logistic regression)', riley,
@@ -71,20 +86,20 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
             ['20 patients in the smaller group per parameter', Math.floor(E / 20), 'more cautious; logistic regression reached stable performance at about 20–50'],
             ['Flexible models (random forest, boosted trees, neural network, k-NN): 200 per parameter', Math.floor(E / 200), 'still unstable at this level in simulations (over 10 times what logistic regression needs); below it, treat these models as exploratory']);
         const main = binary ? Math.min(rows4[0][1], rows4[1][1]) : rows4[0][1];
-        status = P <= main ? 'ok' : P <= Math.floor(E / 10) ? 'caution' : 'over';
+        status = Pv <= main ? 'ok' : Pv <= Math.floor(E / 10) ? 'caution' : 'over';
     } else {
-        headline = `<strong>${fmt(nTrain)}</strong> training patients${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}; numerical outcome.`;
+        headline = `<strong>${fmt(nTrain)}</strong> training ${units.unit}${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}; numerical outcome.`;
         const riley = rileyMaxParameters('continuous', nTrain, null);
         rows4.push(['Minimum sample-size criteria (Riley et al.; linear regression, anticipated R² 0.2)', riley, riley ? 'the recommended standard' : 'not met for any number of predictors'],
             ['Flexible models (random forest, boosted trees, neural network, k-NN)', Math.floor(nTrain / 200), 'rough guide; flexible models need much more data than regression']);
-        status = P <= riley ? 'ok' : P <= riley * 1.5 ? 'caution' : 'over';
+        status = Pv <= riley ? 'ok' : Pv <= riley * 1.5 ? 'caution' : 'over';
     }
 
     const multi = perCol.filter(c => c.levels && c.levels > 2).sort((a, b) => b.df - a.df).slice(0, 3);
-    const candidates = candidateCols ? predictorParameters(withOutcome, candidateCols, columnConfigs).total : null;
+    const counted = candidates !== null && candidates > P ? `the ${candidates} candidate parameters considered` : 'your selection';
     const statusText = {
-        ok: '✓ Your selection is within the recommended number of predictor parameters.',
-        caution: '⚠️ Your selection is above the recommended number but not grossly so: expect some overfitting; penalised (ridge) regression and cross-validated tuning help.',
+        ok: `✓ ${counted === 'your selection' ? 'Your selection meets' : `The ${candidates} candidate parameters considered meet`} these planning criteria for regression models, under the stated assumptions (anticipated R², one record per patient unless patients are grouped). This is a planning guide, not proof that a model will perform well.`,
+        caution: `⚠️ ${counted === 'your selection' ? 'Your selection is' : `The ${candidates} candidate parameters considered are`} above the recommended number but not grossly so: expect some overfitting; penalised (ridge) regression and cross-validated tuning help.`,
         over: '⚠️ <strong>Too many predictor parameters for this sample</strong>: models are likely to overfit (good results in these patients, worse in new ones). Reduce the number of predictors, group rare categories, or add patients.'
     }[status];
 
@@ -94,8 +109,9 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
             <p class="tune-muted" style="margin-top: 4px;">${headline} Your selection: <strong>${featureCols.length}</strong> predictor(s) = <strong>${P}</strong> parameter(s)${candidates !== null && candidates > P ? `, from <strong>${candidates}</strong> candidate parameters considered` : ''}.</p>
             <div class="${status === 'ok' ? 'explain-box' : 'tune-warn'}" style="margin-top: 6px;">${statusText}</div>
             <table class="data-table thr-table"><thead><tr><th>Guide</th><th>Largest number of parameters</th><th>Comment</th></tr></thead>
-                <tbody>${rows4.map(([g, v, c]) => `<tr><td>${escapeHtml(g)}</td><td><strong>${v}</strong>${P > v ? ' <span class="tune-sd">(you have ' + P + ')</span>' : ''}</td><td>${escapeHtml(c)}</td></tr>`).join('')}</tbody></table>
+                <tbody>${rows4.map(([g, v, c]) => `<tr><td>${escapeHtml(g)}</td><td><strong>${v}</strong>${Pv > v ? ' <span class="tune-sd">(you have ' + Pv + ')</span>' : ''}</td><td>${escapeHtml(c)}</td></tr>`).join('')}</tbody></table>
             ${multi.length ? `<p class="tune-muted">Categorical predictors use one parameter per category beyond the first: ${multi.map(c => `"${escapeHtml(c.col)}" ${c.levels} categories = ${c.df}`).join('; ')}. Grouping rare categories saves parameters.</p>` : ''}
+            ${groupOf ? '' : `<p class="tune-muted">${escapeHtml(UNIT_NOTE)}</p>`}
             <p class="tune-muted">A parameter is one number the model estimates: 1 for each numerical or ordered predictor, and (categories − 1) for an unordered categorical one. Choose predictors from clinical knowledge and earlier studies before looking at their association with the outcome: selecting them by p-value in the same patients makes the model look better than it is, and every predictor considered counts towards overfitting, not only those kept. SMOTENC and other balancing add no real patients. Riley et al. (BMJ 2020) with the default anticipated R² (15% of the maximum, as in pmsampsize; Step 4 lets you change it); 20–50 and 200 per parameter: van der Ploeg, Austin and Steyerberg, “Modern modelling techniques are data hungry” (BMC Med Res Methodol 2014;14:137).</p>
         </div>`;
 }
@@ -119,21 +135,21 @@ const MODEL_NEEDS = {
  * For each selected model: the data it needs for the current predictors, what the Training set has, and a
  * verdict (adequate / borderline / exploratory only).
  */
-function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, columnConfigs, modelIds, trainFraction = 1, trainLabel = '' }) {
+function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, columnConfigs, modelIds, trainFraction = 1, trainLabel = '', candidateCols = null, groupOf = null }) {
     const box = document.getElementById(containerId);
     if (!box) return;
     if (!rows || !rows.length || !targetCol || !columnConfigs[targetCol] || !modelIds || !modelIds.length) { box.innerHTML = ''; return; }
     const tcfg = columnConfigs[targetCol];
     const withOutcome = rows.filter(r => !DataEngine.isMissing(r[targetCol]));
-    const n = withOutcome.length, nTrain = Math.round(n * trainFraction);
-    const P = Math.max(1, predictorParameters(withOutcome, featureCols, columnConfigs).total);
+    const units = outcomeUnits(withOutcome, targetCol, groupOf);
+    const n = units.n, nTrain = Math.round(n * trainFraction);
+    const P = Math.max(1, predictorParameters(withOutcome, featureCols, columnConfigs).total,
+        candidateCols ? predictorParameters(withOutcome, candidateCols, columnConfigs).total : 0);
     const isClass = tcfg.type === 'nominal' || tcfg.type === 'ordinal';
     const fmt = v => Math.round(v).toLocaleString('en-GB');
     let E = nTrain, share = 1, unit = 'patients', binary = false;
     if (isClass) {
-        const counts = {};
-        withOutcome.forEach(r => { const k = String(r[targetCol]).trim(); counts[k] = (counts[k] || 0) + 1; });
-        const groups = Object.values(counts).sort((a, b) => a - b);
+        const groups = Object.values(units.counts).sort((a, b) => a - b);
         if (groups.length < 2) { box.innerHTML = ''; return; }
         share = groups[0] / n;
         E = Math.round(groups[0] * trainFraction);
@@ -146,12 +162,12 @@ function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, col
         const needed = need.per * P, better = need.better ? need.better * P : null;
         let verdict, cls;
         if (need.kind === 'flexible') {
-            if (E >= needed) { verdict = '✓ Enough data'; cls = 'ok'; }
+            if (E >= needed) { verdict = '✓ Meets this guide (stability still not assured)'; cls = 'ok'; }
             else if (E >= needed / 4) { verdict = '⚠️ Exploratory only: expect overfitting'; cls = 'warn'; }
             else { verdict = '✗ Far too little data: results unreliable'; cls = 'bad'; }
         } else {
             const rileyOk = id === 'glm' && riley !== null ? P <= riley : true;
-            if (E >= (better || needed) && rileyOk) { verdict = '✓ Enough data'; cls = 'ok'; }
+            if (E >= (better || needed) && rileyOk) { verdict = '✓ Meets these planning criteria'; cls = 'ok'; }
             else if (E >= needed) { verdict = '⚠️ Borderline: fewer predictors would be safer'; cls = 'warn'; }
             else { verdict = '✗ Too little data for this many predictors'; cls = 'bad'; }
         }
@@ -166,10 +182,11 @@ function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, col
     box.innerHTML = `
         <div class="cal-panel">
             <div class="tune-title">📏 Enough data for each model?</div>
-            <p class="tune-muted" style="margin-top: 4px;">Training set${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}: <strong>${fmt(nTrain)}</strong> patients, <strong>${fmt(E)}</strong> ${isClass ? 'in the smaller outcome group' : 'in all'}; <strong>${P}</strong> predictor parameter(s).${riley !== null ? ` The Riley criteria allow logistic regression up to <strong>${riley}</strong> parameter(s) here.` : ''}</p>
+            <p class="tune-muted" style="margin-top: 4px;">Training set${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}: <strong>${fmt(nTrain)}</strong> ${units.unit}, <strong>${fmt(E)}</strong> ${isClass ? 'in the smaller outcome group' : 'in all'}; <strong>${P}</strong> predictor parameter(s)${candidateCols ? ' (all candidates considered)' : ''}.${riley !== null ? ` The Riley criteria allow logistic regression up to <strong>${riley}</strong> parameter(s) here.` : ''}</p>
             <table class="data-table thr-table budget-table"><thead><tr><th>Model</th><th>Needed for your ${P} parameter(s)</th><th>Your Training set</th></tr></thead>
                 <tbody>${rowsHtml}</tbody></table>
-            <p class="tune-muted">An "event" is a patient in the smaller outcome group. Flexible models (random forest, boosted trees, neural network, k-NN, ensemble) need roughly ten times the data of logistic regression; with typical clinical cohorts of a few hundred patients they rarely beat penalised logistic regression and overfit more. Training them anyway is fine as a comparison, but judge them by validated results (Option C), not by apparent performance.${isClass ? '' : ' Numerical outcomes: rough guide in patients rather than events.'} Sources: Riley et al. (BMJ 2020); van der Ploeg, Austin and Steyerberg (BMC Med Res Methodol 2014;14:137).</p>
+            ${groupOf ? '' : `<p class="tune-muted">${escapeHtml(UNIT_NOTE)}</p>`}
+            <p class="tune-muted">These are planning guides under stated assumptions, not guarantees. An "event" is a patient in the smaller outcome group. Flexible models (random forest, boosted trees, neural network, k-NN, ensemble) need roughly ten times the data of logistic regression; with typical clinical cohorts of a few hundred patients they rarely beat penalised logistic regression and overfit more. Training them anyway is fine as a comparison, but judge them by validated results (Option C), not by apparent performance.${isClass ? '' : ' Numerical outcomes: rough guide in patients rather than events.'} Sources: Riley et al. (BMJ 2020); van der Ploeg, Austin and Steyerberg (BMC Med Res Methodol 2014;14:137).</p>
         </div>`;
 }
 
@@ -184,7 +201,8 @@ function refreshModelSampleGuide() {
         targetCol: headers.find(h => cfgs[h] && cfgs[h].role === 'target'), columnConfigs: cfgs,
         modelIds: AppState.selectedModelIds && AppState.selectedModelIds.length ? AppState.selectedModelIds : [AppState.selectedModelId || 'nn'],
         trainFraction: mode === 'split' ? pct / 100 : 1,
-        trainLabel: mode === 'split' ? `Option A, ${pct}% of patients` : (mode === 'bootstrap' ? 'Option C, all patients' : 'Option B, all loaded patients')
+        trainLabel: mode === 'split' ? `Option A, ${pct}% of patients` : (mode === 'bootstrap' ? 'Option C, all patients' : 'Option B, all loaded patients'),
+        groupOf: splitGroupFunction()
     });
 }
 
@@ -194,8 +212,9 @@ function refreshPipelineModelGuide() {
     if (!P || !P.trainRows) return;
     renderModelSampleGuide('pipeline-model-sample-guide', {
         rows: P.trainRows, featureCols: P.featureCols.filter(c => !P.droppedFeatures.has(c)), targetCol: P.targetCol,
-        columnConfigs: P.columnConfigs, modelIds: ALL_MODEL_IDS, trainLabel: '7-step pipeline'
+        columnConfigs: P.columnConfigs, modelIds: ALL_MODEL_IDS, trainLabel: '7-step pipeline',
+        candidateCols: P.featureCols, groupOf: pipelineGroupFunction()
     });
 }
 
-export { refreshModelSampleGuide, refreshPipelineModelGuide, MODEL_NEEDS, predictorParameters, renderModelSampleGuide, renderPredictorBudget, rileyMaxParameters };
+export { outcomeUnits, refreshModelSampleGuide, refreshPipelineModelGuide, MODEL_NEEDS, predictorParameters, renderModelSampleGuide, renderPredictorBudget, rileyMaxParameters };

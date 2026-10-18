@@ -1,4 +1,5 @@
 // model-io.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+/* global DataEngine, ModelEngine */
 import { APP_VERSION, AppState, RESEARCH_USE_NOTICE, displayModelName, rankingMetricLabel } from './core.js';
 import { describeSplit } from './cv-tuning.js';
 import { goToStep } from './navigation.js';
@@ -14,20 +15,27 @@ import { showSeedToast } from './training-actions.js';
 // included, except where the method needs them (k-NN models and k-NN imputation), which is flagged.
 // =========================================================================
 const MODEL_FILE_FORMAT = 'ummp-trained-model';
+const MODEL_FILE_VERSION = 1;
 
 function sanitizedPrep(prep) {
     const keep = ['featureCols', 'featureMetadata', 'totalDimensions', 'targetCol', 'isClassification', 'targetClasses',
         'targetClassToIdx', 'targetIdxToClass', 'positiveClass', 'fillValues', 'encodedFeatureNames', 'derivedIndicators'];
     const out = {};
     keep.forEach(k => { if (prep[k] !== undefined) out[k] = JSON.parse(JSON.stringify(prep[k])); });
-    let knnImputation = false;
+    let knnImputation = false, knnColumns = [];
     if (prep.imputation && prep.imputation.plan) {
         const cols = prep.imputation.plan.columns || {};
         knnImputation = Object.values(cols).some(c => c && c.strategy === 'knn');
+        // k-NN filling needs, for each training patient, only the predictors it fills and measures distance
+        // on: every other column (identifiers, outcome, excluded variables) is left out of the file
+        const needed = new Set();
+        Object.keys(cols).forEach(c => { if (cols[c] && cols[c].strategy === 'knn') { needed.add(c); (cols[c].numericCols || []).forEach(n => needed.add(n)); } });
+        const refRows = knnImputation ? (prep.imputation.plan.referenceRows || []).map(r => { const o = {}; needed.forEach(c => { if (r[c] !== undefined) o[c] = r[c]; }); return o; }) : [];
         out.imputation = {
             configs: JSON.parse(JSON.stringify(prep.imputation.configs)),
-            plan: { columns: JSON.parse(JSON.stringify(cols)), referenceRows: knnImputation ? JSON.parse(JSON.stringify(prep.imputation.plan.referenceRows || [])) : [] }
+            plan: { columns: JSON.parse(JSON.stringify(cols)), referenceRows: JSON.parse(JSON.stringify(refRows)) }
         };
+        knnColumns = [...needed];
     }
     // Multiple imputation: the fitted imputation models, including their donor values (observed values of
     // training patients, one predictor at a time), are needed to impute new patients
@@ -36,7 +44,7 @@ function sanitizedPrep(prep) {
         out.imputation = { ...(out.imputation || { configs: JSON.parse(JSON.stringify(prep.imputation.configs)) }), mice: JSON.parse(JSON.stringify(prep.imputation.mice)) };
         if (prep.multipleImputation) out.multipleImputation = JSON.parse(JSON.stringify(prep.multipleImputation));
     }
-    return { prep: out, knnImputation: knnImputation || miceImputation, miceImputation };
+    return { prep: out, knnImputation: knnImputation || miceImputation, miceImputation, knnFilling: knnImputation, knnColumns };
 }
 
 function evaluationSummary(ev) {
@@ -47,10 +55,15 @@ function evaluationSummary(ev) {
     return JSON.parse(JSON.stringify(out));
 }
 
+// Whether a serialised model holds training patients' values: a k-NN model anywhere inside it, including inside
+// recalibrated, multiply imputed (pooled), ensemble or neural-network-fallback wrappers
 function modelContainsKnn(ser) {
-    if (!ser) return false;
+    if (!ser || typeof ser !== 'object') return false;
     if (ser.type === 'knn') return true;
     if (ser.type === 'ensemble') return (ser.models || []).some(it => modelContainsKnn(it.model));
+    if (ser.type === 'mi-pooled') return (ser.models || []).some(modelContainsKnn);
+    if (ser.type === 'calibrated') return modelContainsKnn(ser.base);
+    if (ser.type === 'nn') return modelContainsKnn(ser.fallbackGLM);
     return false;
 }
 
@@ -61,20 +74,27 @@ async function exportTrainedModel() {
     try {
         if (btn) btn.disabled = true;
         const ser = await ModelEngine.serializeModel(model);
-        const { prep: cleanPrep, knnImputation, miceImputation } = sanitizedPrep(prep);
-        const containsPatientData = knnImputation || modelContainsKnn(ser);
-        if (containsPatientData && !confirm('This model file will contain the training patients\' predictor values (needed by ' +
-            (modelContainsKnn(ser) ? 'k-Nearest Neighbours' : miceImputation ? 'multiple imputation, which fills a new patient\'s gaps with values observed in similar training patients' : 'k-NN missing-value filling') + '). Share it only where your data-governance rules allow. Continue?')) return;
+        const { prep: cleanPrep, knnImputation, miceImputation, knnFilling, knnColumns } = sanitizedPrep(prep);
+        const knnModel = modelContainsKnn(ser);
+        const containsPatientData = knnImputation || knnModel;
+        // What the file holds, stated exactly (no identifiers or outcomes of individual patients beyond this)
+        const manifest = [];
+        if (knnModel) manifest.push(`• k-Nearest Neighbours model: every training patient's encoded predictor values and outcome (${prep.featureCols.length} predictor(s), outcome "${prep.targetCol}")`);
+        if (knnFilling) manifest.push(`• k-NN missing-value filling: every training patient's values of ${knnColumns.length} predictor(s) (${knnColumns.slice(0, 6).join(', ')}${knnColumns.length > 6 ? ', …' : ''}); no identifiers or outcomes`);
+        if (miceImputation) manifest.push('• Multiple imputation: up to 500 observed values per predictor from training patients (donors), each predictor separately; no identifiers or outcomes');
+        if (containsPatientData && !confirm('This model file will contain patient-level data from the training set:\n\n' + manifest.join('\n') +
+            '\n\nIt also contains the model parameters, preprocessing and summary results (no other patient values). Share it only where your data-governance rules allow. Continue?')) return;
         const name = AppState.deployedSource === '7step' && AppState.deployedPipelineModel ? AppState.deployedPipelineModel.name
             : AppState.deployedSource === 'imported' && AppState.importedModelInfo ? AppState.importedModelInfo.name
             : displayModelName(AppState.deployedModelId || AppState.selectedModelId, model);
         const bundle = {
-            format: MODEL_FILE_FORMAT, formatVersion: 1, notice: RESEARCH_USE_NOTICE,
+            format: MODEL_FILE_FORMAT, formatVersion: MODEL_FILE_VERSION, notice: RESEARCH_USE_NOTICE,
             software: { name: SETTINGS_APP, version: APP_VERSION },
             exportedAt: new Date().toISOString(),
             model: { id: AppState.deployedModelId || AppState.selectedModelId, name, workflow: AppState.deployedSource || 'standard', seed: model.seed ?? null },
             trainingDataset: { name: AppState.fileName || (AppState.importedModelInfo && AppState.importedModelInfo.dataset) || null, outcome: prep.targetCol },
             containsPatientData,
+            patientDataContents: containsPatientData ? manifest.map(m => m.replace(/^• /, '')) : [],
             decisionThreshold: AppState.evalResults ? AppState.evalResults.decisionThreshold ?? null : null,
             evaluation: evaluationSummary(AppState.evalResults),
             preprocessing: cleanPrep,
@@ -98,13 +118,47 @@ async function exportTrainedModel() {
     }
 }
 
+// A model file is untrusted input: its preprocessing description is checked before anything is used
+function validateImportedPrep(prep) {
+    const bad = what => { throw new Error(`The file's preprocessing information is invalid (${what}).`); };
+    if (!prep || typeof prep !== 'object') bad('missing');
+    if (!Array.isArray(prep.featureCols) || !prep.featureCols.length || !prep.featureCols.every(c => typeof c === 'string')) bad('predictor names');
+    if (typeof prep.targetCol !== 'string') bad('outcome name');
+    if (typeof prep.isClassification !== 'boolean') bad('outcome type');
+    if (!Number.isInteger(prep.totalDimensions) || prep.totalDimensions < 1 || prep.totalDimensions > 5000) bad('number of encoded columns');
+    if (!prep.featureMetadata || typeof prep.featureMetadata !== 'object') bad('predictor encoding');
+    prep.featureCols.forEach(c => {
+        const md = prep.featureMetadata[c];
+        if (!md || typeof md !== 'object' || !['nominal', 'ordinal', 'continuous'].includes(md.type)) bad(`encoding of "${c}"`);
+        if (!Number.isInteger(md.startIndex) || md.startIndex < 0 || md.startIndex >= prep.totalDimensions) bad(`position of "${c}"`);
+        if (md.type === 'nominal' && (!Array.isArray(md.categories) || !md.categories.every(v => typeof v === 'string'))) bad(`categories of "${c}"`);
+    });
+    if (prep.isClassification && (!Array.isArray(prep.targetClasses) || prep.targetClasses.length < 2)) bad('outcome categories');
+    ['__proto__', 'constructor', 'prototype'].forEach(k => { if (Object.prototype.hasOwnProperty.call(prep, k)) bad(k); });
+}
+
+// The imported model must predict a typical patient (all predictors at their fitted defaults) with valid output
+function checkImportedModel(model, prep) {
+    if (!model || typeof model.predictSingle !== 'function') throw new Error('The file does not contain a usable model.');
+    const row = {};
+    prep.featureCols.forEach(c => { row[c] = ''; });
+    const x = DataEngine.transformSingleRow(row, prep);
+    if (!Array.isArray(x) && !ArrayBuffer.isView(x)) throw new Error('The model\'s preprocessing could not be applied.');
+    const out = model.predictSingle(x);
+    const nums = out && typeof out === 'object' ? [out.pred, ...Object.values(out.probabilities || {})] : [out];
+    if (!nums.every(v => typeof v === 'number' && isFinite(v))) throw new Error('The model gives invalid predictions.');
+}
+
 async function importTrainedModel(file) {
     try {
         const bundle = JSON.parse(await file.text());
         if (!bundle || bundle.format !== MODEL_FILE_FORMAT) throw new Error('This is not a trained-model file exported from this app.');
-        const model = await ModelEngine.deserializeModel(bundle.parameters);
+        if (bundle.formatVersion !== undefined && bundle.formatVersion > MODEL_FILE_VERSION) throw new Error('This model file was made by a newer version of the app; please use the latest version.');
         const prep = bundle.preprocessing;
-        if (!prep || !Array.isArray(prep.featureCols)) throw new Error('The file has no preprocessing information.');
+        validateImportedPrep(prep);
+        const model = await ModelEngine.deserializeModel(bundle.parameters);
+        // Nothing is installed until the model has predicted a typical patient without error
+        checkImportedModel(model, prep);
         AppState.trainedModel = model;
         AppState.prepMeta = prep;
         AppState.evalResults = { ...(bundle.evaluation || {}), decisionThreshold: bundle.decisionThreshold ?? (bundle.evaluation || {}).decisionThreshold, isClassification: prep.isClassification };
@@ -155,7 +209,7 @@ function downloadPipelineProtocolReport() {
         target_variable: AppState.pipeline.targetCol,
         reproducibility_seed: AppState.pipeline.evalSeed,
         automatic_tuning: AppState.pipeline.tuningReport ? {
-            method: `${AppState.pipeline.tuningReport.folds}-fold stratified cross-validation within the training set; SMOTENC and encoding/scaling refitted inside each fold; neural network at most 3 folds; test set not used`,
+            method: `${AppState.pipeline.tuningReport.folds}-fold stratified cross-validation within the training set; imputation, SMOTENC and encoding/scaling refitted inside each fold; neural network at most 3 folds; test set not used`,
             ranking_metric: AppState.pipeline.tuningReport.models[0] ? AppState.pipeline.tuningReport.models[0].metricLabel : null,
             small_sample_warning: AppState.pipeline.tuningReport.smallSampleWarning || null,
             models: AppState.pipeline.tuningReport.models.map(t => ({

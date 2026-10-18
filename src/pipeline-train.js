@@ -15,6 +15,7 @@ import { renderSubgroupPanel } from './subgroups.js';
 // STEP 7: Algorithm-Specific Training & Constraints
 // =========================================================================
 async function executePipelineStep7() {
+    const runDataset = AppState.datasetRun; // results are installed only if the same dataset is still loaded
     if (!AppState.pipeline.rfImportance || AppState.pipeline.rfImportance.length === 0) {
         alert("Please complete Step 6: Random Forest Scout & Feature Ranking first.");
         return;
@@ -111,7 +112,7 @@ async function executePipelineStep7() {
         const benchmarkList = [];
 
         // Protocol default settings; optional automatic tuning (cross-validation inside the real
-        // Training rows, SMOTENC re-applied within each fold) may replace them
+        // Training rows, imputation and SMOTENC re-applied within each fold) may replace them
         const evalSeed = AppState.pipeline.evalSeed;
         const pHp = {
             knn: { k: 5, metric: 'euclidean', weighting: 'distance', seed: evalSeed },
@@ -139,7 +140,7 @@ async function executePipelineStep7() {
                 const key = `${k}|${inFold ? 'sel' : ''}|${cols.join('␟')}`;
                 if (!foldCache[key]) {
                     foldCache[key] = await buildPipelineFolds(AppState.pipeline.trainRows, cols, k, evalSeed, (f, nf) => {
-                        if (watchdog) watchdog.tick(stepOf(stepId), `🎯 Preparing cross-validation folds for ${label}: fold ${f}/${nf} (SMOTENC, scaling${inFold ? ' and top-70% selection' : ''} inside each fold)...`);
+                        if (watchdog) watchdog.tick(stepOf(stepId), `🎯 Preparing cross-validation folds for ${label}: fold ${f}/${nf} (imputation, SMOTENC, scaling${inFold ? ' and top-70% selection' : ''} inside each fold)...`);
                     }, inFold);
                 }
                 return foldCache[key];
@@ -285,6 +286,7 @@ async function executePipelineStep7() {
         }
         // Store ranked best-first, so benchmarkResults[0] is genuinely the top model everywhere it is used
         benchmarkList.sort((a, b) => compareEvalResults(a.eval, b.eval, isClassification));
+        if (AppState.datasetRun !== runDataset) throw new Error('A different dataset was loaded while the models were training, so these results were discarded.');
         disposeModels((AppState.pipeline.benchmarkResults || []).map(b => b.model));
         AppState.pipeline.benchmarkResults = benchmarkList;
         AppState.pipeline.tuningReport = pipeTune ? pipeTuningReport : null;
@@ -373,8 +375,8 @@ function renderPipelineLeaderboardOnly() {
                             ✓ Active
                         </span>
                     ` : `
-                        <button class="btn btn-secondary btn-sm" ${actionAttrs('deployPipelineModel', item.id)} title="Deploy this model for live patient inference">
-                            🚀 Deploy
+                        <button class="btn btn-secondary btn-sm" ${actionAttrs('deployPipelineModel', item.id)} title="Make this the active research model for Steps 5 and 6">
+                            Use this model
                         </button>
                     `}
                 </td>

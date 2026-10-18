@@ -24,6 +24,18 @@ const SETTINGS_KEY_PREFIX = 'ummp-settings:';
 const SETTINGS_MAX_STORED = 20;
 const VARIABLE_FIELDS = ['role', 'prevRole', 'type', 'imputationStrategy', 'prevImputationStrategy', 'customImputeVal', 'positiveClass', 'ordinalOrder'];
 
+// A settings file is untrusted input: each saved variable choice must be one the app itself can make
+const ROLES = ['feature', 'target', 'meta'], TYPES = ['continuous', 'ordinal', 'nominal'];
+const STRATEGIES = ['median', 'mean', 'mode', 'constant', 'knn', 'drop'];
+function validVariableField(f, v) {
+    if (f === 'role' || f === 'prevRole') return ROLES.includes(v);
+    if (f === 'type') return TYPES.includes(v);
+    if (f === 'imputationStrategy' || f === 'prevImputationStrategy') return STRATEGIES.includes(v);
+    if (f === 'customImputeVal' || f === 'positiveClass') return (typeof v === 'string' && v.length <= 500) || (typeof v === 'number' && isFinite(v));
+    if (f === 'ordinalOrder') return Array.isArray(v) && v.length <= 1000 && v.every(x => typeof x === 'string' && x.length <= 500);
+    return false;
+}
+
 // Identifies a dataset by its column headers (FNV-1a hash), so a re-loaded or updated file matches
 function datasetSignature(headers) {
     let h = 0x811c9dc5;
@@ -223,7 +235,7 @@ function applySettings(settings) {
         const cfg = AppState.columnConfigs[h];
         // Optional choices absent from the saved file must not linger from the current session
         ['prevRole', 'prevImputationStrategy', 'positiveClass', 'ordinalOrder'].forEach(f => { delete cfg[f]; });
-        VARIABLE_FIELDS.forEach(f => { if (saved[f] !== undefined) cfg[f] = Array.isArray(saved[f]) ? saved[f].slice() : saved[f]; });
+        VARIABLE_FIELDS.forEach(f => { if (saved[f] !== undefined && validVariableField(f, saved[f])) cfg[f] = Array.isArray(saved[f]) ? saved[f].slice() : saved[f]; });
     });
     // Exactly one target
     const targets = headers.filter(h => AppState.columnConfigs[h].role === 'target');

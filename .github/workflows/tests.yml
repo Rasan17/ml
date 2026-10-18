@@ -36,6 +36,9 @@ jobs:
       - name: Edge cases (data engine and models)
         run: node tests/edge_cases.js
 
+      - name: Audit regression checks
+        run: node tests/audit_regressions.js
+
       - name: End-to-end workflow checks
         run: node tests/end_to_end.js
 

@@ -6,8 +6,8 @@ type: software
 authors:
   - family-names: "Narenthiran"
     given-names: "Ganesalingam"
-version: "2.1 (2026.10.17)"
-date-released: "2026-10-17"
+version: "2.2 (2026.10.18)"
+date-released: "2026-10-18"
 repository-code: "https://github.com/Rasan17/ml"
 url: "https://rasan17.github.io/ml/"
 keywords:

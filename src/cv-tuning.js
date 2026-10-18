@@ -254,7 +254,10 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const targetCol = p.targetCol;
     const isClassification = p.columnConfigs[targetCol]?.type !== 'continuous';
     const groupOf = pipelineGroupFunction();
-    const cap = capRows(trainRows, isClassification, targetCol, seed, groupOf);
+    // Folds are built from the raw (not yet imputed) training records, and the Step 1 imputation is refitted on
+    // each fold's learning rows, so a fold's validation patients never influence the values filled in
+    const raw = p.trainRawRows && p.trainRawRows.length === trainRows.length ? p.trainRawRows : null;
+    const cap = capRows(raw || trainRows, isClassification, targetCol, seed, groupOf);
     const rows = cap.rows;
     const sampled = cap.sampled;
     const requestedFolds = k;
@@ -266,8 +269,14 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const sets = [];
     const selections = [];
     for (let f = 0; f < k; f++) {
-        const tr = rows.filter((_, i) => fold[i] !== f);
-        const va = rows.filter((_, i) => fold[i] === f);
+        let tr = rows.filter((_, i) => fold[i] !== f);
+        let va = rows.filter((_, i) => fold[i] === f);
+        let foldImputer = p.imputer;
+        if (raw) {
+            foldImputer = DataEngine.fitStrictImputer(tr, p.featureCols, targetCol, p.columnConfigs, p.imputeStrategy || 'median');
+            tr = DataEngine.transformWithStrictImputer(tr, foldImputer, p.columnConfigs).rows;
+            va = DataEngine.transformWithStrictImputer(va, foldImputer, p.columnConfigs).rows;
+        }
         const balanced = DataEngine.applySMOTENC(tr, cols, targetCol, p.columnConfigs, seed).balancedRows;
         let foldCols = cols, foldCfg = cfg;
         if (inFoldSelection) {
@@ -279,13 +288,13 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
             foldCfg[targetCol] = p.columnConfigs[targetCol];
         }
         const prep = DataEngine.prepareDataset(balanced, foldCfg, foldCols, targetCol);
-        prep.fillValues = { ...(p.imputer ? p.imputer.fillValues : {}) };
+        prep.fillValues = { ...(foldImputer ? foldImputer.fillValues : {}) };
         const te = DataEngine.prepareTestingDataset(va, prep);
         sets.push({ Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses });
         if (onFold) onFold(f + 1, k);
         await ModelEngine.yieldToBrowser(); // keep the page responsive between folds
     }
-    return { sets, rowsUsed: rows.length, rowsTotal: trainRows.length, sampled, grouped: Boolean(groupOf), selections: inFoldSelection ? selections : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds };
+    return { sets, rowsUsed: rows.length, rowsTotal: trainRows.length, sampled, grouped: Boolean(groupOf), imputationRefitted: Boolean(raw), selections: inFoldSelection ? selections : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds };
 }
 
 // Show the chosen settings in the model's settings panel (so they are visible and saved with Save settings)

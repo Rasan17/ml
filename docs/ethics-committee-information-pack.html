@@ -67,8 +67,8 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 <p class="subtitle">Ethics committee information pack: data handling, intended use, accuracy and verification</p>
 
 <div class="doc-control">
-  <div><div class="label">Software version</div><div class="v">2.1 (build 2026.10.17)</div></div>
-  <div><div class="label">Document date</div><div class="v">17 October 2026</div></div>
+  <div><div class="label">Software version</div><div class="v">2.2 (build 2026.10.18)</div></div>
+  <div><div class="label">Document date</div><div class="v">18 October 2026</div></div>
   <div><div class="label">Web address</div><div class="v">rasan17.github.io/ml</div></div>
   <div><div class="label">Source code</div><div class="v">github.com/Rasan17/ml</div></div>
   <div><div class="label">Developer</div><div class="v">Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)</div></div>
@@ -123,6 +123,8 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   <li><strong>No server and no data upload.</strong> The website delivers only the application's own files (program code, stylesheet and simulated example datasets). It has no account system, database or upload function.</li>
   <li><strong>Content Security Policy.</strong> The page declares a browser security policy that only allows it to contact its own address (<code>connect-src 'self'</code>), forbids form submissions to other sites (<code>form-action 'none'</code>), blocks plug-ins (<code>object-src 'none'</code>) and allows scripts only from its own files or by cryptographic hash. The browser enforces this policy, so even a programming error could not send data to another server.</li>
   <li><strong>No third-party components at run time.</strong> No analytics, advertising, tracking, fonts or scripts are loaded from other organisations. The libraries the application uses (TensorFlow.js and Chart.js) are served from the application's own files.</li>
+  <li><strong>Untrusted files are checked.</strong> Model and settings files loaded into the application are treated as untrusted: they are read as plain data only (a file cannot add program code), checked against the expected structure, and a model must predict a test patient correctly before anything is installed.</li>
+  <li><strong>Clear session.</strong> A “Clear session and patient data” button discards every loaded dataset, result, trained model and cached imputation from the page. Closing the browser tab has the same effect.</li>
   <li><strong>Verified on the published site.</strong> In October 2026, every network request made by the published application during a complete analysis (loading data, training models, making predictions) was recorded: all went to the application's own address, all were downloads of its own files and example data, and none sent data out.</li>
 </ul>
 
@@ -137,7 +139,7 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 <tr><td>Settings file (.json)</td><td>Researcher clicks “Save settings”</td><td class="no">No: analysis choices only</td></tr>
 <tr><td>Analysis reports (printable HTML, JSON) and TRIPOD+AI checklist</td><td>Researcher clicks the report button</td><td class="no">No: summary results only (counts, performance measures, plots)</td></tr>
 <tr><td>Trained model file (.json), most model types</td><td>Researcher clicks “Export trained model”</td><td class="no">No: model parameters and preprocessing rules (e.g. means used for scaling)</td></tr>
-<tr><td>Trained model file: k-nearest-neighbours models, or models using k-NN or multiple imputation for missing values</td><td>Researcher clicks “Export trained model” and confirms a warning</td><td class="yes">Yes: these methods need training patients' predictor values, which the application states before the file is saved</td></tr>
+<tr><td>Trained model file: k-nearest-neighbours models, or models using k-NN or multiple imputation for missing values</td><td>Researcher clicks “Export trained model” and confirms a warning</td><td class="yes">Yes, and the application lists exactly what is included before the file is saved: a k-NN model holds every training patient's encoded predictor values and outcome; k-NN missing-value filling keeps only the predictors it fills and measures distance on; multiple imputation keeps up to 500 observed values per predictor. No identifiers or excluded columns are included. This is detected through every model wrapper (recalibrated, multiply imputed, ensemble)</td></tr>
 <tr><td>Imputed data file (.json)</td><td>Researcher clicks “Save imputed data” (Step 4, multiple imputation)</td><td class="yes">Yes: every training patient's values with the missing ones filled in, to skip repeating the imputation in a later session. The file name includes “PATIENT-DATA” and the application states this when it is saved</td></tr>
 <tr><td>Batch prediction results (.csv)</td><td>Researcher downloads predictions for an uploaded file</td><td class="yes">Yes: the researcher's own rows with a prediction added</td></tr>
 </tbody></table></div>
@@ -217,12 +219,12 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 <h2>9. Suggested wording for an ethics application</h2>
 <p>Researchers may adapt the following paragraph:</p>
-<div class="paste"><p>Prediction models will be developed using the Universal Medical ML/NeuralNet Predictor (version 2.1, build 2026.10.17; Dr G Narenthiran), a browser-based research application in which all data processing takes place locally on the researcher's computer. No patient data are transmitted to any server; the application has no server-side component and its security policy prevents network transmission, which has been verified on the published version. The application [will be run offline from a local copy on an institution-managed encrypted computer]. Only [de-identified / pseudonymised] data will be analysed. The software's statistical calculations have been verified against established statistical software (SciPy, scikit-learn, statsmodels, scikit-survival) and open-source audit tools (Fairlearn, Deepchecks); verification reports are publicly available. The software is research software, not a medical device, and no results will be used for decisions about individual patients' care. Model development and reporting will follow TRIPOD+AI.</p></div>
+<div class="paste"><p>Prediction models will be developed using the Universal Medical ML/NeuralNet Predictor (version 2.2, build 2026.10.18; Dr G Narenthiran), a browser-based research application in which all data processing takes place locally on the researcher's computer. No patient data are transmitted to any server; the application has no server-side component and its security policy prevents network transmission, which has been verified on the published version. The application [will be run offline from a local copy on an institution-managed encrypted computer]. Only [de-identified / pseudonymised] data will be analysed. The software's statistical calculations have been verified against established statistical software (SciPy, scikit-learn, statsmodels, scikit-survival) and open-source audit tools (Fairlearn, Deepchecks); verification reports are publicly available. The software is research software, not a medical device, and no results will be used for decisions about individual patients' care. Model development and reporting will follow TRIPOD+AI.</p></div>
 
 <h2>10. Further information</h2>
 <p>Technical documentation, test reports (<code>tests/AUDIT_REPORT.md</code>, <code>tests/BENCHMARK_REPORT.md</code>, <code>tests/AUDIT_FAIRLEARN.md</code>, <code>tests/AUDIT_DEEPCHECKS.md</code>) and instructions for repeating every check are in the source repository's README. Questions about the software can be addressed to the developer, whose contact details are shown in the application's header.</p>
 
-<footer>Universal Medical ML/NeuralNet Predictor · Ethics committee information pack · document for software version 2.1 (build 2026.10.17) · 17 October 2026. This document describes the software; it does not replace the study-specific information required by the reviewing committee.</footer>
+<footer>Universal Medical ML/NeuralNet Predictor · Ethics committee information pack · document for software version 2.2 (build 2026.10.18) · 18 October 2026. This document describes the software; it does not replace the study-specific information required by the reviewing committee.</footer>
 </div>
 </body>
 </html>

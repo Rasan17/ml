@@ -294,7 +294,7 @@ function deployPipelineModel(modelId, showNotice = true, skipRerender = false) {
     }
 
     if (showNotice) {
-        showSeedToast(`✓ Deployed "${targetItem.name}" as the active predictor for Steps 5 & 6`);
+        showSeedToast(`✓ "${targetItem.name}" is now the active research model for Steps 5 & 6`);
     }
 }
 window.deployPipelineModel = deployPipelineModel;
@@ -310,12 +310,12 @@ function updatePipelineActiveDeploymentStatus() {
     if (!DOM.pipelineActiveDeploymentStatus) return;
     if (AppState.deployedPipelineModel) {
         DOM.pipelineActiveDeploymentStatus.innerHTML = `
-            Currently Active Deployed Model: <strong style="color: var(--accent-emerald);">${escapeHtml(AppState.deployedPipelineModel.name)}</strong> 
+            Active research model: <strong style="color: var(--accent-emerald);">${escapeHtml(AppState.deployedPipelineModel.name)}</strong> 
             (${escapeHtml(AppState.deployedPipelineModel.eval.featuresUsed)}). 
             ${pipelineProvenanceSummary()} &bull; Ready for single-case and batch predictions (research use).
         `;
     } else {
-        DOM.pipelineActiveDeploymentStatus.innerHTML = `Select any model from the leaderboard to deploy for real-time patient predictions.`;
+        DOM.pipelineActiveDeploymentStatus.innerHTML = `Choose a model from the leaderboard to use for research predictions in Steps 5 and 6.`;
     }
 }
 

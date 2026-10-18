@@ -3,6 +3,7 @@ import { AppState, escapeHtml } from './core.js';
 import { renderImputationTable } from './imputation.js';
 import { DOM } from './shell.js';
 import { renderPredictorBudget } from './predictor-budget.js';
+import { splitGroupFunction } from './cv-tuning.js';
 
 
 // =========================================================================
@@ -184,7 +185,8 @@ function renderVariableIncludeSummary() {
     renderPredictorBudget('predictor-budget-container', {
         rows: AppState.parsedData.rows, featureCols: headers.filter(h => cfgs[h].role === 'feature'), targetCol: target, columnConfigs: cfgs,
         trainFraction: mode === 'split' ? pct / 100 : 1,
-        trainLabel: mode === 'split' ? `the ${pct}% Training set of Option A; Options B and C train on all loaded patients` : (mode === 'bootstrap' ? 'all patients, Option C' : 'all loaded patients, Option B')
+        trainLabel: mode === 'split' ? `the ${pct}% Training set of Option A; Options B and C train on all loaded patients` : (mode === 'bootstrap' ? 'all patients, Option C' : 'all loaded patients, Option B'),
+        groupOf: splitGroupFunction()
     });
 }
 

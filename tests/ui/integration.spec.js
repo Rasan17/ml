@@ -240,13 +240,13 @@ test('"How many predictors?" (Step 2, pipeline Step 4) and per-model data needs 
     await expect(page.locator('#data-stats-grid')).toContainText('420');
     await page.click('button.step-tab[data-step="2"]');
     const guide = page.locator('#predictor-budget-container');
-    await expect(guide).toContainText('336 training patients');
+    await expect(guide).toContainText('336 training records');
     await expect(guide).toContainText('104 are in the smaller outcome group');
     await expect(guide).toContainText('14 predictor(s) = 15 parameter(s)');
     await expect(guide).toContainText('Riley');
     await page.click('#var-exclude-all-btn');
     await expect(guide).toContainText('0 predictor(s) = 0 parameter(s)');
-    await expect(guide).toContainText('within the recommended number');
+    await expect(guide).toContainText('meets these planning criteria');
     await page.click('#var-include-all-btn');
     // Step 4: data needed by each selected model
     await page.click('button.step-tab[data-step="3"]');
@@ -268,5 +268,37 @@ test('"How many predictors?" (Step 2, pipeline Step 4) and per-model data needs 
     await expect(pg).toContainText('15 parameter(s)');
     await page.locator('.pipeline-univ-checkbox').first().uncheck();
     await expect(pg).toContainText('candidate parameters considered');
+    expect(errors).toEqual([]);
+});
+
+test('a tampered model file is refused before anything is installed; Clear session empties the page', async ({ page }) => {
+    test.setTimeout(400000);
+    const errors = [], dialogs = [];
+    page.on('pageerror', e => errors.push(String(e)));
+    page.on('dialog', d => { dialogs.push(d.message()); d.accept(); });
+    await page.goto('/index.html');
+    await toStep4(page);
+    await page.locator('.model-card[data-model-id="glm"]').click({ position: { x: 12, y: 12 } });
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText(/Deployed|Complete/, { timeout: 170000 });
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#model-export-btn')]);
+    const bundle = JSON.parse(fs.readFileSync(await dl.path(), 'utf8'));
+    const tampered = JSON.parse(JSON.stringify(bundle));
+    (tampered.parameters.state || tampered.parameters.base?.state || {}).predictSingle = 1;
+    if (tampered.parameters.type === 'calibrated') tampered.parameters.base.state.predictSingle = 1;
+    await page.goto('/index.html');
+    await page.setInputFiles('#model-file-input', { name: 'tampered.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(tampered)) });
+    await expect.poll(() => dialogs.join(' ')).toContain('could not be imported');
+    await expect(page.locator('#step-5-content')).not.toBeVisible();
+    // the genuine file still imports
+    await page.setInputFiles('#model-file-input', { name: 'genuine.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
+    await expect(page.locator('#step-5-content')).toBeVisible();
+    // Clear session: everything held by the page is discarded
+    await page.click('button.step-tab[data-step="1"]');
+    await page.click('#sample-shunt-large-btn');
+    await expect(page.locator('#data-stats-grid')).toContainText('420');
+    await Promise.all([page.waitForEvent('load'), page.click('#clear-session-btn')]);
+    await expect(page.locator('#data-stats-grid')).not.toContainText('420');
+    await expect(page.locator('#model-export-btn')).toBeDisabled();
     expect(errors).toEqual([]);
 });

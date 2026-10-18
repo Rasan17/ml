@@ -191,7 +191,7 @@ body {
     border-radius: var(--card-radius);
     padding: 8px 12px;
     gap: 6px;
-    overflow-x: auto;
+    flex-wrap: wrap; /* every tab stays visible (the last ones were hidden off-screen at common widths) */
     box-shadow: var(--shadow-soft);
 }
 
@@ -1938,3 +1938,10 @@ body.comparison-running { overflow: hidden; }
 .budget-warn strong { color: var(--accent-amber, #b45309); }
 .budget-bad strong { color: var(--accent-rose, #dc2626); }
 .budget-table td, .budget-table th { white-space: normal; vertical-align: top; }
+
+/* Start page: choose the task first */
+.task-chooser { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; margin-bottom: 16px; }
+.task-chooser-label { width: 100%; font-size: 13px; font-weight: 700; color: var(--text-secondary); }
+.task-choice { flex: 1 1 220px; display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-surface); color: var(--text-primary); cursor: pointer; font: inherit; }
+.task-choice span { font-size: 12px; color: var(--text-secondary); }
+.task-choice:hover, .task-choice:focus-visible { border-color: var(--accent-cyan); }
