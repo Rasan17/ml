@@ -26,7 +26,8 @@ function isNumericSubgroupColumn(rows, c) {
 // Group label for every row: categories as they are, numbers in thirds of the Testing set (tertiles)
 function groupLabels(rows, col) {
     if (isNumericSubgroupColumn(rows, col)) {
-        const nums = rows.map(r => Number(String(r[col] ?? '').trim())).map(v => (String(v) === '' || isNaN(v) ? null : v));
+        // Blank cells are "(missing)", never 0 (Number('') would be 0 and fall in the lowest third)
+        const nums = rows.map(r => { const t = String(r[col] ?? '').trim(); const v = Number(t); return t === '' || DataEngine.isMissing(t) || !isFinite(v) ? null : v; });
         const sorted = nums.filter(v => v !== null).sort((a, b) => a - b);
         const q = p => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
         const c1 = q(1 / 3), c2 = q(2 / 3);

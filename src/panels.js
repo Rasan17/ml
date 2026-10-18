@@ -75,7 +75,7 @@ function calibrationBody(item, positiveLabel) {
     const rc = ev.recalibration;
     const f2 = v => (typeof v === 'number' ? v.toFixed(2) : 'n/a');
     const recalNote = rc
-        ? `<div class="explain-box" style="margin-top: 8px;"><strong>📐 Recalibrated</strong> with ${rc.method === 'platt' ? 'Platt scaling' : 'isotonic regression'} fitted on ${escapeHtml(rc.fittedOn)}. Before recalibration on these test patients: slope ${f2(rc.before.slope)}, intercept ${f2(rc.before.intercept)}, Brier ${typeof rc.before.brierScore === 'number' ? rc.before.brierScore.toFixed(3) : 'n/a'}${typeof rc.before.rocAuc === 'number' ? `, AUC ${rc.before.rocAuc.toFixed(3)}` : ''}. The values above are after recalibration.</div>`
+        ? `<div class="explain-box" style="margin-top: 8px;"><strong>📐 Recalibrated</strong> with ${rc.method === 'prior-shift' ? 'a prior-shift correction (undoing the SMOTENC balancing) based on' : rc.method === 'platt' ? 'Platt scaling fitted on' : 'isotonic regression fitted on'} ${escapeHtml(rc.fittedOn)}. Before recalibration on these test patients: slope ${f2(rc.before.slope)}, intercept ${f2(rc.before.intercept)}, Brier ${typeof rc.before.brierScore === 'number' ? rc.before.brierScore.toFixed(3) : 'n/a'}${typeof rc.before.rocAuc === 'number' ? `, AUC ${rc.before.rocAuc.toFixed(3)}` : ''}. The values above are after recalibration.</div>`
         : (ev.recalibrationSkipped ? `<div class="tune-muted" style="margin-top: 6px;">${escapeHtml(ev.recalibrationSkipped)}</div>`
             // Miscalibrated (the slope's 95% CI excludes 1) and not recalibrated: say how to correct it
             : (ev.ci && ev.ci.calibrationSlope && (ev.ci.calibrationSlope[0] > 1 || ev.ci.calibrationSlope[1] < 1)
@@ -647,7 +647,7 @@ function renderOptimismPanel(containerId, results) {
                 : 'Reported: <strong>Harrell\'s</strong> optimism-corrected estimate, the standard for regression-type models; the .632+ estimate is shown for comparison.'}</p>
             <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (trained and scored on all patients)</th><th>Average optimism</th><th>Harrell corrected</th><th>.632+ estimate</th></tr></thead>
             <tbody>${keys.map(k => `<tr><td>${labels[k] || k}</td><td>${fmt(k, oc.apparent[k])}</td><td>${fmtOpt(k, oc.optimism[k])}</td><td>${b(!is632, fmt(k, h[k]))}</td><td>${b(is632, fmt(k, e[k]))}</td></tr>`).join('')}
-            ${oc.calibrationSlope !== null && oc.calibrationSlope !== undefined ? `<tr><td>Calibration slope (ideal 1)</td><td>${appSlope}</td><td>—</td><td colspan="2"><strong>${oc.calibrationSlope.toFixed(3)}</strong> <span class="tune-muted">(${is632 ? 'bootstrap models on their out-of-bag patients' : 'bootstrap models on the original patients'})</span></td></tr>` : ''}</tbody></table></div>`;
+            ${oc.calibrationSlope !== null && oc.calibrationSlope !== undefined ? `<tr><td>Calibration slope (ideal 1)</td><td>${appSlope}</td><td>${typeof oc.calibrationSlopeOptimism === 'number' && !is632 ? fmtOpt('calibrationSlope', oc.calibrationSlopeOptimism) : '—'}</td><td colspan="2"><strong>${oc.calibrationSlope.toFixed(3)}</strong> <span class="tune-muted">(${is632 ? 'bootstrap models on their out-of-bag patients' : 'apparent slope minus its optimism (Harrell)'})</span></td></tr>` : ''}</tbody></table></div>`;
     }).join('');
     // Choosing the best model: the winner's curse
     const sel = items[0].evalRes.optimismCorrection.selection;

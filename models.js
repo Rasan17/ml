@@ -2322,10 +2322,13 @@
                     };
                 });
 
-                // Macro-averaged metrics (all classes, as in scikit-learn's default)
-                const macroPrecision = Number((classMetrics.reduce((a, b) => a + b.precision, 0) / numClasses).toFixed(4));
-                const macroRecall = Number((classMetrics.reduce((a, b) => a + b.recall, 0) / numClasses).toFixed(4));
-                const macroF1 = Number((classMetrics.reduce((a, b) => a + b.f1, 0) / numClasses).toFixed(4));
+                // Macro-averaged metrics over the classes present in the test outcomes or the predictions, as in
+                // scikit-learn's default (a class absent from both would otherwise add a spurious 0)
+                const labelled = classMetrics.filter((c, i) => c.support > 0 || confMatrix.some(row => row[i] > 0));
+                const macro = key => (labelled.length ? Number((labelled.reduce((a, b) => a + b[key], 0) / labelled.length).toFixed(4)) : 0);
+                const macroPrecision = macro('precision');
+                const macroRecall = macro('recall');
+                const macroF1 = macro('f1');
                 // Balanced accuracy: mean recall over classes present in the test set
                 const present = classMetrics.filter(c => c.support > 0);
                 const balancedAccuracy = present.length ? Number((present.reduce((a, b) => a + b.recall, 0) / present.length).toFixed(4)) : null;
@@ -2601,7 +2604,8 @@
                     add('accuracy', correct / m);
                     const present = sup.map((s, c) => c).filter(c => sup[c] > 0);
                     add('balancedAccuracy', present.reduce((a, c) => a + tp[c] / sup[c], 0) / present.length);
-                    add('macroF1', sup.reduce((a, s, c) => { const pr = prd[c] ? tp[c] / prd[c] : 0, rc = s ? tp[c] / s : 0; return a + (pr + rc ? 2 * pr * rc / (pr + rc) : 0); }, 0) / k);
+                    const labelled = sup.map((s, c) => c).filter(c => sup[c] > 0 || prd[c] > 0);
+                    add('macroF1', labelled.reduce((a, c) => { const pr = prd[c] ? tp[c] / prd[c] : 0, rc = sup[c] ? tp[c] / sup[c] : 0; return a + (pr + rc ? 2 * pr * rc / (pr + rc) : 0); }, 0) / labelled.length);
                     if (ev.probPositive) {
                         const yb = yy.map(v => (v === 1 ? 1 : 0)), pr = idx.map(i => ev.probPositive[i]);
                         add('brierScore', pr.reduce((a, q, i) => a + (q - yb[i]) ** 2, 0) / m);
@@ -3087,9 +3091,13 @@
             const eps = 1e-4;
             const lp = p.map(v => { const q = Math.min(1 - eps, Math.max(eps, Number(v) || 0)); return Math.log(q / (1 - q)); });
             const sig = z => 1 / (1 + Math.exp(-z));
-            // Slope: y ~ a + b·lp (Newton-Raphson)
-            let a = 0, b = 1, ok = false;
-            for (let it = 0; it < 100; it++) {
+            // Log-likelihood of y ~ a + b·lp (b fixed at 1 for the intercept-only model with lp as offset)
+            const ll = (a, b) => { let s = 0; for (let i = 0; i < n; i++) { const z = a + b * lp[i]; s += y[i] * z - (z > 0 ? z + Math.log1p(Math.exp(-z)) : Math.log1p(Math.exp(z))); } return s; };
+            // Slope: y ~ a + b·lp by Newton-Raphson with step-halving, from a neutral start (a = logit of the
+            // event rate, b = 0), so it converges for badly over-confident models too (slopes well below 1)
+            const rate = events / n;
+            let a = Math.log(rate / (1 - rate)), b = 0, ok = false, cur = ll(a, b);
+            for (let it = 0; it < 200; it++) {
                 let g0 = 0, g1 = 0, h00 = 0, h01 = 0, h11 = 0;
                 for (let i = 0; i < n; i++) {
                     const m = sig(a + b * lp[i]);
@@ -3099,21 +3107,24 @@
                 }
                 const det = h00 * h11 - h01 * h01;
                 if (!isFinite(det) || Math.abs(det) < 1e-12) break;
-                const da = (h11 * g0 - h01 * g1) / det, db = (h00 * g1 - h01 * g0) / det;
-                a += da; b += db;
-                if (!isFinite(a) || !isFinite(b) || Math.abs(b) > 100) break;
-                if (Math.abs(da) < 1e-8 && Math.abs(db) < 1e-8) { ok = true; break; }
+                let da = (h11 * g0 - h01 * g1) / det, db = (h00 * g1 - h01 * g0) / det, step = 1, next = ll(a + da, b + db);
+                while (!(next >= cur - 1e-12) && step > 1e-6) { step /= 2; next = ll(a + step * da, b + step * db); }
+                a += step * da; b += step * db; cur = next;
+                if (!isFinite(a) || !isFinite(b) || Math.abs(b) > 100) break; // diverging: (near-)separation
+                if (Math.abs(step * da) < 1e-9 && Math.abs(step * db) < 1e-9) { ok = true; break; }
             }
             if (ok) out.slope = Number(b.toFixed(3));
-            // Intercept (calibration-in-the-large): y ~ a + offset(lp)
-            let c = 0, okC = false;
-            for (let it = 0; it < 100; it++) {
+            // Intercept (calibration-in-the-large): y ~ a + offset(lp), Newton with step-halving
+            let c = 0, okC = false, curC = ll(0, 1);
+            for (let it = 0; it < 200; it++) {
                 let g = 0, h = 0;
                 for (let i = 0; i < n; i++) { const m = sig(c + lp[i]); g += y[i] - m; h += m * (1 - m); }
                 if (h < 1e-12) break;
-                const dc = g / h; c += dc;
+                let dc = g / h, step = 1, next = ll(c + dc, 1);
+                while (!(next >= curC - 1e-12) && step > 1e-6) { step /= 2; next = ll(c + step * dc, 1); }
+                c += step * dc; curC = next;
                 if (!isFinite(c) || Math.abs(c) > 100) break;
-                if (Math.abs(dc) < 1e-10) { okC = true; break; }
+                if (Math.abs(step * dc) < 1e-10) { okC = true; break; }
             }
             if (okC && ok) out.intercept = Number(c.toFixed(3)); // under (near-)separation neither is meaningful
             if (!ok || !okC) out.note = 'Calibration slope/intercept could not be estimated: the predictions separate the outcomes (almost) perfectly on these test cases, or there are too few events.';

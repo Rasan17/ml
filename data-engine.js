@@ -789,7 +789,7 @@
                 // Collect distinct target classes
                 const classSet = new Set();
                 rows.forEach(r => {
-                    const val = String(r[targetCol]);
+                    const val = String(r[targetCol]).trim(); // trimmed as in prepareTestingDataset, so " Yes" and "Yes" match
                     classSet.add(val);
                 });
                 targetClasses = Array.from(classSet);
@@ -798,7 +798,7 @@
                 // Binary outcome: the user-chosen positive (event) class is placed at index 1, which every
                 // binary metric (AUC, sensitivity, PPV, TP/FN) treats as the positive class
                 const chosenPositive = targetConf.positiveClass !== undefined && targetConf.positiveClass !== null
-                    ? String(targetConf.positiveClass) : null;
+                    ? String(targetConf.positiveClass).trim() : null;
                 if (targetClasses.length === 2 && chosenPositive !== null && targetClasses.includes(chosenPositive)) {
                     targetClasses = [targetClasses.find(c => c !== chosenPositive), chosenPositive];
                 }
@@ -949,7 +949,7 @@
                 X.push(xRow);
 
                 if (isClassification) {
-                    const targetClass = String(row[targetCol]);
+                    const targetClass = String(row[targetCol]).trim();
                     y.push(targetClassToIdx[targetClass] !== undefined ? targetClassToIdx[targetClass] : 0);
                 } else {
                     y.push(Number(row[targetCol]));

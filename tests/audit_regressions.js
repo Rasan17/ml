@@ -211,6 +211,29 @@ const rejects = async (fn, what) => { try { await fn(); } catch (e) { return e.m
         return `typical → typical; opposite values of two correlated predictors → ${odd.level}; ${(share * 100).toFixed(1)}% of training patients flagged`;
     });
 
+    await check('Independent review (stats): calibration slope estimable for over-confident models; macro-F1 over present classes only', async () => {
+        // Over-confident predictions (true slope well below 1): compare with the separate IRLS implementation
+        const rng = DE.createPRNG(13);
+        const out = [];
+        for (const k of [2, 3, 4]) {
+            const lp = Array.from({ length: 500 }, () => -1 + 1.5 * Math.sqrt(-2 * Math.log(rng() || 1e-12)) * Math.cos(2 * Math.PI * rng()));
+            const y = lp.map(v => (rng() < 1 / (1 + Math.exp(-v)) ? 1 : 0));
+            const p = lp.map(v => 1 / (1 + Math.exp(-k * v)));
+            const cal = ME.calibrationSummary(y, p);
+            const q = p.map(v => Math.min(1 - 1e-4, Math.max(1e-4, v)));
+            const ref = ME.logisticIRLS(q.map(v => [Math.log(v / (1 - v))]), y);
+            assert(cal.slope !== null, `slope blank for over-confidence ${k}`);
+            assert(ref && Math.abs(cal.slope - ref.rows[1].coef) < 2e-3, `slope ${cal.slope} differs from IRLS ${ref && ref.rows[1].coef}`);
+            out.push(`×${k}: ${cal.slope}`);
+        }
+        // 3-class model, class 2 absent from both truth and predictions: macro-F1 over classes 0 and 1 only
+        const m = { predictSingle: x => ({ pred: x[0], probabilities: { 0: x[0] === 0 ? 1 : 0, 1: x[0] === 1 ? 1 : 0, 2: 0 } }) };
+        const ev = ME.evaluate(m, [[0], [0], [1], [1], [1]], [0, 1, 1, 1, 0], true, ['a', 'b', 'c'], {});
+        // sklearn f1_score(average='macro') on y=[0,1,1,1,0], yhat=[0,0,1,1,1]: class0 F1=0.5, class1 F1=0.6667 → 0.5833
+        assert(Math.abs(ev.macroF1 - 0.5833) < 1e-3, `macro-F1 ${ev.macroF1}, expected 0.5833 (absent class excluded)`);
+        return `slopes ${out.join(', ')} match IRLS; macro-F1 ${ev.macroF1}`;
+    });
+
     console.log(results.join('\n'));
     console.log(`\n${passed}/${passed + failed} audit regression checks passed`);
     if (failed) process.exit(1);

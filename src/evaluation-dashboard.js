@@ -439,7 +439,7 @@ function renderEvaluationDashboard() {
                         <span>📊</span> Confusion Matrix &amp; Diagnostic Accuracy Breakdown &mdash; All Chosen Models
                     </h3>
                     <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                        Individual confusion matrices and test metrics for every model chosen in this benchmark. Each card includes its exact reproducibility seed (click to copy).
+                        Individual confusion matrices and test metrics for every model chosen in this benchmark. Each card includes its exact reproducibility seed (click to copy).${isOptionC ? ' <strong>Option C: these matrices are apparent (measured on the patients each model was trained on), not optimism-corrected.</strong>' : ''}
                     </p>
                 </div>
                 <div class="multi-cm-grid">
@@ -513,7 +513,8 @@ function renderEvaluationDashboard() {
             const classes = prep.targetClasses;
             let cmHtml = `
                 <div style="display: flex; flex-direction: column; gap: 16px;">
-                    <h3 style="font-size: 15px; color: var(--text-primary);">Confusion Matrix (${cohortDesc})</h3>
+                    <h3 style="font-size: 15px; color: var(--text-primary);">Confusion Matrix (${isOptionC ? `apparent: the final model on the ${totalCount} patients it was trained on, <em>not</em> optimism-corrected` : cohortDesc})</h3>
+                    ${isOptionC ? '<p class="tune-warn" style="margin: 0;">⚠️ With bootstrap validation no patients are held out, so this matrix and the per-class sensitivity and precision below are measured on the training patients and are optimistic (flexible models can look almost perfect). Only the optimism-corrected measures in the summary and leaderboard (accuracy, balanced accuracy, F1, AUC, Brier, calibration slope) estimate performance on new patients.</p>' : ''}
                     <div class="table-container" style="max-width: 500px;">
                         <table class="cm-table">
                             <thead>

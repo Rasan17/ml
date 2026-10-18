@@ -284,7 +284,7 @@ async function bootstrapOptimism(o) {
     const perResample = []; // index b -> { onBoot, onOrig, innerScore, hp } (undefined when skipped)
     const opt = {}; keys.forEach(k => { opt[k] = []; });
     const oob = {}; keys.forEach(k => { oob[k] = []; });
-    const slopes = [], oobSlopes = [];
+    const slopes = [], oobSlopes = [], slopeOpt = [];
     const t0 = Date.now();
     for (let b = 0; b < Bm; b++) {
         if (isAborted && isAborted()) throw new Error("Training aborted by user.");
@@ -324,6 +324,8 @@ async function bootstrapOptimism(o) {
             if (onOob && typeof onOob[k] === 'number' && isFinite(onOob[k])) oob[k].push(onOob[k]);
         });
         if (typeof onOrig.calibrationSlope === 'number' && isFinite(onOrig.calibrationSlope)) slopes.push(onOrig.calibrationSlope);
+        // Harrell: optimism of the slope = slope on the resample itself − slope on the original patients
+        if (typeof onOrig.calibrationSlope === 'number' && isFinite(onOrig.calibrationSlope) && typeof onBoot.calibrationSlope === 'number' && isFinite(onBoot.calibrationSlope)) slopeOpt.push(onBoot.calibrationSlope - onOrig.calibrationSlope);
         if (onOob && typeof onOob.calibrationSlope === 'number' && isFinite(onOob.calibrationSlope)) oobSlopes.push(onOob.calibrationSlope);
         perResample[b] = { onBoot, onOrig, onOob, innerScore, hp: hpB };
         if (onResample) onResample(b + 1, Bm, t0);
@@ -332,7 +334,7 @@ async function bootstrapOptimism(o) {
     const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
     const optimism = {}, oobMean = {};
     keys.forEach(k => { optimism[k] = mean(opt[k]); oobMean[k] = mean(oob[k]); });
-    return { B: opt[keys[0]].length, optimism, oobMean, calibrationSlope: mean(slopes), oobCalibrationSlope: mean(oobSlopes), perResample, tuned: Boolean(tune && tune.doTune), innerFolds: tune ? tune.k : null };
+    return { B: opt[keys[0]].length, optimism, oobMean, calibrationSlope: mean(slopes), calibrationSlopeOptimism: mean(slopeOpt), oobCalibrationSlope: mean(oobSlopes), perResample, tuned: Boolean(tune && tune.doTune), innerFolds: tune ? tune.k : null };
 }
 
 /**

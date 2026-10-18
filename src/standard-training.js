@@ -206,7 +206,14 @@ async function startModelTraining() {
                 }
                 evalRes.optimismCorrection = {
                     B: run.B, apparent, optimism: run.optimism, corrected, harrell, est632, oobMean: run.oobMean, noInfo, method,
-                    calibrationSlope: (() => { const v = method === '632plus' ? run.oobCalibrationSlope : run.calibrationSlope; return typeof v === 'number' ? Number(v.toFixed(3)) : null; })(), apparentSlope,
+                    // Harrell: apparent slope − slope optimism (equals the mean slope of the bootstrap models on the
+                    // original patients only when the apparent slope is 1, as for unpenalised regression); .632+:
+                    // mean slope of the bootstrap models on their out-of-bag patients
+                    calibrationSlope: (() => {
+                        const v = method === '632plus' ? run.oobCalibrationSlope
+                            : (typeof apparentSlope === 'number' && typeof run.calibrationSlopeOptimism === 'number' ? apparentSlope - run.calibrationSlopeOptimism : run.calibrationSlope);
+                        return typeof v === 'number' && isFinite(v) ? Number(v.toFixed(3)) : null;
+                    })(), calibrationSlopeOptimism: typeof run.calibrationSlopeOptimism === 'number' ? Number(run.calibrationSlopeOptimism.toFixed(3)) : null, apparentSlope,
                     tuning: !wasTuned ? 'none' : (tuneInside ? 'repeated' : 'once'), innerFolds: inner ? innerK : null, sameSettingsShare
                 };
                 evalRes.protocol = 'option-c';
@@ -549,7 +556,7 @@ async function startModelTraining() {
                 }
                 evalRes.protocol = 'option-b';
                 if (miB) evalRes.multipleImputation = { m: miMB, imputedColumns: miB.imputedColumns };
-                evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
+                evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed, testPatientGroups(testPrep.validRows, 'standard'));
                 if (tuned.cv) evalRes.cv = tuned.cv;
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 evalRes.retrainOn100 = false;

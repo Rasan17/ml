@@ -263,6 +263,36 @@ async function executePipelineStep7() {
         ensEval.constraintNote = `Equal-weight soft vote of ${ensembleConfig.baseModels.map(b => b.toUpperCase()).join(', ')}; scaling fitted on Train only.`;
         benchmarkList.push({ id: 'ensemble', name: 'Voting / Weighted Ensemble', model: ensemble, prep: fullPrep, eval: ensEval });
 
+        // SMOTENC trains the models on artificially balanced rows, which inflates every predicted risk of the rarer
+        // outcome (van den Goorbergh et al., JAMIA 2022). Without recalibration, the predictions are shifted back to
+        // the real event rate of the training patients (prior-shift correction: logit p − log(odds_balanced /
+        // odds_real)); ranking (AUC) is unchanged. With recalibration, the calibrator fitted on real out-of-fold
+        // predictions does this instead.
+        const smoteApplied = Boolean(AppState.pipeline.smotencResult && AppState.pipeline.smotencResult.applied);
+        let priorShift = null; // applied to out-of-fold predictions too (Youden threshold on the corrected scale)
+        if (smoteApplied && isClassification && numClasses === 2 && recalPipe === 'none') {
+            const pos = String(fullPrep.targetClasses[1]);
+            const rate = rows => rows.filter(r => String(r[targetCol]).trim() === pos).length / Math.max(1, rows.length);
+            const real = rate(AppState.pipeline.trainRows), bal = rate(AppState.pipeline.balancedTrainRows);
+            if (real > 0 && real < 1 && bal > 0 && bal < 1) {
+                const shift = Math.log(real / (1 - real)) - Math.log(bal / (1 - bal));
+                priorShift = shift;
+                const cal = { type: 'platt', a: shift, b: 1, n: AppState.pipeline.trainRows.length };
+                for (const b of benchmarkList) {
+                    const td = DataEngine.prepareTestingDataset(AppState.pipeline.testRows, b.prep);
+                    const rc = await recalibrateAndEvaluate(b.model, cal, td.X, td.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
+                    ['featuresUsed', 'constraintNote', 'fallbackNote'].forEach(k => { if (b.eval[k] !== undefined) rc.evalRes[k] = b.eval[k]; });
+                    rc.evalRes.recalibration.method = 'prior-shift';
+                    rc.evalRes.recalibration.fittedOn = `the real event rate of the training patients (${(real * 100).toFixed(1)}%, against ${(bal * 100).toFixed(1)}% after SMOTENC balancing)`;
+                    rc.evalRes.constraintNote = (rc.evalRes.constraintNote || '') + ` Probabilities corrected from the SMOTENC-balanced rate (${(bal * 100).toFixed(1)}%) back to the real rate (${(real * 100).toFixed(1)}%).`;
+                    b.model = rc.model;
+                    b.eval = rc.evalRes;
+                }
+            }
+        } else if (smoteApplied && isClassification && numClasses > 2 && recalPipe === 'none') {
+            benchmarkList.forEach(b => { b.eval.constraintNote = (b.eval.constraintNote || '') + ' Caution: trained on SMOTENC-balanced rows, so predicted probabilities over-state the rarer outcome groups; use them for ranking, not as risks.'; });
+        }
+
         // Optional recalibration: calibrator fitted on each model's out-of-fold Training-set predictions
         if (recalPipe !== 'none') {
             for (const b of benchmarkList) {
@@ -278,7 +308,8 @@ async function executePipelineStep7() {
         }
         // Cross-validated scores (model selection inside the Training set) when that mode is chosen
         benchmarkList.forEach(b => { if (cvByModel[b.id]) b.eval.cv = cvByModel[b.id]; });
-        if (isClassification && numClasses === 2) benchmarkList.forEach(b => { const y = youdenThreshold(oofByModel[b.id]); if (y) b.eval.youden = y; });
+        const shifted = o => (o && priorShift !== null ? { ...o, p: o.p.map(v => { const q = Math.min(1 - 1e-12, Math.max(1e-12, v)); return 1 / (1 + Math.exp(-(Math.log(q / (1 - q)) + priorShift))); }) } : o);
+        if (isClassification && numClasses === 2) benchmarkList.forEach(b => { const y = youdenThreshold(shifted(oofByModel[b.id])); if (y) b.eval.youden = y; });
         // Bootstrap 95% confidence intervals for every test metric
         for (const b of benchmarkList) {
             if (watchdog) watchdog.tick(totalModels, `Computing 95% confidence intervals (bootstrap): ${b.name}...`);
@@ -391,6 +422,9 @@ function renderPipelineLeaderboardOnly() {
         if (item.eval.fallbackNote) caveats.add(`⚠️ ${escapeHtml(item.eval.fallbackNote)}`);
     });
     if (sorted[0] && sorted[0].eval.cv) {
+        if (AppState.pipeline.droppedFeatures && AppState.pipeline.droppedFeatures.size) {
+            caveats.add(`Predictors removed in Steps 2–4 (${AppState.pipeline.droppedFeatures.size}) were chosen once on the whole Training set, partly from their association with the outcome, and not re-chosen inside each cross-validation fold: the cross-validated scores used to pick and tune models are therefore somewhat optimistic. The held-out Testing-set results are not affected.`);
+        }
         const stab = AppState.pipeline.cvSelectionStability;
         if (stab && stab.length) {
             const freq = {};

@@ -31,6 +31,7 @@ function renderPipelineStep5() {
                     ${escapeHtml(smotencRes.reason)}<br>
                     Smallest class <code>${escapeHtml(smotencRes.minorityClass)}</code>: ${smotencRes.minorityPctBefore}% of training rows before &rarr; ${smotencRes.minorityPctAfter}% after resampling.
                     Synthetic rows are used for training only; all test-set metrics are computed on real patients at their true prevalence.
+                    <strong>Balancing distorts predicted risks</strong> (the models learn a 50:50 world): for two-outcome models the app shifts the probabilities back to the real event rate, or recalibrates them if you choose recalibration in Step 7. Balancing rarely improves discrimination, and is often unnecessary for well-specified models (van den Goorbergh et al., JAMIA 2022).
                 </div>
             </div>
 

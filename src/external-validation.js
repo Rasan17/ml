@@ -4,7 +4,7 @@
 // and a printable validation report. Nothing is refitted: preprocessing and model are used exactly as saved.
 /* global DataEngine, ModelEngine */
 import { AppState, displayModelName, escapeHtml } from './core.js';
-import { bootstrapFor } from './cv-tuning.js';
+import { bootstrapFor, testPatientGroups } from './cv-tuning.js';
 import { renderCalibrationPanel } from './panels.js';
 import { renderSubgroupPanel } from './subgroups.js';
 
@@ -65,7 +65,7 @@ async function validateOnLabelledCohort(rows, fileName) {
     const ev = await ModelEngine.evaluateAsync(model, test.X, test.y, prep.isClassification, prep.targetClasses,
         prep.isClassification ? { decisionThreshold: threshold } : { regressionThreshold: null });
     if (!ev) { box.innerHTML = ''; return null; }
-    ev.ci = await bootstrapFor(ev, 2024);
+    ev.ci = await bootstrapFor(ev, 2024, testPatientGroups(test.validRows, 'standard')); // patients resampled when a patient column is set
     ev.validationCohort = { fileName: fileName || null, n: test.X.length, provided: rows.length, missingOutcome: test.missingTargetCount, unknownClass: test.unknownClassCount, imputedCells: test.imputedFeatureCells };
     AppState.externalValidation = { ev, name, fileName, rows: test.validRows, prep };
     const summary = validationSummary(ev, prep);

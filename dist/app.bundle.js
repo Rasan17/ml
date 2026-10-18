@@ -1044,7 +1044,7 @@ async function bootstrapOptimism(o) {
     const perResample = []; // index b -> { onBoot, onOrig, innerScore, hp } (undefined when skipped)
     const opt = {}; keys.forEach(k => { opt[k] = []; });
     const oob = {}; keys.forEach(k => { oob[k] = []; });
-    const slopes = [], oobSlopes = [];
+    const slopes = [], oobSlopes = [], slopeOpt = [];
     const t0 = Date.now();
     for (let b = 0; b < Bm; b++) {
         if (isAborted && isAborted()) throw new Error("Training aborted by user.");
@@ -1084,6 +1084,8 @@ async function bootstrapOptimism(o) {
             if (onOob && typeof onOob[k] === 'number' && isFinite(onOob[k])) oob[k].push(onOob[k]);
         });
         if (typeof onOrig.calibrationSlope === 'number' && isFinite(onOrig.calibrationSlope)) slopes.push(onOrig.calibrationSlope);
+        // Harrell: optimism of the slope = slope on the resample itself − slope on the original patients
+        if (typeof onOrig.calibrationSlope === 'number' && isFinite(onOrig.calibrationSlope) && typeof onBoot.calibrationSlope === 'number' && isFinite(onBoot.calibrationSlope)) slopeOpt.push(onBoot.calibrationSlope - onOrig.calibrationSlope);
         if (onOob && typeof onOob.calibrationSlope === 'number' && isFinite(onOob.calibrationSlope)) oobSlopes.push(onOob.calibrationSlope);
         perResample[b] = { onBoot, onOrig, onOob, innerScore, hp: hpB };
         if (onResample) onResample(b + 1, Bm, t0);
@@ -1092,7 +1094,7 @@ async function bootstrapOptimism(o) {
     const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
     const optimism = {}, oobMean = {};
     keys.forEach(k => { optimism[k] = mean(opt[k]); oobMean[k] = mean(oob[k]); });
-    return { B: opt[keys[0]].length, optimism, oobMean, calibrationSlope: mean(slopes), oobCalibrationSlope: mean(oobSlopes), perResample, tuned: Boolean(tune && tune.doTune), innerFolds: tune ? tune.k : null };
+    return { B: opt[keys[0]].length, optimism, oobMean, calibrationSlope: mean(slopes), calibrationSlopeOptimism: mean(slopeOpt), oobCalibrationSlope: mean(oobSlopes), perResample, tuned: Boolean(tune && tune.doTune), innerFolds: tune ? tune.k : null };
 }
 
 /**
@@ -3280,7 +3282,7 @@ function calibrationBody(item, positiveLabel) {
     const rc = ev.recalibration;
     const f2 = v => (typeof v === 'number' ? v.toFixed(2) : 'n/a');
     const recalNote = rc
-        ? `<div class="explain-box" style="margin-top: 8px;"><strong>📐 Recalibrated</strong> with ${rc.method === 'platt' ? 'Platt scaling' : 'isotonic regression'} fitted on ${escapeHtml(rc.fittedOn)}. Before recalibration on these test patients: slope ${f2(rc.before.slope)}, intercept ${f2(rc.before.intercept)}, Brier ${typeof rc.before.brierScore === 'number' ? rc.before.brierScore.toFixed(3) : 'n/a'}${typeof rc.before.rocAuc === 'number' ? `, AUC ${rc.before.rocAuc.toFixed(3)}` : ''}. The values above are after recalibration.</div>`
+        ? `<div class="explain-box" style="margin-top: 8px;"><strong>📐 Recalibrated</strong> with ${rc.method === 'prior-shift' ? 'a prior-shift correction (undoing the SMOTENC balancing) based on' : rc.method === 'platt' ? 'Platt scaling fitted on' : 'isotonic regression fitted on'} ${escapeHtml(rc.fittedOn)}. Before recalibration on these test patients: slope ${f2(rc.before.slope)}, intercept ${f2(rc.before.intercept)}, Brier ${typeof rc.before.brierScore === 'number' ? rc.before.brierScore.toFixed(3) : 'n/a'}${typeof rc.before.rocAuc === 'number' ? `, AUC ${rc.before.rocAuc.toFixed(3)}` : ''}. The values above are after recalibration.</div>`
         : (ev.recalibrationSkipped ? `<div class="tune-muted" style="margin-top: 6px;">${escapeHtml(ev.recalibrationSkipped)}</div>`
             // Miscalibrated (the slope's 95% CI excludes 1) and not recalibrated: say how to correct it
             : (ev.ci && ev.ci.calibrationSlope && (ev.ci.calibrationSlope[0] > 1 || ev.ci.calibrationSlope[1] < 1)
@@ -3851,7 +3853,7 @@ function renderOptimismPanel(containerId, results) {
                 : 'Reported: <strong>Harrell\'s</strong> optimism-corrected estimate, the standard for regression-type models; the .632+ estimate is shown for comparison.'}</p>
             <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (trained and scored on all patients)</th><th>Average optimism</th><th>Harrell corrected</th><th>.632+ estimate</th></tr></thead>
             <tbody>${keys.map(k => `<tr><td>${labels[k] || k}</td><td>${fmt(k, oc.apparent[k])}</td><td>${fmtOpt(k, oc.optimism[k])}</td><td>${b(!is632, fmt(k, h[k]))}</td><td>${b(is632, fmt(k, e[k]))}</td></tr>`).join('')}
-            ${oc.calibrationSlope !== null && oc.calibrationSlope !== undefined ? `<tr><td>Calibration slope (ideal 1)</td><td>${appSlope}</td><td>—</td><td colspan="2"><strong>${oc.calibrationSlope.toFixed(3)}</strong> <span class="tune-muted">(${is632 ? 'bootstrap models on their out-of-bag patients' : 'bootstrap models on the original patients'})</span></td></tr>` : ''}</tbody></table></div>`;
+            ${oc.calibrationSlope !== null && oc.calibrationSlope !== undefined ? `<tr><td>Calibration slope (ideal 1)</td><td>${appSlope}</td><td>${typeof oc.calibrationSlopeOptimism === 'number' && !is632 ? fmtOpt('calibrationSlope', oc.calibrationSlopeOptimism) : '—'}</td><td colspan="2"><strong>${oc.calibrationSlope.toFixed(3)}</strong> <span class="tune-muted">(${is632 ? 'bootstrap models on their out-of-bag patients' : 'apparent slope minus its optimism (Harrell)'})</span></td></tr>` : ''}</tbody></table></div>`;
     }).join('');
     // Choosing the best model: the winner's curse
     const sel = items[0].evalRes.optimismCorrection.selection;
@@ -3911,7 +3913,8 @@ function isNumericSubgroupColumn(rows, c) {
 // Group label for every row: categories as they are, numbers in thirds of the Testing set (tertiles)
 function groupLabels(rows, col) {
     if (isNumericSubgroupColumn(rows, col)) {
-        const nums = rows.map(r => Number(String(r[col] ?? '').trim())).map(v => (String(v) === '' || isNaN(v) ? null : v));
+        // Blank cells are "(missing)", never 0 (Number('') would be 0 and fall in the lowest third)
+        const nums = rows.map(r => { const t = String(r[col] ?? '').trim(); const v = Number(t); return t === '' || DataEngine.isMissing(t) || !isFinite(v) ? null : v; });
         const sorted = nums.filter(v => v !== null).sort((a, b) => a - b);
         const q = p => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
         const c1 = q(1 / 3), c2 = q(2 / 3);
@@ -4769,7 +4772,14 @@ async function startModelTraining() {
                 }
                 evalRes.optimismCorrection = {
                     B: run.B, apparent, optimism: run.optimism, corrected, harrell, est632, oobMean: run.oobMean, noInfo, method,
-                    calibrationSlope: (() => { const v = method === '632plus' ? run.oobCalibrationSlope : run.calibrationSlope; return typeof v === 'number' ? Number(v.toFixed(3)) : null; })(), apparentSlope,
+                    // Harrell: apparent slope − slope optimism (equals the mean slope of the bootstrap models on the
+                    // original patients only when the apparent slope is 1, as for unpenalised regression); .632+:
+                    // mean slope of the bootstrap models on their out-of-bag patients
+                    calibrationSlope: (() => {
+                        const v = method === '632plus' ? run.oobCalibrationSlope
+                            : (typeof apparentSlope === 'number' && typeof run.calibrationSlopeOptimism === 'number' ? apparentSlope - run.calibrationSlopeOptimism : run.calibrationSlope);
+                        return typeof v === 'number' && isFinite(v) ? Number(v.toFixed(3)) : null;
+                    })(), calibrationSlopeOptimism: typeof run.calibrationSlopeOptimism === 'number' ? Number(run.calibrationSlopeOptimism.toFixed(3)) : null, apparentSlope,
                     tuning: !wasTuned ? 'none' : (tuneInside ? 'repeated' : 'once'), innerFolds: inner ? innerK : null, sameSettingsShare
                 };
                 evalRes.protocol = 'option-c';
@@ -5112,7 +5122,7 @@ async function startModelTraining() {
                 }
                 evalRes.protocol = 'option-b';
                 if (miB) evalRes.multipleImputation = { m: miMB, imputedColumns: miB.imputedColumns };
-                evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed);
+                evalRes.ci = await bootstrapFor(evalRes, hyperparams.seed, testPatientGroups(testPrep.validRows, 'standard'));
                 if (tuned.cv) evalRes.cv = tuned.cv;
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
                 evalRes.retrainOn100 = false;
@@ -5875,7 +5885,7 @@ function renderEvaluationDashboard() {
                         <span>📊</span> Confusion Matrix &amp; Diagnostic Accuracy Breakdown &mdash; All Chosen Models
                     </h3>
                     <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                        Individual confusion matrices and test metrics for every model chosen in this benchmark. Each card includes its exact reproducibility seed (click to copy).
+                        Individual confusion matrices and test metrics for every model chosen in this benchmark. Each card includes its exact reproducibility seed (click to copy).${isOptionC ? ' <strong>Option C: these matrices are apparent (measured on the patients each model was trained on), not optimism-corrected.</strong>' : ''}
                     </p>
                 </div>
                 <div class="multi-cm-grid">
@@ -5949,7 +5959,8 @@ function renderEvaluationDashboard() {
             const classes = prep.targetClasses;
             let cmHtml = `
                 <div style="display: flex; flex-direction: column; gap: 16px;">
-                    <h3 style="font-size: 15px; color: var(--text-primary);">Confusion Matrix (${cohortDesc})</h3>
+                    <h3 style="font-size: 15px; color: var(--text-primary);">Confusion Matrix (${isOptionC ? `apparent: the final model on the ${totalCount} patients it was trained on, <em>not</em> optimism-corrected` : cohortDesc})</h3>
+                    ${isOptionC ? '<p class="tune-warn" style="margin: 0;">⚠️ With bootstrap validation no patients are held out, so this matrix and the per-class sensitivity and precision below are measured on the training patients and are optimistic (flexible models can look almost perfect). Only the optimism-corrected measures in the summary and leaderboard (accuracy, balanced accuracy, F1, AUC, Brier, calibration slope) estimate performance on new patients.</p>' : ''}
                     <div class="table-container" style="max-width: 500px;">
                         <table class="cm-table">
                             <thead>
@@ -7170,6 +7181,7 @@ function renderPipelineStep5() {
                     ${escapeHtml(smotencRes.reason)}<br>
                     Smallest class <code>${escapeHtml(smotencRes.minorityClass)}</code>: ${smotencRes.minorityPctBefore}% of training rows before &rarr; ${smotencRes.minorityPctAfter}% after resampling.
                     Synthetic rows are used for training only; all test-set metrics are computed on real patients at their true prevalence.
+                    <strong>Balancing distorts predicted risks</strong> (the models learn a 50:50 world): for two-outcome models the app shifts the probabilities back to the real event rate, or recalibrates them if you choose recalibration in Step 7. Balancing rarely improves discrimination, and is often unnecessary for well-specified models (van den Goorbergh et al., JAMIA 2022).
                 </div>
             </div>
 
@@ -7652,6 +7664,36 @@ async function executePipelineStep7() {
         ensEval.constraintNote = `Equal-weight soft vote of ${ensembleConfig.baseModels.map(b => b.toUpperCase()).join(', ')}; scaling fitted on Train only.`;
         benchmarkList.push({ id: 'ensemble', name: 'Voting / Weighted Ensemble', model: ensemble, prep: fullPrep, eval: ensEval });
 
+        // SMOTENC trains the models on artificially balanced rows, which inflates every predicted risk of the rarer
+        // outcome (van den Goorbergh et al., JAMIA 2022). Without recalibration, the predictions are shifted back to
+        // the real event rate of the training patients (prior-shift correction: logit p − log(odds_balanced /
+        // odds_real)); ranking (AUC) is unchanged. With recalibration, the calibrator fitted on real out-of-fold
+        // predictions does this instead.
+        const smoteApplied = Boolean(AppState.pipeline.smotencResult && AppState.pipeline.smotencResult.applied);
+        let priorShift = null; // applied to out-of-fold predictions too (Youden threshold on the corrected scale)
+        if (smoteApplied && isClassification && numClasses === 2 && recalPipe === 'none') {
+            const pos = String(fullPrep.targetClasses[1]);
+            const rate = rows => rows.filter(r => String(r[targetCol]).trim() === pos).length / Math.max(1, rows.length);
+            const real = rate(AppState.pipeline.trainRows), bal = rate(AppState.pipeline.balancedTrainRows);
+            if (real > 0 && real < 1 && bal > 0 && bal < 1) {
+                const shift = Math.log(real / (1 - real)) - Math.log(bal / (1 - bal));
+                priorShift = shift;
+                const cal = { type: 'platt', a: shift, b: 1, n: AppState.pipeline.trainRows.length };
+                for (const b of benchmarkList) {
+                    const td = DataEngine.prepareTestingDataset(AppState.pipeline.testRows, b.prep);
+                    const rc = await recalibrateAndEvaluate(b.model, cal, td.X, td.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
+                    ['featuresUsed', 'constraintNote', 'fallbackNote'].forEach(k => { if (b.eval[k] !== undefined) rc.evalRes[k] = b.eval[k]; });
+                    rc.evalRes.recalibration.method = 'prior-shift';
+                    rc.evalRes.recalibration.fittedOn = `the real event rate of the training patients (${(real * 100).toFixed(1)}%, against ${(bal * 100).toFixed(1)}% after SMOTENC balancing)`;
+                    rc.evalRes.constraintNote = (rc.evalRes.constraintNote || '') + ` Probabilities corrected from the SMOTENC-balanced rate (${(bal * 100).toFixed(1)}%) back to the real rate (${(real * 100).toFixed(1)}%).`;
+                    b.model = rc.model;
+                    b.eval = rc.evalRes;
+                }
+            }
+        } else if (smoteApplied && isClassification && numClasses > 2 && recalPipe === 'none') {
+            benchmarkList.forEach(b => { b.eval.constraintNote = (b.eval.constraintNote || '') + ' Caution: trained on SMOTENC-balanced rows, so predicted probabilities over-state the rarer outcome groups; use them for ranking, not as risks.'; });
+        }
+
         // Optional recalibration: calibrator fitted on each model's out-of-fold Training-set predictions
         if (recalPipe !== 'none') {
             for (const b of benchmarkList) {
@@ -7667,7 +7709,8 @@ async function executePipelineStep7() {
         }
         // Cross-validated scores (model selection inside the Training set) when that mode is chosen
         benchmarkList.forEach(b => { if (cvByModel[b.id]) b.eval.cv = cvByModel[b.id]; });
-        if (isClassification && numClasses === 2) benchmarkList.forEach(b => { const y = youdenThreshold(oofByModel[b.id]); if (y) b.eval.youden = y; });
+        const shifted = o => (o && priorShift !== null ? { ...o, p: o.p.map(v => { const q = Math.min(1 - 1e-12, Math.max(1e-12, v)); return 1 / (1 + Math.exp(-(Math.log(q / (1 - q)) + priorShift))); }) } : o);
+        if (isClassification && numClasses === 2) benchmarkList.forEach(b => { const y = youdenThreshold(shifted(oofByModel[b.id])); if (y) b.eval.youden = y; });
         // Bootstrap 95% confidence intervals for every test metric
         for (const b of benchmarkList) {
             if (watchdog) watchdog.tick(totalModels, `Computing 95% confidence intervals (bootstrap): ${b.name}...`);
@@ -7780,6 +7823,9 @@ function renderPipelineLeaderboardOnly() {
         if (item.eval.fallbackNote) caveats.add(`⚠️ ${escapeHtml(item.eval.fallbackNote)}`);
     });
     if (sorted[0] && sorted[0].eval.cv) {
+        if (AppState.pipeline.droppedFeatures && AppState.pipeline.droppedFeatures.size) {
+            caveats.add(`Predictors removed in Steps 2–4 (${AppState.pipeline.droppedFeatures.size}) were chosen once on the whole Training set, partly from their association with the outcome, and not re-chosen inside each cross-validation fold: the cross-validated scores used to pick and tune models are therefore somewhat optimistic. The held-out Testing-set results are not affected.`);
+        }
         const stab = AppState.pipeline.cvSelectionStability;
         if (stab && stab.length) {
             const freq = {};
@@ -9164,7 +9210,8 @@ async function runSurvival() {
     const tert = [0, 1, 2].map(g => order.slice(Math.round(g * order.length / 3), Math.round((g + 1) * order.length / 3)));
     const kmGroups = tert.map(g => ModelEngine.kaplanMeier(g.map(i => tTe[i]), g.map(i => eTe[i])));
     const maxFollow = Math.max(...tTr, ...tTe);
-    SURV.result = { tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, obsAllCI, meanPred, obsAll, kmGroups, maxFollow,
+    const lastEvent = Math.max(0, ...tTr.filter((_, i) => eTr[i] === 1));
+    SURV.result = { lastEvent, tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, obsAllCI, meanPred, obsAll, kmGroups, maxFollow,
         nTrain: Xtr.length, nTest: Xte.length, eventsTrain: events, eventsTest: eTe.reduce((a, b) => a + b, 0), excluded };
     renderSurvivalResults();
     status.textContent = '';
@@ -9206,6 +9253,7 @@ function renderSurvivalResults() {
             <div class="cal-stats"><div><strong>Harrell's C-index</strong>: ${r.cIndex !== null ? r.cIndex.toFixed(3) : 'N/A'}${r.cCI ? ` <span class="tune-sd">(95% CI ${r.cCI[0].toFixed(3)}–${r.cCI[1].toFixed(3)})</span>` : ''} &mdash; the probability that, of two comparable patients, the one with the event first had the higher predicted risk (0.5 = chance, 1 = perfect).</div>
             <div><strong>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.tdAuc === 'number' ? r.tdAuc.toFixed(3) : 'N/A'}${r.tdCI ? ` <span class="tune-sd">(95% CI ${r.tdCI[0].toFixed(3)}–${r.tdCI[1].toFixed(3)})</span>` : ''} &mdash; of a patient who had the event by ${escapeHtml(String(r.horizon))} and one still event-free after it, how often the first had the higher predicted risk.</div>
             <div><strong>Brier score at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.brier === 'number' ? r.brier.toFixed(3) : 'not estimable (too little follow-up to weight the patients at this horizon; choose an earlier horizon)'} (lower is better; giving everyone the overall Kaplan-Meier risk scores ${typeof r.brierNull === 'number' ? r.brierNull.toFixed(3) : 'N/A'})${typeof r.scaledBrier === 'number' ? `; <strong>scaled Brier</strong> ${(r.scaledBrier * 100).toFixed(1)}% (share of that error the model removes; 0% = no better than the overall risk)` : ''}.</div>
+            ${r.horizon > r.lastEvent ? `<div class="tune-warn">⚠️ The horizon (${escapeHtml(String(r.horizon))}) is beyond the last event in the training patients (${escapeHtml(String(r.lastEvent))}): the model cannot learn risk after that time, so predicted risks at this horizon are underestimated. Choose a horizon within the follow-up of the training data.</div>` : ''}
             <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pctTxt(r.meanPred)} vs observed ${pctTxt(r.obsAll)}${r.obsAllCI ? ` <span class="tune-sd">(95% CI ${pctTxt(r.obsAllCI[0])}–${pctTxt(r.obsAllCI[1])})</span>` : ''} (Kaplan-Meier).</div>
             <div class="tune-muted">The time-dependent AUC and Brier score weight each patient for censoring (inverse probability of censoring weights, with the censoring pattern estimated from the training patients), so patients lost to follow-up before ${escapeHtml(String(r.horizon))} do not bias them.</div></div>
             <div class="cal-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
@@ -9866,7 +9914,7 @@ async function validateOnLabelledCohort(rows, fileName) {
     const ev = await ModelEngine.evaluateAsync(model, test.X, test.y, prep.isClassification, prep.targetClasses,
         prep.isClassification ? { decisionThreshold: threshold } : { regressionThreshold: null });
     if (!ev) { box.innerHTML = ''; return null; }
-    ev.ci = await bootstrapFor(ev, 2024);
+    ev.ci = await bootstrapFor(ev, 2024, testPatientGroups(test.validRows, 'standard')); // patients resampled when a patient column is set
     ev.validationCohort = { fileName: fileName || null, n: test.X.length, provided: rows.length, missingOutcome: test.missingTargetCount, unknownClass: test.unknownClassCount, imputedCells: test.imputedFeatureCells };
     AppState.externalValidation = { ev, name, fileName, rows: test.validRows, prep };
     const summary = validationSummary(ev, prep);
