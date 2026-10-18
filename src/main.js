@@ -26,7 +26,7 @@ import './pipeline-balance.js';
 import './pipeline-train.js';
 import './pipeline-results.js';
 import './reports.js';
-import './model-io.js';
+import { updateModelExportButton } from './model-io.js';
 import './survival.js';
 import { refreshModelSampleGuide } from './predictor-budget.js';
 import { downloadTripodChecklist } from './tripod.js';
@@ -78,6 +78,9 @@ function start() {
         e.target.value = '';
     });
     updateImputedDataButtons();
+    // Firefox restores buttons' enabled state on reload: set the data-dependent ones from the (empty) page state
+    updateModelExportButton();
+    ['settings-save-btn', 'run-batch-predict-btn'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = true; });
     // Start page task choice
     document.getElementById('task-develop')?.addEventListener('click', () => {
         const input = document.getElementById('csv-file-input');
