@@ -8,6 +8,7 @@ import { SETTINGS_APP } from './settings.js';
 import { DOM } from './shell.js';
 import { renderSinglePredictionForm } from './single-prediction.js';
 import { showSeedToast } from './training-actions.js';
+import { scheduleAnalysisSummary } from './analysis-summary.js';
 // =========================================================================
 // EXPORT / IMPORT OF THE DEPLOYED (TRAINED) MODEL
 // One JSON file: fitted preprocessing (encoding, scaling, imputation), model parameters, decision
@@ -178,6 +179,7 @@ async function importTrainedModel(file) {
 }
 
 function updateModelExportButton() {
+    scheduleAnalysisSummary(); // the active model may have changed
     const btn = document.getElementById('model-export-btn');
     if (btn) { btn.disabled = !AppState.trainedModel; btn.title = AppState.trainedModel ? 'Save the active model (with its fitted preprocessing) as a file' : 'Train or deploy a model first'; }
 }

@@ -7,6 +7,7 @@ import { DOM } from './shell.js';
 import { disposeModels } from './training-actions.js';
 import { cancelAll } from './compute.js';
 import { clearImputationCache } from './multiple-imputation.js';
+import { scheduleAnalysisSummary } from './analysis-summary.js';
 // Known built-in cohorts and their matching validation (testing) files
 const SAMPLE_COHORTS = {
     'universal_medical_cohort.csv': { id: 'cardio', testFile: 'universal_medical_test_cohort.csv', testLabel: 'Cardiometabolic Risk Test Cohort' },
@@ -164,6 +165,7 @@ function processCSVContent(csvText, name) {
         const saveBtn = document.getElementById('settings-save-btn');
         if (saveBtn) { saveBtn.disabled = false; saveBtn.title = 'Save all choices for this dataset'; }
         populateSplitColumnSelects(parsed.headers);
+        scheduleAnalysisSummary();
     offerStoredSettings(parsed.headers);
         if (DOM.pipelineDirectLaunchBtn) {
             DOM.pipelineDirectLaunchBtn.disabled = false;

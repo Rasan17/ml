@@ -1945,3 +1945,9 @@ body.comparison-running { overflow: hidden; }
 .task-choice { flex: 1 1 220px; display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-surface); color: var(--text-primary); cursor: pointer; font: inherit; }
 .task-choice span { font-size: 12px; color: var(--text-secondary); }
 .task-choice:hover, .task-choice:focus-visible { border-color: var(--accent-cyan); }
+
+/* Persistent analysis summary under the step tabs */
+.analysis-summary { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; margin: 10px 0 0; padding: 8px 14px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface); font-size: 12px; color: var(--text-secondary); }
+.analysis-summary[hidden] { display: none; }
+.analysis-summary-title { font-weight: 700; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; }
+.analysis-summary-item .k { color: var(--text-muted); }

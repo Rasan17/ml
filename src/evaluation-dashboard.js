@@ -357,8 +357,8 @@ function renderEvaluationDashboard() {
                 }
 
                 const deployBtn = isDeployed
-                    ? `<button class="btn-preset-action" disabled style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: var(--tag-emerald); font-weight: 700; width: 100%;">✓ Active Predictor (Steps 5 &amp; 6)</button>`
-                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="width: 100%; font-weight: 600; cursor: pointer;">⭐ Set as Active Predictor</button>`;
+                    ? `<button class="btn-preset-action" disabled style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: var(--tag-emerald); font-weight: 700; width: 100%;">✓ Active research model (Steps 5 &amp; 6)</button>`
+                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="width: 100%; font-weight: 600; cursor: pointer;">⭐ Use as active research model</button>`;
 
                 cmCardsHtml += `
                     <div class="multi-cm-card ${isDeployed ? 'active-deployed' : ''}">

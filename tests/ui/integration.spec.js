@@ -152,6 +152,7 @@ test('external validation: an exported model is imported and validated on a sepa
     await page.goto('/index.html');
     await page.setInputFiles('#model-file-input', modelFile);
     await expect(page.locator('#step-5-content')).toBeVisible();
+    await expect(page.locator('#analysis-summary')).toContainText('(imported file)');
     await page.click('button.step-tab[data-step="6"]');
     await page.setInputFiles('#batch-file-input', path.join(ROOT, 'medical_shunt_validation_cohort.csv'));
     await page.click('#run-batch-predict-btn');

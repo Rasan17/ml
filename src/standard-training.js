@@ -9,6 +9,7 @@ import { DOM } from './shell.js';
 import { disposeModels, evalAbortOpts, markBaselineDeployed, setupTrainingLossChart, updateLossChart } from './training-actions.js';
 import { getHyperparamsForModel } from './training-setup.js';
 import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapResamples, bootstrapResamplesGrouped, noInformationRates, plus632, selectionOptimism, youdenThreshold } from './validation-core.js';
+import { scheduleAnalysisSummary } from './analysis-summary.js';
 
 async function startModelTraining() {
     if (!AppState.imputedData) {
@@ -590,6 +591,7 @@ async function startModelTraining() {
         // Designate top-performing model as champion
         const champion = testedResults[0];
         AppState.trainedModel = champion.model;
+        scheduleAnalysisSummary();
         AppState.deployedModelId = champion.modelId;
         AppState.evalResults = champion.evalRes;
         AppState.selectedModelId = champion.modelId;
@@ -622,7 +624,7 @@ async function startModelTraining() {
                         ✓ Evaluation Complete: ${champion.info.name} is the active research model
                     </span>
                     <span style="font-size: 11.5px; color: var(--text-secondary);">
-                        Reported Benchmark: <strong>${accText}</strong> &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px;">🌱 ${champion.evalRes.seed !== null ? champion.evalRes.seed : 'Auto'}</code> &bull; Active Predictor: <strong>${champion.info.name} (${champion.retrained ? '100% Cohort Retrained' : (isOptionA ? `${singleRes.trainPct}% Split Model` : 'Dataset i Fitted')})</strong>
+                        Reported Benchmark: <strong>${accText}</strong> &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px;">🌱 ${champion.evalRes.seed !== null ? champion.evalRes.seed : 'Auto'}</code> &bull; Active research model: <strong>${champion.info.name} (${champion.retrained ? '100% Cohort Retrained' : (isOptionA ? `${singleRes.trainPct}% Split Model` : 'Dataset i Fitted')})</strong>
                     </span>
                 </div>
             `;

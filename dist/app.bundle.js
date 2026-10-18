@@ -1857,6 +1857,7 @@ function setupEventListeners() {
 
 
 
+
 function syncTrainTestSplit(trainVal) {
     let train = Math.min(95, Math.max(50, Math.round(trainVal)));
     let test = 100 - train;
@@ -1905,6 +1906,7 @@ function processTestingCSVContent(csvText, fileName) {
         AppState.separateTestRawRows = rows;
         AppState.separateTestFileName = fileName;
         refreshOptionBSummaries();
+        scheduleAnalysisSummary();
     } catch (err) {
         alert("Failed to parse testing CSV: " + err.message);
     }
@@ -2133,6 +2135,7 @@ function handleFileUpload(file) {
 
 
 
+
 // Known built-in cohorts and their matching validation (testing) files
 const SAMPLE_COHORTS = {
     'universal_medical_cohort.csv': { id: 'cardio', testFile: 'universal_medical_test_cohort.csv', testLabel: 'Cardiometabolic Risk Test Cohort' },
@@ -2290,6 +2293,7 @@ function processCSVContent(csvText, name) {
         const saveBtn = document.getElementById('settings-save-btn');
         if (saveBtn) { saveBtn.disabled = false; saveBtn.title = 'Save all choices for this dataset'; }
         populateSplitColumnSelects(parsed.headers);
+        scheduleAnalysisSummary();
     offerStoredSettings(parsed.headers);
         if (DOM.pipelineDirectLaunchBtn) {
             DOM.pipelineDirectLaunchBtn.disabled = false;
@@ -4535,6 +4539,7 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
 
 
 
+
 async function startModelTraining() {
     if (!AppState.imputedData) {
         alert("Please execute Data Imputation first.");
@@ -5115,6 +5120,7 @@ async function startModelTraining() {
         // Designate top-performing model as champion
         const champion = testedResults[0];
         AppState.trainedModel = champion.model;
+        scheduleAnalysisSummary();
         AppState.deployedModelId = champion.modelId;
         AppState.evalResults = champion.evalRes;
         AppState.selectedModelId = champion.modelId;
@@ -5147,7 +5153,7 @@ async function startModelTraining() {
                         ✓ Evaluation Complete: ${champion.info.name} is the active research model
                     </span>
                     <span style="font-size: 11.5px; color: var(--text-secondary);">
-                        Reported Benchmark: <strong>${accText}</strong> &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px;">🌱 ${champion.evalRes.seed !== null ? champion.evalRes.seed : 'Auto'}</code> &bull; Active Predictor: <strong>${champion.info.name} (${champion.retrained ? '100% Cohort Retrained' : (isOptionA ? `${singleRes.trainPct}% Split Model` : 'Dataset i Fitted')})</strong>
+                        Reported Benchmark: <strong>${accText}</strong> &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px;">🌱 ${champion.evalRes.seed !== null ? champion.evalRes.seed : 'Auto'}</code> &bull; Active research model: <strong>${champion.info.name} (${champion.retrained ? '100% Cohort Retrained' : (isOptionA ? `${singleRes.trainPct}% Split Model` : 'Dataset i Fitted')})</strong>
                     </span>
                 </div>
             `;
@@ -5753,8 +5759,8 @@ function renderEvaluationDashboard() {
                 }
 
                 const deployBtn = isDeployed
-                    ? `<button class="btn-preset-action" disabled style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: var(--tag-emerald); font-weight: 700; width: 100%;">✓ Active Predictor (Steps 5 &amp; 6)</button>`
-                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="width: 100%; font-weight: 600; cursor: pointer;">⭐ Set as Active Predictor</button>`;
+                    ? `<button class="btn-preset-action" disabled style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: var(--tag-emerald); font-weight: 700; width: 100%;">✓ Active research model (Steps 5 &amp; 6)</button>`
+                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="width: 100%; font-weight: 600; cursor: pointer;">⭐ Use as active research model</button>`;
 
                 cmCardsHtml += `
                     <div class="multi-cm-card ${isDeployed ? 'active-deployed' : ''}">
@@ -8093,7 +8099,7 @@ function updatePredictionProvenanceBar() {
             <div style="display: flex; align-items: center; gap: 10px;">
                 <span style="font-size: 22px;">📥</span>
                 <div>
-                    <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-cyan);">Active Predictor: ${escapeHtml(m.name)} &bull; Imported model file</div>
+                    <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-cyan);">Active research model: ${escapeHtml(m.name)} &bull; Imported model file</div>
                     <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">Trained on ${escapeHtml(m.dataset || 'an unnamed dataset')}; exported ${escapeHtml((m.exportedAt || '').slice(0, 10))} with app version ${escapeHtml(m.version || '?')}. Uses the preprocessing fitted during training.</div>
                 </div>
             </div>`;
@@ -8111,7 +8117,7 @@ function updatePredictionProvenanceBar() {
                 <span style="font-size: 22px;">🔬</span>
                 <div>
                     <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-emerald);">
-                        Active Predictor: ${escapeHtml(m.name)} &bull; Trained via 7-Step Clinical Pipeline
+                        Active research model: ${escapeHtml(m.name)} &bull; Trained via 7-Step Clinical Pipeline
                     </div>
                     <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">
                         ${pipelineProvenanceSummary()} &bull; ${featCount} active features
@@ -8141,7 +8147,7 @@ function updatePredictionProvenanceBar() {
                 <span style="font-size: 22px;">📋</span>
                 <div>
                     <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-cyan);">
-                        Active Predictor: ${mInfo.name} &bull; Trained via Pre-existing Standard Workflow
+                        Active research model: ${mInfo.name} &bull; Trained via Pre-existing Standard Workflow
                     </div>
                     <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">
                         Standard Workflow &bull; ${AppState.evalResults && AppState.evalResults.protocol === 'option-b' ? 'Preprocessing fitted on Dataset (i)' : (AppState.evalResults && AppState.evalResults.retrainOn100 ? 'Final model refitted on the full cohort after split-first evaluation' : 'Preprocessing fitted on the training split only')} &bull; ${featCount} features
@@ -8608,6 +8614,7 @@ function downloadStandardAnalysisReport() {
 
 
 
+
 // =========================================================================
 // EXPORT / IMPORT OF THE DEPLOYED (TRAINED) MODEL
 // One JSON file: fitted preprocessing (encoding, scaling, imputation), model parameters, decision
@@ -8778,6 +8785,7 @@ async function importTrainedModel(file) {
 }
 
 function updateModelExportButton() {
+    scheduleAnalysisSummary(); // the active model may have changed
     const btn = document.getElementById('model-export-btn');
     if (btn) { btn.disabled = !AppState.trainedModel; btn.title = AppState.trainedModel ? 'Save the active model (with its fitted preprocessing) as a file' : 'Train or deploy a model first'; }
 }
@@ -10142,9 +10150,90 @@ function handleUnexpectedError(err) {
     try { showSeedToast(`⚠️ Unexpected error: ${msg}. Please check your data/settings and retry.`); } catch (e) { /* ignore */ }
 }
 
+// ---- src/analysis-summary.js ----
+// analysis-summary.js: a persistent one-line summary of the analysis under the step tabs: dataset, outcome and
+// positive class, independent patients, predictors, validation design, missing-data handling, recalibration
+// and the active research model. Refreshed after any change on the page, so it always shows the current state.
+/* global DataEngine */
+
+let summaryPending = false;
+
+// Refreshes at the next frame (several changes in a row cause one update)
+function scheduleAnalysisSummary() {
+    if (summaryPending) return;
+    summaryPending = true;
+    (typeof requestAnimationFrame === 'function' ? requestAnimationFrame : setTimeout)(() => { summaryPending = false; renderAnalysisSummary(); });
+}
+
+const val = id => document.getElementById(id)?.value || '';
+
+function validationText() {
+    const mode = document.querySelector('input[name="validation-mode"]:checked')?.value || 'split';
+    const method = val('split-method') || 'random';
+    const how = method === 'group' ? `by patient (${val('split-group-col') || 'column not chosen'})` : method === 'time' ? `by date (${val('split-date-col') || 'column not chosen'})` : 'random, stratified';
+    if (mode === 'bootstrap') {
+        const g = val('bootstrap-group-col');
+        return `Option C: bootstrap, ${val('bootstrap-reps') || '?'} resamples${g ? `, by patient (${g})` : ''}`;
+    }
+    if (mode === 'separate') return `Option B: separate test file${AppState.separateTestFileName ? ` (${AppState.separateTestFileName})` : ' (not loaded yet)'}`;
+    const pct = Math.min(95, Math.max(50, parseFloat(val('train-pct-input')) || 80));
+    return `Option A: ${pct}/${100 - pct} split, ${how}`;
+}
+
+function activeModelText() {
+    if (!AppState.trainedModel) return null;
+    if (AppState.deployedSource === 'imported' && AppState.importedModelInfo) return `${AppState.importedModelInfo.name} (imported file)`;
+    if (AppState.deployedSource === '7step' && AppState.deployedPipelineModel) return `${AppState.deployedPipelineModel.name} (7-step pipeline)`;
+    return `${displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel)} (Step 4)`;
+}
+
+function renderAnalysisSummary() {
+    const box = document.getElementById('analysis-summary');
+    if (!box) return;
+    const pd = AppState.parsedData, cfgs = AppState.columnConfigs || {};
+    const model = activeModelText();
+    if (!pd && !model) { box.hidden = true; box.innerHTML = ''; return; }
+    const items = [];
+    if (pd) {
+        const target = pd.headers.find(h => cfgs[h] && cfgs[h].role === 'target');
+        const rows = target ? pd.rows.filter(r => !DataEngine.isMissing(r[target])) : pd.rows;
+        const groupCol = val('split-method') === 'group' ? val('split-group-col') : (document.querySelector('input[name="validation-mode"]:checked')?.value === 'bootstrap' ? val('bootstrap-group-col') : '');
+        const patients = groupCol ? new Set(rows.map(r => String(r[groupCol] ?? '').trim())).size : null;
+        items.push(['📄 Data', `${AppState.fileName || 'dataset'}: ${rows.length.toLocaleString('en-GB')} records${target ? ' with an outcome' : ''}${patients !== null ? ` from ${patients.toLocaleString('en-GB')} patients` : ''}${target && pd.rows.length > rows.length ? ` (${pd.rows.length - rows.length} without outcome excluded)` : ''}`]);
+        if (target) {
+            const c = cfgs[target];
+            let outcome = `${target} (${c.type === 'continuous' ? 'numerical' : 'categories'})`;
+            const levels = ((AppState.columnAnalysis || {})[target]?.distinctValues || []).map(String);
+            if (c.type !== 'continuous' && levels.length === 2) {
+                const positive = c.positiveClass !== undefined && levels.includes(String(c.positiveClass)) ? String(c.positiveClass) : [...levels].sort()[1];
+                outcome = `${target}, positive class "${positive}"`;
+            }
+            items.push(['🎯 Outcome', outcome]);
+        } else {
+            items.push(['🎯 Outcome', 'not chosen yet (Step 2)']);
+        }
+        items.push(['🧮 Predictors', String(pd.headers.filter(h => cfgs[h] && cfgs[h].role === 'feature').length)]);
+        items.push(['✂️ Validation', validationText()]);
+        const mi = val('mi-select');
+        items.push(['🧩 Missing data', AppState.completeCase ? 'complete cases only' : mi === 'mice5' ? 'multiple imputation (5)' : mi === 'mice10' ? 'multiple imputation (10)' : 'single imputation (Step 3)']);
+        const recal = val('recalibration-select');
+        if (recal && recal !== 'none') items.push(['📏 Recalibration', recal === 'platt' ? 'Platt scaling' : 'isotonic regression']);
+    }
+    items.push(['🤖 Active research model', model || 'none yet']);
+    box.hidden = false;
+    box.innerHTML = `<span class="analysis-summary-title">Analysis</span>${items.map(([k, v]) => `<span class="analysis-summary-item"><span class="k">${k}:</span> ${escapeHtml(v)}</span>`).join('')}`;
+}
+
+// Any change or click on the page may alter the analysis: refresh after it
+function initAnalysisSummary() {
+    ['change', 'click'].forEach(t => document.addEventListener(t, scheduleAnalysisSummary));
+    scheduleAnalysisSummary();
+}
+
 // ---- src/main.js ----
 // main.js: entry point of the Universal Medical ML/NeuralNet Predictor application controller.
 // Loads every module, initialises the shared state and starts the interface once the page is ready.
+
 
 
 
@@ -10222,6 +10311,7 @@ function start() {
         e.target.value = '';
     });
     updateImputedDataButtons();
+    initAnalysisSummary();
     // Firefox restores buttons' enabled state on reload: set the data-dependent ones from the (empty) page state
     updateModelExportButton();
     ['settings-save-btn', 'run-batch-predict-btn'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = true; });

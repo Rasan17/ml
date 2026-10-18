@@ -350,7 +350,7 @@ function updatePredictionProvenanceBar() {
             <div style="display: flex; align-items: center; gap: 10px;">
                 <span style="font-size: 22px;">📥</span>
                 <div>
-                    <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-cyan);">Active Predictor: ${escapeHtml(m.name)} &bull; Imported model file</div>
+                    <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-cyan);">Active research model: ${escapeHtml(m.name)} &bull; Imported model file</div>
                     <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">Trained on ${escapeHtml(m.dataset || 'an unnamed dataset')}; exported ${escapeHtml((m.exportedAt || '').slice(0, 10))} with app version ${escapeHtml(m.version || '?')}. Uses the preprocessing fitted during training.</div>
                 </div>
             </div>`;
@@ -368,7 +368,7 @@ function updatePredictionProvenanceBar() {
                 <span style="font-size: 22px;">🔬</span>
                 <div>
                     <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-emerald);">
-                        Active Predictor: ${escapeHtml(m.name)} &bull; Trained via 7-Step Clinical Pipeline
+                        Active research model: ${escapeHtml(m.name)} &bull; Trained via 7-Step Clinical Pipeline
                     </div>
                     <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">
                         ${pipelineProvenanceSummary()} &bull; ${featCount} active features
@@ -398,7 +398,7 @@ function updatePredictionProvenanceBar() {
                 <span style="font-size: 22px;">📋</span>
                 <div>
                     <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-cyan);">
-                        Active Predictor: ${mInfo.name} &bull; Trained via Pre-existing Standard Workflow
+                        Active research model: ${mInfo.name} &bull; Trained via Pre-existing Standard Workflow
                     </div>
                     <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">
                         Standard Workflow &bull; ${AppState.evalResults && AppState.evalResults.protocol === 'option-b' ? 'Preprocessing fitted on Dataset (i)' : (AppState.evalResults && AppState.evalResults.retrainOn100 ? 'Final model refitted on the full cohort after split-first evaluation' : 'Preprocessing fitted on the training split only')} &bull; ${featCount} features

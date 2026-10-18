@@ -33,6 +33,7 @@ import { downloadTripodChecklist } from './tripod.js';
 import { downloadHtmlReport, downloadValidationReport } from './html-report.js';
 import './external-validation.js';
 import { handleUnexpectedError } from './settings.js';
+import { initAnalysisSummary } from './analysis-summary.js';
 
 AppState.pipeline = createEmptyPipelineState(42);
 
@@ -78,6 +79,7 @@ function start() {
         e.target.value = '';
     });
     updateImputedDataButtons();
+    initAnalysisSummary();
     // Firefox restores buttons' enabled state on reload: set the data-dependent ones from the (empty) page state
     updateModelExportButton();
     ['settings-save-btn', 'run-batch-predict-btn'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = true; });

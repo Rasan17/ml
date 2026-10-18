@@ -10,6 +10,7 @@ import { DOM } from './shell.js';
 import { renderSinglePredictionForm } from './single-prediction.js';
 import { renderVariableConfigGrid } from './variables.js';
 import { refreshModelSampleGuide } from './predictor-budget.js';
+import { scheduleAnalysisSummary } from './analysis-summary.js';
 
 
 function syncTrainTestSplit(trainVal) {
@@ -60,6 +61,7 @@ function processTestingCSVContent(csvText, fileName) {
         AppState.separateTestRawRows = rows;
         AppState.separateTestFileName = fileName;
         refreshOptionBSummaries();
+        scheduleAnalysisSummary();
     } catch (err) {
         alert("Failed to parse testing CSV: " + err.message);
     }
