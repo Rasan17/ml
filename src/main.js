@@ -34,6 +34,7 @@ import { downloadHtmlReport, downloadValidationReport } from './html-report.js';
 import './external-validation.js';
 import { handleUnexpectedError } from './settings.js';
 import { initAnalysisSummary } from './analysis-summary.js';
+import './interpretation.js';
 
 AppState.pipeline = createEmptyPipelineState(42);
 

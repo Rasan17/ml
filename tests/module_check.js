@@ -44,6 +44,15 @@ const vm = require('vm');
 const bundlePath = path.join(__dirname, '..', 'dist', 'app.bundle.js');
 try { new vm.Script(fs.readFileSync(bundlePath, 'utf8'), { filename: 'dist/app.bundle.js' }); } catch (e) { problems.push(`dist/app.bundle.js does not compile (${e.message}): rename the clashing top-level name and run node tools/build.js`); }
 
+// The file:// bundle contains the modules main.js imports (tools/build.js): every module must be imported there
+{
+    const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
+    const inMain = new Set([...mainSrc.matchAll(/^import\s+(?:[^'"]*from\s+)?['"]\.\/([\w-]+)\.js['"];/gm)].map(m => m[1]));
+    files.filter(f => f !== 'main.js').forEach(f => {
+        if (!inMain.has(f.replace(/\.js$/, ''))) problems.push(`src/${f} is not imported by src/main.js, so it is missing from the file:// bundle: add an import there`);
+    });
+}
+
 // Every data-action used in the modules or the page must be in main.js's list of allowed actions
 {
     const allowed = new Set((fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8').match(/const ACTIONS = new Set\(\[([\s\S]*?)\]\)/) || [, ''])[1].match(/'[^']+'/g)?.map(x => x.slice(1, -1)) || []);
