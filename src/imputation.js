@@ -36,6 +36,8 @@ function renderImputationTable() {
         miEl.title = AppState.completeCase ? 'Complete-case analysis is on: there is nothing to impute' : '';
     }
     const mice = !AppState.completeCase && readMultipleImputation() > 0;
+    const methodsHint = document.getElementById('impute-methods-hint');
+    if (methodsHint) methodsHint.textContent = mice ? '💡 Multiple imputation: MICE fills every incomplete predictor, in the final models, every cross-validation fold and every bootstrap resample.' : '💡 Continuous: Median, Mean, KNN, Constant • Ordinal: Mode, Median • Nominal: Mode, "Missing" category';
 
     let rowsHtml = '';
     let missingColCount = 0;

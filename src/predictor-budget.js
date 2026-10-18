@@ -111,7 +111,7 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
             <div class="tune-title">📐 How many predictors can this sample support?</div>
             <p class="tune-muted" style="margin-top: 4px;">${headline} Your selection: <strong>${featureCols.length}</strong> predictor(s) = <strong>${P}</strong> parameter(s)${candidates !== null && candidates > P ? `, from <strong>${candidates}</strong> candidate parameters considered` : ''}.</p>
             <div class="${status === 'ok' ? 'explain-box' : 'tune-warn'}" style="margin-top: 6px;">${statusText}</div>
-            <table class="data-table thr-table"><thead><tr><th>Guide</th><th>Largest number of parameters</th><th>Comment</th></tr></thead>
+            <table class="data-table thr-table budget-table"><thead><tr><th>Guide</th><th>Largest number of parameters</th><th>Comment</th></tr></thead>
                 <tbody>${rows4.map(([g, v, c]) => `<tr><td>${escapeHtml(g)}</td><td><strong>${v}</strong>${Pv > v ? ' <span class="tune-sd">(you have ' + Pv + ')</span>' : ''}</td><td>${escapeHtml(c)}</td></tr>`).join('')}</tbody></table>
             ${idLike.length ? `<div class="tune-warn">⚠️ <strong>Looks like an identifier:</strong> ${idLike.map(c => `"${escapeHtml(c.col)}" (${c.levels} categories in ${withOutcome.length} records)`).join(', ')}. Untick it (or set it to Meta / ID): identifiers cannot predict new patients, and their values would be stored in exported model files.</div>` : ''}
             ${multi.length ? `<p class="tune-muted">Categorical predictors use one parameter per category beyond the first: ${multi.map(c => `"${escapeHtml(c.col)}" ${c.levels} categories = ${c.df}`).join('; ')}. Grouping rare categories saves parameters.</p>` : ''}
