@@ -136,6 +136,15 @@ async function buildFolds(rawRows, k, o, prepareFold, onFold) {
     return { sets, metas, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), requestedFolds };
 }
 
+// Recalibration of two-outcome probabilities on out-of-fold predictions (same rule as the final model):
+// null when there are too few predictions or events to fit it reliably
+function fitRecalibratorCore(method, oof) {
+    if (!method || method === 'none' || !oof || !oof.p || oof.p.length < 20) return null;
+    const events = oof.y.reduce((a, b) => a + b, 0);
+    if (events < 5 || oof.y.length - events < 5) return null;
+    return method === 'platt' ? ModelEngine.fitPlatt(oof.y, oof.p) : ModelEngine.fitIsotonic(oof.y, oof.p);
+}
+
 // Imputation and encoding fitted on learning rows only. Single imputation uses the Step 3 per-variable methods;
 // with miceM (multiple imputation chosen) MICE is fitted on the learning rows instead and one completed dataset is
 // used: across folds or bootstrap resamples this carries the imputation uncertainty ("resample, then impute";
@@ -298,7 +307,8 @@ function bootstrapResamplesGrouped(keys, B, seed) {
  * Returns per-resample scores (for model-selection correction) and the mean optimism per measure.
  */
 async function bootstrapOptimism(o) {
-    const { rows, boots, configs, analysis, isClassification, modelId, hp, evalOptions, keys, fitAndScoreMulti, tune = null, isAborted = null, onResample = null, miceM = 0, seed = 0 } = o;
+    const { rows, boots, configs, analysis, isClassification, modelId, hp, evalOptions, keys, fitAndScoreMulti, tune = null, isAborted = null, onResample = null, miceM = 0, seed = 0, recalibration = null } = o;
+    let recalibrated = 0;
     const Bm = Math.min(boots.length, o.maxResamples || boots.length);
     const targetCol = Object.keys(configs).find(c => configs[c].role === 'target');
     const nClassesAll = isClassification ? new Set(rows.map(r => String(r[targetCol]).trim())).size : 0;
@@ -316,7 +326,7 @@ async function bootstrapOptimism(o) {
         const prepB = imputeAndEncode(rowsB, configs, analysis, miceM, (seed + 7919 * (b + 1)) >>> 0);
         if (!prepB.X.length) continue;
         const numClasses = prepB.targetClasses.length || 2;
-        let hpB = hp, innerScore;
+        let hpB = hp, innerScore, evalB = evalOptions;
         if (tune) {
             // Repeat the tuning (or the cross-validation used to choose between models) inside this resample
             const userGroup = tune.groupOf || null;
@@ -331,6 +341,11 @@ async function bootstrapOptimism(o) {
             });
             hpB = t.bestHp;
             innerScore = t.best.mean;
+            // Recalibration repeated inside the resample: fitted on the resample's own out-of-fold predictions
+            if (recalibration) {
+                const cal = fitRecalibratorCore(recalibration, t.best.oof);
+                if (cal) { evalB = { ...evalOptions, recalibrator: cal }; recalibrated++; }
+            }
         }
         const origB = DataEngine.prepareTestingDataset(rows, prepB);
         // Out-of-bag patients (not drawn into this resample), for the .632+ estimate
@@ -339,7 +354,7 @@ async function bootstrapOptimism(o) {
         const oobB = oobRows.length ? DataEngine.prepareTestingDataset(oobRows, prepB) : null;
         const sets = [{ X: prepB.X, y: prepB.y, targetClasses: prepB.targetClasses }, { X: origB.X, y: origB.y, targetClasses: prepB.targetClasses }];
         if (oobB && oobB.X.length) sets.push({ X: oobB.X, y: oobB.y, targetClasses: prepB.targetClasses });
-        const [onBoot, onOrig, onOob = null] = await fitAndScoreMulti(modelId, isClassification, numClasses, hpB, prepB.X, prepB.y, sets, evalOptions, { isAborted });
+        const [onBoot, onOrig, onOob = null] = await fitAndScoreMulti(modelId, isClassification, numClasses, hpB, prepB.X, prepB.y, sets, evalB, { isAborted });
         keys.forEach(k => {
             if (typeof onBoot[k] === 'number' && typeof onOrig[k] === 'number') opt[k].push(onBoot[k] - onOrig[k]);
             if (onOob && typeof onOob[k] === 'number' && isFinite(onOob[k])) oob[k].push(onOob[k]);
@@ -355,7 +370,7 @@ async function bootstrapOptimism(o) {
     const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
     const optimism = {}, oobMean = {};
     keys.forEach(k => { optimism[k] = mean(opt[k]); oobMean[k] = mean(oob[k]); });
-    return { B: opt[keys[0]].length, optimism, oobMean, calibrationSlope: mean(slopes), calibrationSlopeOptimism: mean(slopeOpt), oobCalibrationSlope: mean(oobSlopes), perResample, tuned: Boolean(tune && tune.doTune), innerFolds: tune ? tune.k : null };
+    return { B: opt[keys[0]].length, recalibrated, optimism, oobMean, calibrationSlope: mean(slopes), calibrationSlopeOptimism: mean(slopeOpt), oobCalibrationSlope: mean(oobSlopes), perResample, tuned: Boolean(tune && tune.doTune), innerFolds: tune ? tune.k : null };
 }
 
 /**

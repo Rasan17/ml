@@ -34,12 +34,16 @@ async function localFitAndScore(modelId, isClassification, numClasses, hp, fold,
         return await ModelEngine.evaluateAsync(m, fold.Xva, fold.yva, isClassification, fold.targetClasses, evalOptions || {});
     } finally { if (m.dispose) m.dispose(); }
 }
+// evalOptions.recalibrator (optional): the fitted model is wrapped with it before scoring (Option C repeats
+// recalibration inside every resample)
 async function localFitAndScoreMulti(modelId, isClassification, numClasses, hp, X, y, evalSets, evalOptions) {
-    const m = await fitModel({ modelId, isClassification, numClasses, hp, X, y }, () => {});
+    const { recalibrator = null, ...evalOpts } = evalOptions || {};
+    const fitted = await fitModel({ modelId, isClassification, numClasses, hp, X, y }, () => {});
+    const m = recalibrator ? ModelEngine.wrapCalibrated(fitted, recalibrator) : fitted;
     try {
         const out = [];
         for (const set of evalSets) {
-            const e = await ModelEngine.evaluateAsync(m, set.X, set.y, isClassification, set.targetClasses, evalOptions || {});
+            const e = await ModelEngine.evaluateAsync(m, set.X, set.y, isClassification, set.targetClasses, evalOpts);
             const r = {};
             if (e) { KEEP.forEach(k => { if (e[k] !== undefined) r[k] = e[k]; }); if (e.calibration) r.calibrationSlope = e.calibration.slope; }
             out.push(r);
@@ -106,11 +110,13 @@ self.onmessage = async (ev) => {
         }
         if (op === 'fitEvalMulti') {
             // Train once, then score on several datasets (e.g. bootstrap sample and original data)
-            const m = await fitModel(payload, progress);
+            const { recalibrator = null, ...evalOpts } = payload.evalOptions || {};
+            const fitted = await fitModel(payload, progress);
+            const m = recalibrator ? ModelEngine.wrapCalibrated(fitted, recalibrator) : fitted;
             const keep = ['accuracy', 'balancedAccuracy', 'macroF1', 'rocAuc', 'brierScore', 'r2', 'rmse', 'mae'];
             const out = [];
             for (const set of payload.evalSets) {
-                const e = await ModelEngine.evaluateAsync(m, set.X, set.y, payload.isClassification, set.targetClasses, payload.evalOptions || {});
+                const e = await ModelEngine.evaluateAsync(m, set.X, set.y, payload.isClassification, set.targetClasses, evalOpts);
                 const r = {};
                 if (e) { keep.forEach(k => { if (e[k] !== undefined) r[k] = e[k]; }); if (e.calibration) r.calibrationSlope = e.calibration.slope; }
                 out.push(r);

@@ -1,6 +1,6 @@
 // cv-tuning.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { fitAndScore, fitModel } from './compute.js';
-import { TUNE_MAX_ROWS, TUNABLE_MODELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildFolds, buildRowFolds, runTuningCore } from './validation-core.js';
+import { TUNE_MAX_ROWS, TUNABLE_MODELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildFolds, buildRowFolds, fitRecalibratorCore, runTuningCore } from './validation-core.js';
 import { AppState, MODEL_INFO, RANKING_METRICS, escapeHtml, parseSeed, rankingMetricKey } from './core.js';
 import { fitPooledModel, prepareMultipleImputation, readMultipleImputation } from './multiple-imputation.js';
 /* global DataEngine, ModelEngine */
@@ -233,10 +233,7 @@ function readRecalibration(id) {
 }
 
 function fitRecalibrator(method, oof) {
-    if (method === 'none' || !oof || !oof.p || oof.p.length < 20) return null;
-    const events = oof.y.reduce((a, b) => a + b, 0);
-    if (events < 5 || oof.y.length - events < 5) return null;
-    return method === 'platt' ? ModelEngine.fitPlatt(oof.y, oof.p) : ModelEngine.fitIsotonic(oof.y, oof.p);
+    return fitRecalibratorCore(method, oof); // the same rule as inside bootstrap resamples (validation-core.js)
 }
 
 // Wraps a trained model with the calibrator and records the before/after evaluation summary

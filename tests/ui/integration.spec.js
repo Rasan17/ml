@@ -382,3 +382,22 @@ test('one imputation choice: with MICE the Step 3 table shows MICE only, folds a
     await expect(page.locator('.impute-strat-select').first()).toBeVisible();
     expect(errors).toEqual([]);
 });
+
+test('Option C with recalibration: the final model is recalibrated and the resamples repeat it', async ({ page }) => {
+    test.setTimeout(400000);
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await toStep4(page);
+    await page.selectOption('#recalibration-select', 'platt');
+    await page.check('#val-mode-c', { force: true });
+    await page.selectOption('#bootstrap-reps', { index: 0 });
+    await page.locator('.model-card[data-model-id="glm"]').click({ position: { x: 12, y: 12 } });
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText(/Complete/, { timeout: 300000 });
+    await expect(page.locator('#retrain-status-banner')).toContainText('Recalibrated with Platt scaling');
+    await expect(page.locator('#retrain-status-banner')).toContainText('refitted inside');
+    await page.click('button.step-tab[data-step="5"]');
+    await page.click('#run-single-predict-btn');
+    await expect(page.locator('#single-result-banner')).toBeVisible();
+    expect(errors).toEqual([]);
+});

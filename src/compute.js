@@ -161,11 +161,13 @@ async function fitAndScoreMulti(modelId, isClassification, numClasses, hp, X, y,
             if (!e.workerUnavailable) throw e;
         }
     }
-    const m = await fitLocal(modelId, isClassification, numClasses, hp, X, y, onProgress, isAborted);
+    const { recalibrator = null, ...evalOpts } = evalOptions || {};
+    const fitted = await fitLocal(modelId, isClassification, numClasses, hp, X, y, onProgress, isAborted);
+    const m = recalibrator ? ModelEngine.wrapCalibrated(fitted, recalibrator) : fitted;
     try {
         const out = [];
         for (const set of evalSets) {
-            const e = await ModelEngine.evaluateAsync(m, set.X, set.y, isClassification, set.targetClasses, evalOptions);
+            const e = await ModelEngine.evaluateAsync(m, set.X, set.y, isClassification, set.targetClasses, evalOpts);
             const r = {};
             if (e) { ['accuracy', 'balancedAccuracy', 'macroF1', 'rocAuc', 'brierScore', 'r2', 'rmse', 'mae'].forEach(k => { if (e[k] !== undefined) r[k] = e[k]; }); if (e.calibration) r.calibrationSlope = e.calibration.slope; }
             out.push(r);

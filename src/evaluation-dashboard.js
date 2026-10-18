@@ -145,6 +145,10 @@ function renderEvaluationDashboard() {
             notes.push(`🧩 <strong>Multiple imputation:</strong> missing predictor values${mi.imputedColumns && mi.imputedColumns.length ? ` (${mi.imputedColumns.map(escapeHtml).join(', ')})` : ''} were imputed ${mi.m} times by chained equations with predictive mean matching, fitted on the Training patients only and without the outcome. One model was trained on each completed dataset and the predictions are averaged; Testing and new patients with missing values are imputed in the same way.${evalRes.cv && evalRes.cv.imputation ? ` Cross-validation folds (model selection, tuning, recalibration): ${escapeHtml(evalRes.cv.imputation)}.` : ''}${mi.insideResamples ? ` Bootstrap resamples: ${escapeHtml(mi.insideResamples)}.` : ''}`);
         }
         if (evalRes && evalRes.multipleImputationSkipped) notes.push(`🧩 ${escapeHtml(evalRes.multipleImputationSkipped)}`);
+        if (isOptionC && evalRes && evalRes.recalibration) {
+            notes.push(`📐 <strong>Recalibrated</strong> with ${evalRes.recalibration.method === 'platt' ? 'Platt scaling' : 'isotonic regression'}, fitted on ${escapeHtml(evalRes.recalibration.fittedOn)}. The recalibration was refitted inside ${typeof evalRes.recalibrationInResamples === 'number' ? evalRes.recalibrationInResamples : 'every'} bootstrap resample(s) on their own cross-validated predictions, so the optimism-corrected results include its effect.`);
+        }
+        if (isOptionC && evalRes && evalRes.recalibrationSkipped) notes.push(`📐 ${escapeHtml(evalRes.recalibrationSkipped)}`);
         if (evalRes && evalRes.cv) {
             notes.push(`Best model chosen by ${evalRes.cv.folds}-fold cross-validation inside the Training set${evalRes.cv.grouped ? ' (each patient\'s records kept in one fold)' : ''}; missing-value filling (${escapeHtml(evalRes.cv.imputation || 'Step 3 methods')}), encoding and scaling were refitted inside every fold.`);
         } else if (allResults.length > 1 && !isOptionC) {

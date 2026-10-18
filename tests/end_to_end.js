@@ -126,10 +126,12 @@ async function localFitAndScore(id, isClf, nc, hp, fold, evalOptions) {
     return ev;
 }
 async function localFitAndScoreMulti(id, isClf, nc, hp, X, y, sets, evalOptions) {
-    const m = await fitLocal(id, isClf, nc, hp, X, y);
+    const { recalibrator = null, ...evalOpts } = evalOptions || {};
+    const fitted = await fitLocal(id, isClf, nc, hp, X, y);
+    const m = recalibrator ? ME.wrapCalibrated(fitted, recalibrator) : fitted;
     const out = [];
     for (const set of sets) {
-        const e = await ME.evaluateAsync(m, set.X, set.y, isClf, set.targetClasses, evalOptions);
+        const e = await ME.evaluateAsync(m, set.X, set.y, isClf, set.targetClasses, evalOpts);
         const r = {};
         KEEP.forEach(k => { if (e && e[k] !== undefined) r[k] = e[k]; });
         if (e && e.calibration) r.calibrationSlope = e.calibration.slope;
@@ -424,6 +426,32 @@ async function optionC(VC, rows, cfg, modelId, hp, B, tune) {
         const d = Math.abs(done.result.optimism.rocAuc - page.optimism.rocAuc) + Math.abs(done.result.oobMean.rocAuc - page.oobMean.rocAuc);
         assert(d < 1e-12 && done.result.B === page.B && progress === page.B, `worker and page differ (${d}; B ${done.result.B} vs ${page.B}; ${progress} progress messages)`);
         return `${done.result.B} resamples with tuning repeated, ${progress} progress messages, identical optimism (${done.result.optimism.rocAuc.toFixed(4)})`;
+    });
+
+    await check('Option C with recalibration: recalibration refitted inside every resample; worker and page agree', async () => {
+        // The simulated worker set up by the previous check (loading its scripts twice would redeclare them)
+        const ws = globalThis.__workerScope;
+        assert(ws && ws.onmessage, 'worker scope from the previous check is missing');
+        const sent = [];
+        ws.postMessage = m => sent.push(m);
+        const VC = loadValidationCore();
+        const rows = cohort(160, 61, 'binary', {});
+        const cfg = configs('binary');
+        const analysis = DE.analyzeColumns(Object.keys(rows[0]), rows);
+        const metricDefs = { rocAuc: { label: 'ROC-AUC', higherIsBetter: true } };
+        const base = { rows, boots: VC.bootstrapResamples(rows.length, 10, 9), configs: cfg, analysis, isClassification: true, modelId: 'rf', hp: { numTrees: 20, seed: 1 },
+            evalOptions: {}, keys: ['rocAuc', 'brierScore'], tune: { k: 3, seed: 9, groupCol: null, metricKey: 'rocAuc', metricDefs, doTune: false } };
+        const payload = { ...base, recalibration: 'platt' };
+        await ws.onmessage({ data: { id: 5, op: 'bootstrap', payload: JSON.parse(JSON.stringify(payload)) } });
+        const done = sent.find(m => m.id === 5 && (m.result || m.error));
+        assert(done && done.result, `worker failed: ${done && done.error}`);
+        assert(done.result.recalibrated === done.result.B && done.result.B > 0, `recalibration applied in ${done.result.recalibrated} of ${done.result.B} resamples`);
+        const page = await VC.bootstrapOptimism({ ...payload, fitAndScoreMulti: localFitAndScoreMulti, tune: { ...payload.tune, fitAndScore: localFitAndScore } });
+        const d = Math.abs(done.result.optimism.brierScore - page.optimism.brierScore);
+        assert(d < 1e-12, `worker and page differ by ${d}`);
+        const plain = await VC.bootstrapOptimism({ ...base, fitAndScoreMulti: localFitAndScoreMulti, tune: { ...base.tune, fitAndScore: localFitAndScore } });
+        assert(Math.abs(plain.optimism.brierScore - page.optimism.brierScore) > 1e-6, 'recalibration made no difference to the bootstrap');
+        return `recalibrated in ${done.result.recalibrated}/${done.result.B} resamples; Brier optimism ${page.optimism.brierScore.toFixed(4)} with vs ${plain.optimism.brierScore.toFixed(4)} without`;
     });
 
     await check('Multiple imputation for prediction: leak-free, reproducible, survives export, and helps when data are missing at random', async () => {

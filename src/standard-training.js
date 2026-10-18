@@ -176,10 +176,20 @@ async function startModelTraining() {
                 const model = miAll
                     ? await fitPooledModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, miAll.sets, { isAborted, onProgress: heartbeat })
                     : await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, prep.X, prep.y, { isAborted, onProgress: heartbeat });
-                const evalRes = await ModelEngine.evaluateAsync(model, miAll ? miAllX : prep.X, miAll ? miAllY : prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
+                let evalRes = await ModelEngine.evaluateAsync(model, miAll ? miAllX : prep.X, miAll ? miAllY : prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
+                // Recalibration: fitted on cross-validated predictions over all patients and applied to the final model;
+                // the same is repeated inside every resample, so the optimism correction covers it too
+                const calC = recalMethod !== 'none' ? fitRecalibrator(recalMethod, tuned.oof) : null;
+                let finalModel = model;
+                if (calC) {
+                    const rc = await recalibrateAndEvaluate(model, calC, miAll ? miAllX : prep.X, miAll ? miAllY : prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
+                    finalModel = rc.model;
+                    evalRes = rc.evalRes;
+                    evalRes.recalibration.fittedOn = `${calC.n} cross-validated predictions over all patients (repeated inside every bootstrap resample)`;
+                }
                 const wasTuned = autoTune && TUNABLE_MODELS.has(mId);
                 const tuneInside = wasTuned && !slowModel(mId);
-                const inner = (tuneInside || repeatSelection)
+                const inner = (tuneInside || repeatSelection || calC)
                     ? { k: innerK, seed: seedC, groupCol: groupColC || null, metricKey, metricDefs, doTune: tuneInside }
                     : null;
                 const Bm = slowModel(mId) ? Math.min(B, 50) : B;
@@ -190,7 +200,7 @@ async function startModelTraining() {
                 const run = await bootstrapRun({
                     rows: allRaw, boots, maxResamples: Bm, analysis: AppState.columnAnalysis,
                     isClassification: prep.isClassification, modelId: mId, hp: tuneInside ? baseHp : hp, evalOptions: evalOptsC, keys,
-                    tune: inner, miceM: miceInside, seed: seedC,
+                    tune: inner, miceM: miceInside, seed: seedC, recalibration: calC ? recalMethod : null,
                     configs: miC && !miceInside ? plainFillConfigs(AppState.columnConfigs) : AppState.columnConfigs
                 }, {
                     isAborted,
@@ -245,10 +255,11 @@ async function startModelTraining() {
                 evalRes.seed = hp.seed;
                 if (tuned.cv) evalRes.cv = { ...tuned.cv, imputation: foldImputationLabel() };
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
-                if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration is not combined with bootstrap internal validation (it would need to be repeated inside every resample); use Option A or B to recalibrate.';
+                if (recalMethod !== 'none' && !calC) evalRes.recalibrationSkipped = 'Recalibration was not applied: too few cross-validated predictions or events to fit it reliably.';
+                if (calC) evalRes.recalibrationInResamples = run.recalibrated;
                 if (model.trainingInfo) evalRes.nnNote = describeNNTraining(model.trainingInfo);
                 if (model.usedFallback) evalRes.fallbackNote = `TensorFlow.js training failed (${model.fallbackReason}); a linear (logistic/ridge) fallback model was evaluated instead of a neural network.`;
-                testedResults.push({ modelId: mId, info: mInfo, evalRes, model, retrained: true, prep, hyperparams: hp, seed: hp.seed });
+                testedResults.push({ modelId: mId, info: mInfo, evalRes, model: finalModel, retrained: true, prep, hyperparams: hp, seed: hp.seed });
                 runs.push({ modelId: mId, perResample: run.perResample });
             }
             // Choosing the best of several models (the winner's curse): optimism of the whole choose-then-fit process

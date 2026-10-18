@@ -649,11 +649,13 @@ async function fitAndScoreMulti(modelId, isClassification, numClasses, hp, X, y,
             if (!e.workerUnavailable) throw e;
         }
     }
-    const m = await fitLocal(modelId, isClassification, numClasses, hp, X, y, onProgress, isAborted);
+    const { recalibrator = null, ...evalOpts } = evalOptions || {};
+    const fitted = await fitLocal(modelId, isClassification, numClasses, hp, X, y, onProgress, isAborted);
+    const m = recalibrator ? ModelEngine.wrapCalibrated(fitted, recalibrator) : fitted;
     try {
         const out = [];
         for (const set of evalSets) {
-            const e = await ModelEngine.evaluateAsync(m, set.X, set.y, isClassification, set.targetClasses, evalOptions);
+            const e = await ModelEngine.evaluateAsync(m, set.X, set.y, isClassification, set.targetClasses, evalOpts);
             const r = {};
             if (e) { ['accuracy', 'balancedAccuracy', 'macroF1', 'rocAuc', 'brierScore', 'r2', 'rmse', 'mae'].forEach(k => { if (e[k] !== undefined) r[k] = e[k]; }); if (e.calibration) r.calibrationSlope = e.calibration.slope; }
             out.push(r);
@@ -896,6 +898,15 @@ async function buildFolds(rawRows, k, o, prepareFold, onFold) {
     return { sets, metas, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), requestedFolds };
 }
 
+// Recalibration of two-outcome probabilities on out-of-fold predictions (same rule as the final model):
+// null when there are too few predictions or events to fit it reliably
+function fitRecalibratorCore(method, oof) {
+    if (!method || method === 'none' || !oof || !oof.p || oof.p.length < 20) return null;
+    const events = oof.y.reduce((a, b) => a + b, 0);
+    if (events < 5 || oof.y.length - events < 5) return null;
+    return method === 'platt' ? ModelEngine.fitPlatt(oof.y, oof.p) : ModelEngine.fitIsotonic(oof.y, oof.p);
+}
+
 // Imputation and encoding fitted on learning rows only. Single imputation uses the Step 3 per-variable methods;
 // with miceM (multiple imputation chosen) MICE is fitted on the learning rows instead and one completed dataset is
 // used: across folds or bootstrap resamples this carries the imputation uncertainty ("resample, then impute";
@@ -1058,7 +1069,8 @@ function bootstrapResamplesGrouped(keys, B, seed) {
  * Returns per-resample scores (for model-selection correction) and the mean optimism per measure.
  */
 async function bootstrapOptimism(o) {
-    const { rows, boots, configs, analysis, isClassification, modelId, hp, evalOptions, keys, fitAndScoreMulti, tune = null, isAborted = null, onResample = null, miceM = 0, seed = 0 } = o;
+    const { rows, boots, configs, analysis, isClassification, modelId, hp, evalOptions, keys, fitAndScoreMulti, tune = null, isAborted = null, onResample = null, miceM = 0, seed = 0, recalibration = null } = o;
+    let recalibrated = 0;
     const Bm = Math.min(boots.length, o.maxResamples || boots.length);
     const targetCol = Object.keys(configs).find(c => configs[c].role === 'target');
     const nClassesAll = isClassification ? new Set(rows.map(r => String(r[targetCol]).trim())).size : 0;
@@ -1076,7 +1088,7 @@ async function bootstrapOptimism(o) {
         const prepB = imputeAndEncode(rowsB, configs, analysis, miceM, (seed + 7919 * (b + 1)) >>> 0);
         if (!prepB.X.length) continue;
         const numClasses = prepB.targetClasses.length || 2;
-        let hpB = hp, innerScore;
+        let hpB = hp, innerScore, evalB = evalOptions;
         if (tune) {
             // Repeat the tuning (or the cross-validation used to choose between models) inside this resample
             const userGroup = tune.groupOf || null;
@@ -1091,6 +1103,11 @@ async function bootstrapOptimism(o) {
             });
             hpB = t.bestHp;
             innerScore = t.best.mean;
+            // Recalibration repeated inside the resample: fitted on the resample's own out-of-fold predictions
+            if (recalibration) {
+                const cal = fitRecalibratorCore(recalibration, t.best.oof);
+                if (cal) { evalB = { ...evalOptions, recalibrator: cal }; recalibrated++; }
+            }
         }
         const origB = DataEngine.prepareTestingDataset(rows, prepB);
         // Out-of-bag patients (not drawn into this resample), for the .632+ estimate
@@ -1099,7 +1116,7 @@ async function bootstrapOptimism(o) {
         const oobB = oobRows.length ? DataEngine.prepareTestingDataset(oobRows, prepB) : null;
         const sets = [{ X: prepB.X, y: prepB.y, targetClasses: prepB.targetClasses }, { X: origB.X, y: origB.y, targetClasses: prepB.targetClasses }];
         if (oobB && oobB.X.length) sets.push({ X: oobB.X, y: oobB.y, targetClasses: prepB.targetClasses });
-        const [onBoot, onOrig, onOob = null] = await fitAndScoreMulti(modelId, isClassification, numClasses, hpB, prepB.X, prepB.y, sets, evalOptions, { isAborted });
+        const [onBoot, onOrig, onOob = null] = await fitAndScoreMulti(modelId, isClassification, numClasses, hpB, prepB.X, prepB.y, sets, evalB, { isAborted });
         keys.forEach(k => {
             if (typeof onBoot[k] === 'number' && typeof onOrig[k] === 'number') opt[k].push(onBoot[k] - onOrig[k]);
             if (onOob && typeof onOob[k] === 'number' && isFinite(onOob[k])) oob[k].push(onOob[k]);
@@ -1115,7 +1132,7 @@ async function bootstrapOptimism(o) {
     const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
     const optimism = {}, oobMean = {};
     keys.forEach(k => { optimism[k] = mean(opt[k]); oobMean[k] = mean(oob[k]); });
-    return { B: opt[keys[0]].length, optimism, oobMean, calibrationSlope: mean(slopes), calibrationSlopeOptimism: mean(slopeOpt), oobCalibrationSlope: mean(oobSlopes), perResample, tuned: Boolean(tune && tune.doTune), innerFolds: tune ? tune.k : null };
+    return { B: opt[keys[0]].length, recalibrated, optimism, oobMean, calibrationSlope: mean(slopes), calibrationSlopeOptimism: mean(slopeOpt), oobCalibrationSlope: mean(oobSlopes), perResample, tuned: Boolean(tune && tune.doTune), innerFolds: tune ? tune.k : null };
 }
 
 /**
@@ -4565,10 +4582,7 @@ function readRecalibration(id) {
 }
 
 function fitRecalibrator(method, oof) {
-    if (method === 'none' || !oof || !oof.p || oof.p.length < 20) return null;
-    const events = oof.y.reduce((a, b) => a + b, 0);
-    if (events < 5 || oof.y.length - events < 5) return null;
-    return method === 'platt' ? ModelEngine.fitPlatt(oof.y, oof.p) : ModelEngine.fitIsotonic(oof.y, oof.p);
+    return fitRecalibratorCore(method, oof); // the same rule as inside bootstrap resamples (validation-core.js)
 }
 
 // Wraps a trained model with the calibrator and records the before/after evaluation summary
@@ -4892,10 +4906,20 @@ async function startModelTraining() {
                 const model = miAll
                     ? await fitPooledModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, miAll.sets, { isAborted, onProgress: heartbeat })
                     : await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, prep.X, prep.y, { isAborted, onProgress: heartbeat });
-                const evalRes = await ModelEngine.evaluateAsync(model, miAll ? miAllX : prep.X, miAll ? miAllY : prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
+                let evalRes = await ModelEngine.evaluateAsync(model, miAll ? miAllX : prep.X, miAll ? miAllY : prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
+                // Recalibration: fitted on cross-validated predictions over all patients and applied to the final model;
+                // the same is repeated inside every resample, so the optimism correction covers it too
+                const calC = recalMethod !== 'none' ? fitRecalibrator(recalMethod, tuned.oof) : null;
+                let finalModel = model;
+                if (calC) {
+                    const rc = await recalibrateAndEvaluate(model, calC, miAll ? miAllX : prep.X, miAll ? miAllY : prep.y, prep.isClassification, prep.targetClasses, evalOptsC, evalAbortOpts(watchdog));
+                    finalModel = rc.model;
+                    evalRes = rc.evalRes;
+                    evalRes.recalibration.fittedOn = `${calC.n} cross-validated predictions over all patients (repeated inside every bootstrap resample)`;
+                }
                 const wasTuned = autoTune && TUNABLE_MODELS.has(mId);
                 const tuneInside = wasTuned && !slowModel(mId);
-                const inner = (tuneInside || repeatSelection)
+                const inner = (tuneInside || repeatSelection || calC)
                     ? { k: innerK, seed: seedC, groupCol: groupColC || null, metricKey, metricDefs, doTune: tuneInside }
                     : null;
                 const Bm = slowModel(mId) ? Math.min(B, 50) : B;
@@ -4906,7 +4930,7 @@ async function startModelTraining() {
                 const run = await bootstrapRun({
                     rows: allRaw, boots, maxResamples: Bm, analysis: AppState.columnAnalysis,
                     isClassification: prep.isClassification, modelId: mId, hp: tuneInside ? baseHp : hp, evalOptions: evalOptsC, keys,
-                    tune: inner, miceM: miceInside, seed: seedC,
+                    tune: inner, miceM: miceInside, seed: seedC, recalibration: calC ? recalMethod : null,
                     configs: miC && !miceInside ? plainFillConfigs(AppState.columnConfigs) : AppState.columnConfigs
                 }, {
                     isAborted,
@@ -4961,10 +4985,11 @@ async function startModelTraining() {
                 evalRes.seed = hp.seed;
                 if (tuned.cv) evalRes.cv = { ...tuned.cv, imputation: foldImputationLabel() };
                 if (prep.isClassification && (prep.targetClasses || []).length === 2 && evalRes.protocol !== 'option-c') evalRes.youden = youdenThreshold(tuned.oof);
-                if (recalMethod !== 'none') evalRes.recalibrationSkipped = 'Recalibration is not combined with bootstrap internal validation (it would need to be repeated inside every resample); use Option A or B to recalibrate.';
+                if (recalMethod !== 'none' && !calC) evalRes.recalibrationSkipped = 'Recalibration was not applied: too few cross-validated predictions or events to fit it reliably.';
+                if (calC) evalRes.recalibrationInResamples = run.recalibrated;
                 if (model.trainingInfo) evalRes.nnNote = describeNNTraining(model.trainingInfo);
                 if (model.usedFallback) evalRes.fallbackNote = `TensorFlow.js training failed (${model.fallbackReason}); a linear (logistic/ridge) fallback model was evaluated instead of a neural network.`;
-                testedResults.push({ modelId: mId, info: mInfo, evalRes, model, retrained: true, prep, hyperparams: hp, seed: hp.seed });
+                testedResults.push({ modelId: mId, info: mInfo, evalRes, model: finalModel, retrained: true, prep, hyperparams: hp, seed: hp.seed });
                 runs.push({ modelId: mId, perResample: run.perResample });
             }
             // Choosing the best of several models (the winner's curse): optimism of the whole choose-then-fit process
@@ -5758,6 +5783,10 @@ function renderEvaluationDashboard() {
             notes.push(`🧩 <strong>Multiple imputation:</strong> missing predictor values${mi.imputedColumns && mi.imputedColumns.length ? ` (${mi.imputedColumns.map(escapeHtml).join(', ')})` : ''} were imputed ${mi.m} times by chained equations with predictive mean matching, fitted on the Training patients only and without the outcome. One model was trained on each completed dataset and the predictions are averaged; Testing and new patients with missing values are imputed in the same way.${evalRes.cv && evalRes.cv.imputation ? ` Cross-validation folds (model selection, tuning, recalibration): ${escapeHtml(evalRes.cv.imputation)}.` : ''}${mi.insideResamples ? ` Bootstrap resamples: ${escapeHtml(mi.insideResamples)}.` : ''}`);
         }
         if (evalRes && evalRes.multipleImputationSkipped) notes.push(`🧩 ${escapeHtml(evalRes.multipleImputationSkipped)}`);
+        if (isOptionC && evalRes && evalRes.recalibration) {
+            notes.push(`📐 <strong>Recalibrated</strong> with ${evalRes.recalibration.method === 'platt' ? 'Platt scaling' : 'isotonic regression'}, fitted on ${escapeHtml(evalRes.recalibration.fittedOn)}. The recalibration was refitted inside ${typeof evalRes.recalibrationInResamples === 'number' ? evalRes.recalibrationInResamples : 'every'} bootstrap resample(s) on their own cross-validated predictions, so the optimism-corrected results include its effect.`);
+        }
+        if (isOptionC && evalRes && evalRes.recalibrationSkipped) notes.push(`📐 ${escapeHtml(evalRes.recalibrationSkipped)}`);
         if (evalRes && evalRes.cv) {
             notes.push(`Best model chosen by ${evalRes.cv.folds}-fold cross-validation inside the Training set${evalRes.cv.grouped ? ' (each patient\'s records kept in one fold)' : ''}; missing-value filling (${escapeHtml(evalRes.cv.imputation || 'Step 3 methods')}), encoding and scaling were refitted inside every fold.`);
         } else if (allResults.length > 1 && !isOptionC) {
