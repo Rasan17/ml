@@ -4637,7 +4637,26 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const cfg = {};
     cols.forEach(c => { cfg[c] = p.columnConfigs[c]; });
     cfg[targetCol] = p.columnConfigs[targetCol];
-    // The pipeline's own preprocessing for one fold: imputation, SMOTENC, optional top-70% selection, encoding
+    // Step 4 univariate screening (it uses the outcome) repeated on each fold's training patients
+    const scr = p.univScreen && p.univScreen.active ? p.univScreen : null;
+    const activeSet = p.featureCols.filter(c => !p.droppedFeatures.has(c));
+    const baseIsActive = activeSet.every(c => cols.includes(c));
+    const screenedSelections = [];
+    const screenCols = realRows => {
+        if (!scr) return cols;
+        const ruleSet = new Set(scr.rule);
+        const res = DataEngine.runUnivariateTesting(realRows, scr.rule, targetCol, p.columnConfigs);
+        const sigInFold = new Set(res.filter(r => r.significant).map(r => r.feature));
+        const kept = cols.filter(c => !ruleSet.has(c) || sigInFold.has(c));
+        // rule predictors dropped on the whole Training set but significant in this fold come back (full model sets only)
+        const added = baseIsActive ? scr.rule.filter(c => !cols.includes(c) && sigInFold.has(c)) : [];
+        const out = [...kept, ...added];
+        screenedSelections.push(scr.rule.filter(c => out.includes(c)));
+        return out.length ? out : cols;
+    };
+    const cfgFor = cs => { const o = {}; cs.forEach(c => { o[c] = p.columnConfigs[c]; }); o[targetCol] = p.columnConfigs[targetCol]; return o; };
+    // The pipeline's own preprocessing for one fold: imputation, Step 4 screening, SMOTENC, optional top-70%
+    // selection, encoding
     const prepareFold = async (tr, va, f) => {
         // Multiple imputation (Step 1): MICE refitted on the fold's learning rows; each completed dataset balanced
         // and encoded like the first; the fold is scored with pooled models (fitAndScoreAny)
@@ -4647,13 +4666,13 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
             cfgMI[targetCol] = { ...p.columnConfigs[targetCol], role: 'target' };
             const mi = DataEngine.miceFit(tr, cfgMI, { m: p.miM, seed: (seed + 104729 * (f + 1)) >>> 0 });
             const fills = { fillValues: Object.fromEntries(p.featureCols.map(c => [c, (p.imputer && p.imputer.fillValues[c]) ?? 0])) };
-            const balanced = mi.datasets.map(d => DataEngine.applySMOTENC(DataEngine.transformWithStrictImputer(d, fills, p.columnConfigs).rows, cols, targetCol, p.columnConfigs, seed).balancedRows);
-            let foldCols = cols, foldCfg = cfg;
+            const completed = mi.datasets.map(d => DataEngine.transformWithStrictImputer(d, fills, p.columnConfigs).rows);
+            const baseCols = screenCols(completed[0]);
+            const balanced = completed.map(d => DataEngine.applySMOTENC(d, baseCols, targetCol, p.columnConfigs, seed).balancedRows);
+            let foldCols = baseCols, foldCfg = cfgFor(baseCols);
             if (inFoldSelection) {
-                foldCols = await selectTop70InFold(balanced[0], cols, targetCol, seed);
-                foldCfg = {};
-                foldCols.forEach(c => { foldCfg[c] = p.columnConfigs[c]; });
-                foldCfg[targetCol] = p.columnConfigs[targetCol];
+                foldCols = await selectTop70InFold(balanced[0], baseCols, targetCol, seed);
+                foldCfg = cfgFor(foldCols);
             }
             const prep = DataEngine.prepareDataset(balanced[0], foldCfg, foldCols, targetCol);
             prep.fillValues = {};
@@ -4668,14 +4687,13 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
             tr = DataEngine.transformWithStrictImputer(tr, foldImputer, p.columnConfigs).rows;
             va = DataEngine.transformWithStrictImputer(va, foldImputer, p.columnConfigs).rows;
         }
-        const balanced = DataEngine.applySMOTENC(tr, cols, targetCol, p.columnConfigs, seed).balancedRows;
-        let foldCols = cols, foldCfg = cfg;
+        const baseCols = screenCols(tr);
+        const balanced = DataEngine.applySMOTENC(tr, baseCols, targetCol, p.columnConfigs, seed).balancedRows;
+        let foldCols = baseCols, foldCfg = cfgFor(baseCols);
         if (inFoldSelection) {
             // Feature selection inside the fold, so the fold's validation patients never influence it
-            foldCols = await selectTop70InFold(balanced, cols, targetCol, seed);
-            foldCfg = {};
-            foldCols.forEach(c => { foldCfg[c] = p.columnConfigs[c]; });
-            foldCfg[targetCol] = p.columnConfigs[targetCol];
+            foldCols = await selectTop70InFold(balanced, baseCols, targetCol, seed);
+            foldCfg = cfgFor(foldCols);
         }
         const prep = DataEngine.prepareDataset(balanced, foldCfg, foldCols, targetCol);
         prep.fillValues = { ...(foldImputer ? foldImputer.fillValues : {}) };
@@ -4683,7 +4701,7 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
         return { set: { Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses }, unknownClassCount: te.unknownClassCount, meta: foldCols };
     };
     const res = await buildFolds(raw || trainRows, k, { isClassification, targetCol, seed, groupOf: pipelineGroupFunction() }, prepareFold, onFold);
-    return { sets: res.sets, rowsUsed: res.rowsUsed, rowsTotal: res.rowsTotal, sampled: res.sampled, grouped: res.grouped, imputationRefitted: Boolean(raw), selections: inFoldSelection ? res.metas : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds: res.requestedFolds };
+    return { sets: res.sets, rowsUsed: res.rowsUsed, rowsTotal: res.rowsTotal, sampled: res.sampled, grouped: res.grouped, imputationRefitted: Boolean(raw), selections: inFoldSelection ? res.metas : null, screening: scr ? { rule: scr.rule, perFold: screenedSelections } : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds: res.requestedFolds };
 }
 
 // Show the chosen settings in the model's settings panel (so they are visible and saved with Save settings)
@@ -6342,7 +6360,7 @@ function runSinglePrediction() {
     const typ = DataEngine.typicality(xVector, prepTypicality(prep));
     const typicalityHtml = typ && typ.level !== 'typical'
         ? `<div style="font-size: 11.5px; color: var(--accent-rose); margin-top: 6px; font-weight: 600;">
-                ⚠️ Unusual patient: this combination of predictor values is ${typ.level === 'very unusual' ? 'more atypical than 99.9%' : 'more atypical than 99%'} of the training patients (Mahalanobis distance), even if each value is within range. The model has seen few patients like this, so the prediction may be unreliable.
+                ⚠️ Unusual patient: this combination of predictor values is ${typ.level === 'very unusual' ? 'more atypical than 99.9%' : 'more atypical than 99%'} of the training patients (Mahalanobis distance), even if each value is within range. The model has seen few patients like this, so the prediction may be unreliable. This is a screening aid, not proof that the prediction is wrong: check the values, and judge the prediction clinically.
            </div>`
         : '';
 
@@ -6562,7 +6580,7 @@ async function executeBatchPrediction() {
             (absentCols.length > 0 ? `• Columns missing from the file (filled for every row): ${absentCols.join(', ')}\n` : '') +
             (rowsWithImputation > 0 ? `• ${rowsWithImputation} of ${results.length} row(s) had ${totalImputedCells} blank or unrecognised predictor value(s) replaced with training-cohort values (see the 'Imputed_Inputs' column).\n` : '') +
             (rowsOutOfRange > 0 ? `• ${rowsOutOfRange} row(s) have values outside the range of the training patients (see 'Outside_Training_Range'): check for typing errors; otherwise those predictions are extrapolations.\n` : '') +
-            (rowsUnusual > 0 ? `• ${rowsUnusual} row(s) have an unusual combination of values compared with the training patients (see 'Unusual_Combination'): the model has seen few patients like them, so treat those predictions with caution.\n` : '') +
+            (rowsUnusual > 0 ? `• ${rowsUnusual} row(s) have an unusual combination of values compared with the training patients (see 'Unusual_Combination'): the model has seen few patients like them, so treat those predictions with caution (a screening aid, not proof that they are wrong).\n` : '') +
             `Predictions for these rows are less reliable.`);
     }
 
@@ -6857,6 +6875,8 @@ function executePipelineStep1() {
     AppState.pipeline.excludedIncomplete = excludedIncomplete;
     // Re-running Step 1 invalidates every downstream result
     AppState.pipeline.droppedFeatures = new Set();
+    AppState.pipeline.outcomeFreeDrops = new Set();
+    AppState.pipeline.univScreen = null;
     AppState.pipeline.normalityMap = {};
     AppState.pipeline.corrPairs = [];
     AppState.pipeline.vifResults = [];
@@ -7092,6 +7112,7 @@ function renderPipelineStep2() {
 
 window.pipelineDropFeature = function (featureName) {
     AppState.pipeline.droppedFeatures.add(featureName);
+    outcomeFreeDrops().add(featureName); // Step 2 (correlation) does not use the outcome
     renderPipelineStep2();
     if (AppState.pipeline.substep === 3) renderPipelineStep3();
 };
@@ -7177,6 +7198,7 @@ function pipelineDropSelectedVIF() {
         const f = cb.dataset.feature;
         if (f) {
             AppState.pipeline.droppedFeatures.add(f);
+            outcomeFreeDrops().add(f); // Step 3 (VIF) does not use the outcome
             droppedNames.push(f);
         }
     });
@@ -7188,6 +7210,29 @@ function pipelineDropSelectedVIF() {
 // =========================================================================
 // STEP 4: Univariate Statistical Testing Check
 // =========================================================================
+// Predictors removed in Steps 2–3 (correlation, VIF), which never look at the outcome
+function outcomeFreeDrops() {
+    if (!AppState.pipeline.outcomeFreeDrops) AppState.pipeline.outcomeFreeDrops = new Set();
+    return AppState.pipeline.outcomeFreeDrops;
+}
+
+// Step 4 screening uses the outcome, so cross-validation repeats it inside every fold (cv-tuning.js). Each Step 4
+// decision becomes a rule: a predictor kept because it was significant, or dropped because it was not, is kept in a
+// fold only if it is significant on that fold's training patients; the user's overrides (keeping a non-significant
+// predictor, dropping a significant one) are kept as they are.
+function recordUnivariateScreen(results) {
+    const P = AppState.pipeline;
+    const sig = new Map(results.map(r => [r.feature, Boolean(r.significant)]));
+    const candidates = P.featureCols.filter(c => !outcomeFreeDrops().has(c) && sig.has(c));
+    const dropped = c => P.droppedFeatures.has(c);
+    P.univScreen = {
+        active: candidates.some(dropped),
+        rule: candidates.filter(c => dropped(c) !== sig.get(c)),
+        alwaysKeep: candidates.filter(c => !dropped(c) && !sig.get(c)),
+        alwaysDrop: candidates.filter(c => dropped(c) && sig.get(c))
+    };
+}
+
 function renderPipelineStep4() {
     if (!AppState.pipeline.trainRows) return;
 
@@ -7201,6 +7246,7 @@ function renderPipelineStep4() {
     );
 
     AppState.pipeline.univariateResults = results;
+    recordUnivariateScreen(results);
 
     const activeCount = allFeatures.filter(c => !AppState.pipeline.droppedFeatures.has(c)).length;
     const sigCount = results.filter(r => r.significant && !AppState.pipeline.droppedFeatures.has(r.feature)).length;
@@ -7821,6 +7867,7 @@ async function executePipelineStep7() {
                 // k-NN / Naive Bayes: the Step 6 top-70% selection is repeated inside every fold
                 const fdModel = await foldsFor(activeCols, k, label, id, reduced);
                 if (reduced && fdModel.selections) pipeTuningReport.selectionStability = fdModel.selections;
+                if (fdModel.screening) pipeTuningReport.screening = fdModel.screening;
                 const res = await runTuningOnFolds(id, pHp[id], fdModel, isClassification, numClasses, watchdog, (c, nc, f, nf, eta) => {
                     const what = doTune ? `Tuning ${label} (${t + 1}/${plan.length}): combination ${c}/${nc}, fold ${f}/${nf}` : `Cross-validating ${label} (${t + 1}/${plan.length}): fold ${f}/${nf}`;
                     if (watchdog) watchdog.tick(stepOf(id), `🎯 ${what}${(eta || '').replace(/&middot;/g, '·')} (Training set only)...`);
@@ -7986,6 +8033,7 @@ async function executePipelineStep7() {
         AppState.pipeline.benchmarkResults = benchmarkList;
         AppState.pipeline.tuningReport = pipeTune ? pipeTuningReport : null;
         AppState.pipeline.cvSelectionStability = pipeTuningReport.selectionStability || null;
+        AppState.pipeline.cvScreening = pipeTuningReport.screening || null;
         renderTuningReport(AppState.pipeline.tuningReport, 'pipeline-tuning-report-container');
 
         // Render Leaderboard & Confusion Matrices
@@ -8086,8 +8134,14 @@ function renderPipelineLeaderboardOnly() {
         if (item.eval.fallbackNote) caveats.add(`⚠️ ${escapeHtml(item.eval.fallbackNote)}`);
     });
     if (sorted[0] && sorted[0].eval.cv) {
-        if (AppState.pipeline.droppedFeatures && AppState.pipeline.droppedFeatures.size) {
-            caveats.add(`Predictors removed in Steps 2–4 (${AppState.pipeline.droppedFeatures.size}) were chosen once on the whole Training set, partly from their association with the outcome, and not re-chosen inside each cross-validation fold: the cross-validated scores used to pick and tune models are therefore somewhat optimistic. The held-out Testing-set results are not affected.`);
+        const scrn = AppState.pipeline.cvScreening;
+        if (scrn && scrn.perFold && scrn.perFold.length) {
+            const freq = {};
+            scrn.perFold.forEach(list => list.forEach(c => { freq[c] = (freq[c] || 0) + 1; }));
+            const nf = scrn.perFold.length;
+            caveats.add(`Step 4 screening repeated inside cross-validation: in each of the ${nf} folds the univariate test was rerun on the fold's training patients, and each predictor screened by significance was kept only if significant there (your manual overrides were kept as set), so the cross-validated scores include the screening. Selected per fold: ${scrn.rule.map(c => `${escapeHtml(c)} ${freq[c] || 0}/${nf}`).join(', ')}. Predictors selected in only some folds are unstable choices.`);
+        } else if (AppState.pipeline.univScreen && AppState.pipeline.univScreen.active) {
+            caveats.add('Predictors removed in Step 4 by their association with the outcome were chosen once on the whole Training set and not re-chosen inside cross-validation folds here: the cross-validated scores are somewhat optimistic. The held-out Testing-set results are not affected.');
         }
         const stab = AppState.pipeline.cvSelectionStability;
         if (stab && stab.length) {
@@ -10719,7 +10773,9 @@ function renderInterpretation(containerId, { ev, prep, name, design, dataset }) 
         items.push(['What the probability means', meaning]);
         // 3. Discrimination and comparison with a simple baseline
         if (typeof ev.rocAuc === 'number') {
-            items.push(['How well it separates patients', `AUC ${ev.rocAuc.toFixed(2)} (${aucWords(ev.rocAuc)}): given one patient with "${positive}" and one without, the model gives the higher risk to the right one about ${Math.round(ev.rocAuc * 100)} times in 100 (50 = coin toss).`]);
+            const ci = ev.ci && Array.isArray(ev.ci.rocAuc) ? ev.ci.rocAuc : null;
+            const wide = ci && ci[1] - ci[0] > 0.2;
+            items.push(['How well it separates patients', `AUC ${ev.rocAuc.toFixed(2)} (${aucWords(ev.rocAuc)})${ci ? `, 95% CI ${ci[0].toFixed(2)}–${ci[1].toFixed(2)}` : ''}: given one patient with "${positive}" and one without, the model gives the higher risk to the right one about ${Math.round(ev.rocAuc * 100)} times in 100 (50 = coin toss).${wide ? ` <strong>The interval is wide: with this many patients the true AUC could be anywhere from ${aucWords(ci[0])} to ${aucWords(ci[1])}, so treat the ranking of models and any single figure as uncertain.</strong>` : ''}`]);
         }
         if (typeof ev.brierScore === 'number' && Array.isArray(ev.actuals) && ev.actuals.length) {
             const prev = ev.actuals.filter(v => v === 1).length / ev.actuals.length, ref = prev * (1 - prev);

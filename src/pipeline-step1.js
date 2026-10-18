@@ -135,6 +135,8 @@ function executePipelineStep1() {
     AppState.pipeline.excludedIncomplete = excludedIncomplete;
     // Re-running Step 1 invalidates every downstream result
     AppState.pipeline.droppedFeatures = new Set();
+    AppState.pipeline.outcomeFreeDrops = new Set();
+    AppState.pipeline.univScreen = null;
     AppState.pipeline.normalityMap = {};
     AppState.pipeline.corrPairs = [];
     AppState.pipeline.vifResults = [];

@@ -451,3 +451,26 @@ test('interface levels: Beginner and Intermediate hide expert settings and reset
     await page.selectOption('#ui-level-select', 'advanced');
     expect(errors).toEqual([]);
 });
+
+test('7-step pipeline: Step 4 significance screening is repeated inside every cross-validation fold', async ({ page }) => {
+    test.setTimeout(500000);
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await page.click('#sample-shunt-large-btn');
+    await page.click('#pipeline-direct-launch-btn');
+    await page.click('#pipeline-step1-run-btn');
+    for (const n of [2, 3, 4]) await page.click(`#subpill-${n}`);
+    await page.click('#pipeline-filter-significant-btn');
+    await page.click('#pipeline-drop-unselected-univ-btn');
+    const scr = await page.evaluate(async () => { const { AppState } = await import('./src/core.js'); return AppState.pipeline.univScreen; });
+    expect(scr.active).toBe(true);
+    expect(scr.rule.length).toBeGreaterThan(0);
+    for (const n of [5, 6]) await page.click(`#subpill-${n}`);
+    await page.click('#pipeline-run-rf-scout-btn');
+    await expect(page.locator('.rf-importance-summary')).toBeVisible({ timeout: 60000 });
+    await page.click('#subpill-7');
+    await page.click('#pipeline-train-models-btn');
+    await expect(page.locator('#pipeline-train-status-text')).toContainText('Evaluated Successfully', { timeout: 450000 });
+    await expect(page.locator('body')).toContainText('Step 4 screening repeated inside cross-validation');
+    expect(errors).toEqual([]);
+});

@@ -288,7 +288,26 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const cfg = {};
     cols.forEach(c => { cfg[c] = p.columnConfigs[c]; });
     cfg[targetCol] = p.columnConfigs[targetCol];
-    // The pipeline's own preprocessing for one fold: imputation, SMOTENC, optional top-70% selection, encoding
+    // Step 4 univariate screening (it uses the outcome) repeated on each fold's training patients
+    const scr = p.univScreen && p.univScreen.active ? p.univScreen : null;
+    const activeSet = p.featureCols.filter(c => !p.droppedFeatures.has(c));
+    const baseIsActive = activeSet.every(c => cols.includes(c));
+    const screenedSelections = [];
+    const screenCols = realRows => {
+        if (!scr) return cols;
+        const ruleSet = new Set(scr.rule);
+        const res = DataEngine.runUnivariateTesting(realRows, scr.rule, targetCol, p.columnConfigs);
+        const sigInFold = new Set(res.filter(r => r.significant).map(r => r.feature));
+        const kept = cols.filter(c => !ruleSet.has(c) || sigInFold.has(c));
+        // rule predictors dropped on the whole Training set but significant in this fold come back (full model sets only)
+        const added = baseIsActive ? scr.rule.filter(c => !cols.includes(c) && sigInFold.has(c)) : [];
+        const out = [...kept, ...added];
+        screenedSelections.push(scr.rule.filter(c => out.includes(c)));
+        return out.length ? out : cols;
+    };
+    const cfgFor = cs => { const o = {}; cs.forEach(c => { o[c] = p.columnConfigs[c]; }); o[targetCol] = p.columnConfigs[targetCol]; return o; };
+    // The pipeline's own preprocessing for one fold: imputation, Step 4 screening, SMOTENC, optional top-70%
+    // selection, encoding
     const prepareFold = async (tr, va, f) => {
         // Multiple imputation (Step 1): MICE refitted on the fold's learning rows; each completed dataset balanced
         // and encoded like the first; the fold is scored with pooled models (fitAndScoreAny)
@@ -298,13 +317,13 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
             cfgMI[targetCol] = { ...p.columnConfigs[targetCol], role: 'target' };
             const mi = DataEngine.miceFit(tr, cfgMI, { m: p.miM, seed: (seed + 104729 * (f + 1)) >>> 0 });
             const fills = { fillValues: Object.fromEntries(p.featureCols.map(c => [c, (p.imputer && p.imputer.fillValues[c]) ?? 0])) };
-            const balanced = mi.datasets.map(d => DataEngine.applySMOTENC(DataEngine.transformWithStrictImputer(d, fills, p.columnConfigs).rows, cols, targetCol, p.columnConfigs, seed).balancedRows);
-            let foldCols = cols, foldCfg = cfg;
+            const completed = mi.datasets.map(d => DataEngine.transformWithStrictImputer(d, fills, p.columnConfigs).rows);
+            const baseCols = screenCols(completed[0]);
+            const balanced = completed.map(d => DataEngine.applySMOTENC(d, baseCols, targetCol, p.columnConfigs, seed).balancedRows);
+            let foldCols = baseCols, foldCfg = cfgFor(baseCols);
             if (inFoldSelection) {
-                foldCols = await selectTop70InFold(balanced[0], cols, targetCol, seed);
-                foldCfg = {};
-                foldCols.forEach(c => { foldCfg[c] = p.columnConfigs[c]; });
-                foldCfg[targetCol] = p.columnConfigs[targetCol];
+                foldCols = await selectTop70InFold(balanced[0], baseCols, targetCol, seed);
+                foldCfg = cfgFor(foldCols);
             }
             const prep = DataEngine.prepareDataset(balanced[0], foldCfg, foldCols, targetCol);
             prep.fillValues = {};
@@ -319,14 +338,13 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
             tr = DataEngine.transformWithStrictImputer(tr, foldImputer, p.columnConfigs).rows;
             va = DataEngine.transformWithStrictImputer(va, foldImputer, p.columnConfigs).rows;
         }
-        const balanced = DataEngine.applySMOTENC(tr, cols, targetCol, p.columnConfigs, seed).balancedRows;
-        let foldCols = cols, foldCfg = cfg;
+        const baseCols = screenCols(tr);
+        const balanced = DataEngine.applySMOTENC(tr, baseCols, targetCol, p.columnConfigs, seed).balancedRows;
+        let foldCols = baseCols, foldCfg = cfgFor(baseCols);
         if (inFoldSelection) {
             // Feature selection inside the fold, so the fold's validation patients never influence it
-            foldCols = await selectTop70InFold(balanced, cols, targetCol, seed);
-            foldCfg = {};
-            foldCols.forEach(c => { foldCfg[c] = p.columnConfigs[c]; });
-            foldCfg[targetCol] = p.columnConfigs[targetCol];
+            foldCols = await selectTop70InFold(balanced, baseCols, targetCol, seed);
+            foldCfg = cfgFor(foldCols);
         }
         const prep = DataEngine.prepareDataset(balanced, foldCfg, foldCols, targetCol);
         prep.fillValues = { ...(foldImputer ? foldImputer.fillValues : {}) };
@@ -334,7 +352,7 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
         return { set: { Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses }, unknownClassCount: te.unknownClassCount, meta: foldCols };
     };
     const res = await buildFolds(raw || trainRows, k, { isClassification, targetCol, seed, groupOf: pipelineGroupFunction() }, prepareFold, onFold);
-    return { sets: res.sets, rowsUsed: res.rowsUsed, rowsTotal: res.rowsTotal, sampled: res.sampled, grouped: res.grouped, imputationRefitted: Boolean(raw), selections: inFoldSelection ? res.metas : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds: res.requestedFolds };
+    return { sets: res.sets, rowsUsed: res.rowsUsed, rowsTotal: res.rowsTotal, sampled: res.sampled, grouped: res.grouped, imputationRefitted: Boolean(raw), selections: inFoldSelection ? res.metas : null, screening: scr ? { rule: scr.rule, perFold: screenedSelections } : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds: res.requestedFolds };
 }
 
 // Show the chosen settings in the model's settings panel (so they are visible and saved with Save settings)

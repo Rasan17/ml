@@ -177,6 +177,7 @@ async function executePipelineStep7() {
                 // k-NN / Naive Bayes: the Step 6 top-70% selection is repeated inside every fold
                 const fdModel = await foldsFor(activeCols, k, label, id, reduced);
                 if (reduced && fdModel.selections) pipeTuningReport.selectionStability = fdModel.selections;
+                if (fdModel.screening) pipeTuningReport.screening = fdModel.screening;
                 const res = await runTuningOnFolds(id, pHp[id], fdModel, isClassification, numClasses, watchdog, (c, nc, f, nf, eta) => {
                     const what = doTune ? `Tuning ${label} (${t + 1}/${plan.length}): combination ${c}/${nc}, fold ${f}/${nf}` : `Cross-validating ${label} (${t + 1}/${plan.length}): fold ${f}/${nf}`;
                     if (watchdog) watchdog.tick(stepOf(id), `🎯 ${what}${(eta || '').replace(/&middot;/g, '·')} (Training set only)...`);
@@ -342,6 +343,7 @@ async function executePipelineStep7() {
         AppState.pipeline.benchmarkResults = benchmarkList;
         AppState.pipeline.tuningReport = pipeTune ? pipeTuningReport : null;
         AppState.pipeline.cvSelectionStability = pipeTuningReport.selectionStability || null;
+        AppState.pipeline.cvScreening = pipeTuningReport.screening || null;
         renderTuningReport(AppState.pipeline.tuningReport, 'pipeline-tuning-report-container');
 
         // Render Leaderboard & Confusion Matrices
@@ -442,8 +444,14 @@ function renderPipelineLeaderboardOnly() {
         if (item.eval.fallbackNote) caveats.add(`⚠️ ${escapeHtml(item.eval.fallbackNote)}`);
     });
     if (sorted[0] && sorted[0].eval.cv) {
-        if (AppState.pipeline.droppedFeatures && AppState.pipeline.droppedFeatures.size) {
-            caveats.add(`Predictors removed in Steps 2–4 (${AppState.pipeline.droppedFeatures.size}) were chosen once on the whole Training set, partly from their association with the outcome, and not re-chosen inside each cross-validation fold: the cross-validated scores used to pick and tune models are therefore somewhat optimistic. The held-out Testing-set results are not affected.`);
+        const scrn = AppState.pipeline.cvScreening;
+        if (scrn && scrn.perFold && scrn.perFold.length) {
+            const freq = {};
+            scrn.perFold.forEach(list => list.forEach(c => { freq[c] = (freq[c] || 0) + 1; }));
+            const nf = scrn.perFold.length;
+            caveats.add(`Step 4 screening repeated inside cross-validation: in each of the ${nf} folds the univariate test was rerun on the fold's training patients, and each predictor screened by significance was kept only if significant there (your manual overrides were kept as set), so the cross-validated scores include the screening. Selected per fold: ${scrn.rule.map(c => `${escapeHtml(c)} ${freq[c] || 0}/${nf}`).join(', ')}. Predictors selected in only some folds are unstable choices.`);
+        } else if (AppState.pipeline.univScreen && AppState.pipeline.univScreen.active) {
+            caveats.add('Predictors removed in Step 4 by their association with the outcome were chosen once on the whole Training set and not re-chosen inside cross-validation folds here: the cross-validated scores are somewhat optimistic. The held-out Testing-set results are not affected.');
         }
         const stab = AppState.pipeline.cvSelectionStability;
         if (stab && stab.length) {

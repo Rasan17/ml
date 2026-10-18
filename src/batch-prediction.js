@@ -134,7 +134,7 @@ async function executeBatchPrediction() {
             (absentCols.length > 0 ? `• Columns missing from the file (filled for every row): ${absentCols.join(', ')}\n` : '') +
             (rowsWithImputation > 0 ? `• ${rowsWithImputation} of ${results.length} row(s) had ${totalImputedCells} blank or unrecognised predictor value(s) replaced with training-cohort values (see the 'Imputed_Inputs' column).\n` : '') +
             (rowsOutOfRange > 0 ? `• ${rowsOutOfRange} row(s) have values outside the range of the training patients (see 'Outside_Training_Range'): check for typing errors; otherwise those predictions are extrapolations.\n` : '') +
-            (rowsUnusual > 0 ? `• ${rowsUnusual} row(s) have an unusual combination of values compared with the training patients (see 'Unusual_Combination'): the model has seen few patients like them, so treat those predictions with caution.\n` : '') +
+            (rowsUnusual > 0 ? `• ${rowsUnusual} row(s) have an unusual combination of values compared with the training patients (see 'Unusual_Combination'): the model has seen few patients like them, so treat those predictions with caution (a screening aid, not proof that they are wrong).\n` : '') +
             `Predictions for these rows are less reliable.`);
     }
 

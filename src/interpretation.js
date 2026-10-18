@@ -40,7 +40,9 @@ function renderInterpretation(containerId, { ev, prep, name, design, dataset }) 
         items.push(['What the probability means', meaning]);
         // 3. Discrimination and comparison with a simple baseline
         if (typeof ev.rocAuc === 'number') {
-            items.push(['How well it separates patients', `AUC ${ev.rocAuc.toFixed(2)} (${aucWords(ev.rocAuc)}): given one patient with "${positive}" and one without, the model gives the higher risk to the right one about ${Math.round(ev.rocAuc * 100)} times in 100 (50 = coin toss).`]);
+            const ci = ev.ci && Array.isArray(ev.ci.rocAuc) ? ev.ci.rocAuc : null;
+            const wide = ci && ci[1] - ci[0] > 0.2;
+            items.push(['How well it separates patients', `AUC ${ev.rocAuc.toFixed(2)} (${aucWords(ev.rocAuc)})${ci ? `, 95% CI ${ci[0].toFixed(2)}–${ci[1].toFixed(2)}` : ''}: given one patient with "${positive}" and one without, the model gives the higher risk to the right one about ${Math.round(ev.rocAuc * 100)} times in 100 (50 = coin toss).${wide ? ` <strong>The interval is wide: with this many patients the true AUC could be anywhere from ${aucWords(ci[0])} to ${aucWords(ci[1])}, so treat the ranking of models and any single figure as uncertain.</strong>` : ''}`]);
         }
         if (typeof ev.brierScore === 'number' && Array.isArray(ev.actuals) && ev.actuals.length) {
             const prev = ev.actuals.filter(v => v === 1).length / ev.actuals.length, ref = prev * (1 - prev);

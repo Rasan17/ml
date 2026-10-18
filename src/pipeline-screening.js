@@ -122,6 +122,7 @@ function renderPipelineStep2() {
 
 window.pipelineDropFeature = function (featureName) {
     AppState.pipeline.droppedFeatures.add(featureName);
+    outcomeFreeDrops().add(featureName); // Step 2 (correlation) does not use the outcome
     renderPipelineStep2();
     if (AppState.pipeline.substep === 3) renderPipelineStep3();
 };
@@ -207,6 +208,7 @@ function pipelineDropSelectedVIF() {
         const f = cb.dataset.feature;
         if (f) {
             AppState.pipeline.droppedFeatures.add(f);
+            outcomeFreeDrops().add(f); // Step 3 (VIF) does not use the outcome
             droppedNames.push(f);
         }
     });
@@ -218,6 +220,29 @@ function pipelineDropSelectedVIF() {
 // =========================================================================
 // STEP 4: Univariate Statistical Testing Check
 // =========================================================================
+// Predictors removed in Steps 2–3 (correlation, VIF), which never look at the outcome
+function outcomeFreeDrops() {
+    if (!AppState.pipeline.outcomeFreeDrops) AppState.pipeline.outcomeFreeDrops = new Set();
+    return AppState.pipeline.outcomeFreeDrops;
+}
+
+// Step 4 screening uses the outcome, so cross-validation repeats it inside every fold (cv-tuning.js). Each Step 4
+// decision becomes a rule: a predictor kept because it was significant, or dropped because it was not, is kept in a
+// fold only if it is significant on that fold's training patients; the user's overrides (keeping a non-significant
+// predictor, dropping a significant one) are kept as they are.
+function recordUnivariateScreen(results) {
+    const P = AppState.pipeline;
+    const sig = new Map(results.map(r => [r.feature, Boolean(r.significant)]));
+    const candidates = P.featureCols.filter(c => !outcomeFreeDrops().has(c) && sig.has(c));
+    const dropped = c => P.droppedFeatures.has(c);
+    P.univScreen = {
+        active: candidates.some(dropped),
+        rule: candidates.filter(c => dropped(c) !== sig.get(c)),
+        alwaysKeep: candidates.filter(c => !dropped(c) && !sig.get(c)),
+        alwaysDrop: candidates.filter(c => dropped(c) && sig.get(c))
+    };
+}
+
 function renderPipelineStep4() {
     if (!AppState.pipeline.trainRows) return;
 
@@ -231,6 +256,7 @@ function renderPipelineStep4() {
     );
 
     AppState.pipeline.univariateResults = results;
+    recordUnivariateScreen(results);
 
     const activeCount = allFeatures.filter(c => !AppState.pipeline.droppedFeatures.has(c)).length;
     const sigCount = results.filter(r => r.significant && !AppState.pipeline.droppedFeatures.has(r.feature)).length;

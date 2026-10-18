@@ -91,7 +91,7 @@ function runSinglePrediction() {
     const typ = DataEngine.typicality(xVector, prepTypicality(prep));
     const typicalityHtml = typ && typ.level !== 'typical'
         ? `<div style="font-size: 11.5px; color: var(--accent-rose); margin-top: 6px; font-weight: 600;">
-                ⚠️ Unusual patient: this combination of predictor values is ${typ.level === 'very unusual' ? 'more atypical than 99.9%' : 'more atypical than 99%'} of the training patients (Mahalanobis distance), even if each value is within range. The model has seen few patients like this, so the prediction may be unreliable.
+                ⚠️ Unusual patient: this combination of predictor values is ${typ.level === 'very unusual' ? 'more atypical than 99.9%' : 'more atypical than 99%'} of the training patients (Mahalanobis distance), even if each value is within range. The model has seen few patients like this, so the prediction may be unreliable. This is a screening aid, not proof that the prediction is wrong: check the values, and judge the prediction clinically.
            </div>`
         : '';
 
