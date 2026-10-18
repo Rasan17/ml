@@ -109,28 +109,44 @@ function effectiveFolds(rows, k, isClassification, targetCol, groupOf = null) {
     return Math.min(k, minority);
 }
 
-// Leak-free folds from raw rows: imputation, encoding and scaling are fitted on each fold's learning
-// rows only and then applied to that fold's validation rows
-async function buildRowFolds(rawRows, k, o, onFold) {
-    const { configs, analysis, isClassification, targetCol, seed, groupOf = null, stratifyGroups = false, decisionThreshold = null } = o;
+// The one cross-validation engine used by every workflow (standard, 7-step pipeline, inside bootstrap
+// resamples). It owns the resampling: caps very large sets, checks that cross-validation is possible, assigns
+// folds (every record of a patient in the same fold when grouped) and checks each fold's outcome coverage. The
+// workflow supplies only prepareFold(learnRows, validRows, f): its own preprocessing, fitted on the fold's
+// learning rows and applied to its validation rows, returning { set: { Xtr, ytr, Xva, yva, targetClasses },
+// unknownClassCount, meta }. Raw (unprocessed) rows go in, so nothing is fitted outside the folds.
+async function buildFolds(rawRows, k, o, prepareFold, onFold) {
+    const { isClassification, targetCol, seed, groupOf = null, stratifyGroups = false } = o;
     const cap = capRows(rawRows, isClassification, targetCol, seed, groupOf);
     const requestedFolds = k;
     k = effectiveFolds(cap.rows, k, isClassification, targetCol, groupOf);
     const fold = assignRowFolds(cap.rows, k, isClassification, targetCol, seed, groupOf, stratifyGroups);
-    const sets = [];
+    const sets = [], metas = [];
     for (let f = 0; f < k; f++) {
         const tr = cap.rows.filter((_, i) => fold[i] !== f);
         const va = cap.rows.filter((_, i) => fold[i] === f);
+        const out = await prepareFold(tr, va, f);
+        if (isClassification && out.unknownClassCount) throw new Error(`Cross-validation is not possible: fold ${f + 1} has an outcome group that its training rows lack. Use fewer folds or more patients.`);
+        sets.push(out.set);
+        metas.push(out.meta);
+        if (onFold) onFold(f + 1, k);
+        await ModelEngine.yieldToBrowser();
+    }
+    return { sets, metas, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), requestedFolds };
+}
+
+// Standard workflow folds: the Step 3 imputation, encoding and scaling are fitted on each fold's learning
+// rows only and then applied to that fold's validation rows
+async function buildRowFolds(rawRows, k, o, onFold) {
+    const { configs, analysis, decisionThreshold = null } = o;
+    const res = await buildFolds(rawRows, k, o, (tr, va) => {
         const trImp = DataEngine.imputeDataset(tr, configs, analysis);
         const vaImp = DataEngine.imputeDataset(va, configs, analysis, trImp.plan);
         const prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, configs);
         const te = DataEngine.prepareTestingDataset(vaImp.imputedRows, prep);
-        if (isClassification && te.unknownClassCount) throw new Error(`Cross-validation is not possible: fold ${f + 1} has an outcome group that its training rows lack. Use fewer folds or more patients.`);
-        sets.push({ Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses });
-        if (onFold) onFold(f + 1, k);
-        await ModelEngine.yieldToBrowser();
-    }
-    return { sets, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), decisionThreshold, requestedFolds };
+        return { set: { Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses }, unknownClassCount: te.unknownClassCount };
+    }, onFold);
+    return { sets: res.sets, rowsUsed: res.rowsUsed, rowsTotal: res.rowsTotal, sampled: res.sampled, grouped: res.grouped, decisionThreshold, requestedFolds: res.requestedFolds };
 }
 
 // Compare the grid by mean cross-validated ranking metric over pre-built folds.
@@ -426,4 +442,4 @@ function plus632(key, apparent, oobValue, noInfo) {
     return { value: T.from(app + w * (err1 - app)), weight: w, overfit: R };
 }
 
-export { TUNE_MAX_ROWS, TUNABLE_MODELS, FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, medianOf, tuningGrid, makeFolds, assignRowFolds, capRows, effectiveFolds, buildRowFolds, runTuningCore, bootstrapResamples, bootstrapResamplesGrouped, bootstrapOptimism, selectionOptimism, noInformationRates, plus632, youdenThreshold };
+export { buildFolds, TUNE_MAX_ROWS, TUNABLE_MODELS, FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, medianOf, tuningGrid, makeFolds, assignRowFolds, capRows, effectiveFolds, buildRowFolds, runTuningCore, bootstrapResamples, bootstrapResamplesGrouped, bootstrapOptimism, selectionOptimism, noInformationRates, plus632, youdenThreshold };

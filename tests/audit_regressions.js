@@ -152,6 +152,17 @@ const rejects = async (fn, what) => { try { await fn(); } catch (e) { return e.m
         return `${done.length} model/outcome combinations, isotonic recalibration, version-1 file`;
     });
 
+    await check('One cross-validation engine: both workflows build folds through buildFolds (no separate resampling code)', async () => {
+        const cv = fs.readFileSync(path.join(dir, 'src', 'cv-tuning.js'), 'utf8');
+        const body = cv.slice(cv.indexOf('async function buildPipelineFolds'), cv.indexOf('// Show the chosen settings'));
+        assert(/buildFolds\(/.test(body), 'the pipeline does not use the shared engine');
+        assert(!/effectiveFolds\(|assignRowFolds\(|capRows\(/.test(body), 'the pipeline still has its own resampling code');
+        const vc = fs.readFileSync(path.join(dir, 'src', 'validation-core.js'), 'utf8');
+        const std = vc.slice(vc.indexOf('async function buildRowFolds'), vc.indexOf('}\n', vc.indexOf('async function buildRowFolds')) + 2);
+        assert(/buildFolds\(/.test(std) && !/assignRowFolds\(/.test(std), 'the standard workflow does not use the shared engine');
+        return 'standard (and inside bootstrap resamples) and 7-step pipeline';
+    });
+
     console.log(results.join('\n'));
     console.log(`\n${passed}/${passed + failed} audit regression checks passed`);
     if (failed) process.exit(1);

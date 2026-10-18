@@ -1,6 +1,6 @@
 // cv-tuning.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { fitAndScore, fitModel } from './compute.js';
-import { TUNE_MAX_ROWS, TUNABLE_MODELS, tuningGrid, makeFolds, assignRowFolds, capRows, effectiveFolds, buildRowFolds, runTuningCore } from './validation-core.js';
+import { TUNE_MAX_ROWS, TUNABLE_MODELS, tuningGrid, makeFolds, assignRowFolds, capRows, buildFolds, buildRowFolds, runTuningCore } from './validation-core.js';
 import { AppState, MODEL_INFO, RANKING_METRICS, escapeHtml, parseSeed, rankingMetricKey } from './core.js';
 // =========================================================================
 // AUTOMATIC TUNING (standard workflow, Step 4): k-fold cross-validation inside the Training set
@@ -253,24 +253,14 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const p = AppState.pipeline;
     const targetCol = p.targetCol;
     const isClassification = p.columnConfigs[targetCol]?.type !== 'continuous';
-    const groupOf = pipelineGroupFunction();
-    // Folds are built from the raw (not yet imputed) training records, and the Step 1 imputation is refitted on
-    // each fold's learning rows, so a fold's validation patients never influence the values filled in
+    // The raw (not yet imputed) training records go to the shared engine, and the Step 1 imputation is refitted
+    // on each fold's learning rows, so a fold's validation patients never influence the values filled in
     const raw = p.trainRawRows && p.trainRawRows.length === trainRows.length ? p.trainRawRows : null;
-    const cap = capRows(raw || trainRows, isClassification, targetCol, seed, groupOf);
-    const rows = cap.rows;
-    const sampled = cap.sampled;
-    const requestedFolds = k;
-    k = effectiveFolds(rows, k, isClassification, targetCol, groupOf);
-    const fold = assignRowFolds(rows, k, isClassification, targetCol, seed, groupOf);
     const cfg = {};
     cols.forEach(c => { cfg[c] = p.columnConfigs[c]; });
     cfg[targetCol] = p.columnConfigs[targetCol];
-    const sets = [];
-    const selections = [];
-    for (let f = 0; f < k; f++) {
-        let tr = rows.filter((_, i) => fold[i] !== f);
-        let va = rows.filter((_, i) => fold[i] === f);
+    // The pipeline's own preprocessing for one fold: imputation, SMOTENC, optional top-70% selection, encoding
+    const prepareFold = async (tr, va) => {
         let foldImputer = p.imputer;
         if (raw) {
             foldImputer = DataEngine.fitStrictImputer(tr, p.featureCols, targetCol, p.columnConfigs, p.imputeStrategy || 'median');
@@ -282,7 +272,6 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
         if (inFoldSelection) {
             // Feature selection inside the fold, so the fold's validation patients never influence it
             foldCols = await selectTop70InFold(balanced, cols, targetCol, seed);
-            selections.push(foldCols);
             foldCfg = {};
             foldCols.forEach(c => { foldCfg[c] = p.columnConfigs[c]; });
             foldCfg[targetCol] = p.columnConfigs[targetCol];
@@ -290,11 +279,10 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
         const prep = DataEngine.prepareDataset(balanced, foldCfg, foldCols, targetCol);
         prep.fillValues = { ...(foldImputer ? foldImputer.fillValues : {}) };
         const te = DataEngine.prepareTestingDataset(va, prep);
-        sets.push({ Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses });
-        if (onFold) onFold(f + 1, k);
-        await ModelEngine.yieldToBrowser(); // keep the page responsive between folds
-    }
-    return { sets, rowsUsed: rows.length, rowsTotal: trainRows.length, sampled, grouped: Boolean(groupOf), imputationRefitted: Boolean(raw), selections: inFoldSelection ? selections : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds };
+        return { set: { Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses }, unknownClassCount: te.unknownClassCount, meta: foldCols };
+    };
+    const res = await buildFolds(raw || trainRows, k, { isClassification, targetCol, seed, groupOf: pipelineGroupFunction() }, prepareFold, onFold);
+    return { sets: res.sets, rowsUsed: res.rowsUsed, rowsTotal: res.rowsTotal, sampled: res.sampled, grouped: res.grouped, imputationRefitted: Boolean(raw), selections: inFoldSelection ? res.metas : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds: res.requestedFolds };
 }
 
 // Show the chosen settings in the model's settings panel (so they are visible and saved with Save settings)

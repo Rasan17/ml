@@ -861,28 +861,44 @@ function effectiveFolds(rows, k, isClassification, targetCol, groupOf = null) {
     return Math.min(k, minority);
 }
 
-// Leak-free folds from raw rows: imputation, encoding and scaling are fitted on each fold's learning
-// rows only and then applied to that fold's validation rows
-async function buildRowFolds(rawRows, k, o, onFold) {
-    const { configs, analysis, isClassification, targetCol, seed, groupOf = null, stratifyGroups = false, decisionThreshold = null } = o;
+// The one cross-validation engine used by every workflow (standard, 7-step pipeline, inside bootstrap
+// resamples). It owns the resampling: caps very large sets, checks that cross-validation is possible, assigns
+// folds (every record of a patient in the same fold when grouped) and checks each fold's outcome coverage. The
+// workflow supplies only prepareFold(learnRows, validRows, f): its own preprocessing, fitted on the fold's
+// learning rows and applied to its validation rows, returning { set: { Xtr, ytr, Xva, yva, targetClasses },
+// unknownClassCount, meta }. Raw (unprocessed) rows go in, so nothing is fitted outside the folds.
+async function buildFolds(rawRows, k, o, prepareFold, onFold) {
+    const { isClassification, targetCol, seed, groupOf = null, stratifyGroups = false } = o;
     const cap = capRows(rawRows, isClassification, targetCol, seed, groupOf);
     const requestedFolds = k;
     k = effectiveFolds(cap.rows, k, isClassification, targetCol, groupOf);
     const fold = assignRowFolds(cap.rows, k, isClassification, targetCol, seed, groupOf, stratifyGroups);
-    const sets = [];
+    const sets = [], metas = [];
     for (let f = 0; f < k; f++) {
         const tr = cap.rows.filter((_, i) => fold[i] !== f);
         const va = cap.rows.filter((_, i) => fold[i] === f);
+        const out = await prepareFold(tr, va, f);
+        if (isClassification && out.unknownClassCount) throw new Error(`Cross-validation is not possible: fold ${f + 1} has an outcome group that its training rows lack. Use fewer folds or more patients.`);
+        sets.push(out.set);
+        metas.push(out.meta);
+        if (onFold) onFold(f + 1, k);
+        await ModelEngine.yieldToBrowser();
+    }
+    return { sets, metas, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), requestedFolds };
+}
+
+// Standard workflow folds: the Step 3 imputation, encoding and scaling are fitted on each fold's learning
+// rows only and then applied to that fold's validation rows
+async function buildRowFolds(rawRows, k, o, onFold) {
+    const { configs, analysis, decisionThreshold = null } = o;
+    const res = await buildFolds(rawRows, k, o, (tr, va) => {
         const trImp = DataEngine.imputeDataset(tr, configs, analysis);
         const vaImp = DataEngine.imputeDataset(va, configs, analysis, trImp.plan);
         const prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, configs);
         const te = DataEngine.prepareTestingDataset(vaImp.imputedRows, prep);
-        if (isClassification && te.unknownClassCount) throw new Error(`Cross-validation is not possible: fold ${f + 1} has an outcome group that its training rows lack. Use fewer folds or more patients.`);
-        sets.push({ Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses });
-        if (onFold) onFold(f + 1, k);
-        await ModelEngine.yieldToBrowser();
-    }
-    return { sets, rowsUsed: cap.rows.length, rowsTotal: rawRows.length, sampled: cap.sampled, grouped: Boolean(groupOf), decisionThreshold, requestedFolds };
+        return { set: { Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses }, unknownClassCount: te.unknownClassCount };
+    }, onFold);
+    return { sets: res.sets, rowsUsed: res.rowsUsed, rowsTotal: res.rowsTotal, sampled: res.sampled, grouped: res.grouped, decisionThreshold, requestedFolds: res.requestedFolds };
 }
 
 // Compare the grid by mean cross-validated ranking metric over pre-built folds.
@@ -4418,24 +4434,14 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     const p = AppState.pipeline;
     const targetCol = p.targetCol;
     const isClassification = p.columnConfigs[targetCol]?.type !== 'continuous';
-    const groupOf = pipelineGroupFunction();
-    // Folds are built from the raw (not yet imputed) training records, and the Step 1 imputation is refitted on
-    // each fold's learning rows, so a fold's validation patients never influence the values filled in
+    // The raw (not yet imputed) training records go to the shared engine, and the Step 1 imputation is refitted
+    // on each fold's learning rows, so a fold's validation patients never influence the values filled in
     const raw = p.trainRawRows && p.trainRawRows.length === trainRows.length ? p.trainRawRows : null;
-    const cap = capRows(raw || trainRows, isClassification, targetCol, seed, groupOf);
-    const rows = cap.rows;
-    const sampled = cap.sampled;
-    const requestedFolds = k;
-    k = effectiveFolds(rows, k, isClassification, targetCol, groupOf);
-    const fold = assignRowFolds(rows, k, isClassification, targetCol, seed, groupOf);
     const cfg = {};
     cols.forEach(c => { cfg[c] = p.columnConfigs[c]; });
     cfg[targetCol] = p.columnConfigs[targetCol];
-    const sets = [];
-    const selections = [];
-    for (let f = 0; f < k; f++) {
-        let tr = rows.filter((_, i) => fold[i] !== f);
-        let va = rows.filter((_, i) => fold[i] === f);
+    // The pipeline's own preprocessing for one fold: imputation, SMOTENC, optional top-70% selection, encoding
+    const prepareFold = async (tr, va) => {
         let foldImputer = p.imputer;
         if (raw) {
             foldImputer = DataEngine.fitStrictImputer(tr, p.featureCols, targetCol, p.columnConfigs, p.imputeStrategy || 'median');
@@ -4447,7 +4453,6 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
         if (inFoldSelection) {
             // Feature selection inside the fold, so the fold's validation patients never influence it
             foldCols = await selectTop70InFold(balanced, cols, targetCol, seed);
-            selections.push(foldCols);
             foldCfg = {};
             foldCols.forEach(c => { foldCfg[c] = p.columnConfigs[c]; });
             foldCfg[targetCol] = p.columnConfigs[targetCol];
@@ -4455,11 +4460,10 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
         const prep = DataEngine.prepareDataset(balanced, foldCfg, foldCols, targetCol);
         prep.fillValues = { ...(foldImputer ? foldImputer.fillValues : {}) };
         const te = DataEngine.prepareTestingDataset(va, prep);
-        sets.push({ Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses });
-        if (onFold) onFold(f + 1, k);
-        await ModelEngine.yieldToBrowser(); // keep the page responsive between folds
-    }
-    return { sets, rowsUsed: rows.length, rowsTotal: trainRows.length, sampled, grouped: Boolean(groupOf), imputationRefitted: Boolean(raw), selections: inFoldSelection ? selections : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds };
+        return { set: { Xtr: prep.X, ytr: prep.y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses }, unknownClassCount: te.unknownClassCount, meta: foldCols };
+    };
+    const res = await buildFolds(raw || trainRows, k, { isClassification, targetCol, seed, groupOf: pipelineGroupFunction() }, prepareFold, onFold);
+    return { sets: res.sets, rowsUsed: res.rowsUsed, rowsTotal: res.rowsTotal, sampled: res.sampled, grouped: res.grouped, imputationRefitted: Boolean(raw), selections: inFoldSelection ? res.metas : null, decisionThreshold: readDecisionThreshold('pipeline-decision-threshold'), requestedFolds: res.requestedFolds };
 }
 
 // Show the chosen settings in the model's settings panel (so they are visible and saved with Save settings)
