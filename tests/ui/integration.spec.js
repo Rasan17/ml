@@ -31,6 +31,13 @@ test('settings with the newer controls are saved and restored', async ({ page })
     await page.check('input[name="validation-mode"][value="bootstrap"]', { force: true });
     await page.selectOption('#bootstrap-reps', '200');
     await page.selectOption('#bootstrap-group-col', 'Patient_ID');
+    // the analysis summary follows the choices
+    const summary = page.locator('#analysis-summary');
+    await expect(summary).toContainText('positive class "Responder"');
+    await expect(summary).toContainText('multiple imputation (10)');
+    await expect(summary).toContainText('Option C: bootstrap, 200 resamples, by patient (Patient_ID)');
+    await expect(summary).toContainText('isotonic regression');
+    await expect(summary).toContainText('none yet');
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#settings-save-btn')]);
     const file = await dl.path();
     await page.goto('/index.html');
