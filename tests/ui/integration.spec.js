@@ -401,3 +401,27 @@ test('Option C with recalibration: the final model is recalibrated and the resam
     await expect(page.locator('#single-result-banner')).toBeVisible();
     expect(errors).toEqual([]);
 });
+
+test('7-step pipeline with multiple imputation: pooled models for all seven, then prediction', async ({ page }) => {
+    test.setTimeout(500000);
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await page.click('#sample-shunt-large-btn');
+    await page.click('#pipeline-direct-launch-btn');
+    await page.selectOption('#pipeline-impute-strategy', 'mice5');
+    await page.click('#pipeline-step1-run-btn');
+    await expect(page.locator('#pipeline-step1-results')).toContainText('MICE (5 completed datasets)');
+    for (const n of [2, 3, 4, 5, 6]) await page.click(`#subpill-${n}`);
+    await page.click('#pipeline-run-rf-scout-btn');
+    await expect(page.locator('.rf-importance-summary')).toBeVisible({ timeout: 60000 });
+    await page.click('#subpill-7');
+    await page.click('#pipeline-train-models-btn');
+    await expect(page.locator('#pipeline-train-status-text')).toContainText('Evaluated Successfully', { timeout: 450000 });
+    await expect(page.locator('#pipeline-leaderboard-container tbody tr')).toHaveCount(7);
+    const pooled = await page.evaluate(async () => { const { AppState } = await import('./src/core.js'); return AppState.pipeline.benchmarkResults.every(b => b.prep.imputation && b.prep.imputation.mice); });
+    expect(pooled).toBe(true);
+    await page.click('button.step-tab[data-step="5"]');
+    await page.click('#run-single-predict-btn');
+    await expect(page.locator('#single-result-banner')).toBeVisible();
+    expect(errors).toEqual([]);
+});

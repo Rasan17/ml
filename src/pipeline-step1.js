@@ -88,23 +88,44 @@ function executePipelineStep1() {
     const testRaw = splitResult.testX;
     AppState.pipeline.testRawRows = testRaw; // raw patient records, used to tell whether the comparison is paired
 
-    // Fit strict imputer ONLY on the Training set (Zero Data Leakage)
+    // Fit strict imputer ONLY on the Training set (Zero Data Leakage); with multiple imputation it only supplies the
+    // training summary statistics shown below, and MICE fills the gaps
+    const miM = imputeStrategy === 'mice10' ? 10 : imputeStrategy === 'mice5' ? 5 : 0;
     const imputer = DataEngine.fitStrictImputer(
         trainRaw,
         featureCols,
         targetCol,
         AppState.columnConfigs,
-        imputeStrategy
+        miM ? 'median' : imputeStrategy
     );
 
     // Transform both Training and Testing sets with the fitted imputer
     const trainTransformed = DataEngine.transformWithStrictImputer(trainRaw, imputer, AppState.columnConfigs);
     const testTransformed = DataEngine.transformWithStrictImputer(testRaw, imputer, AppState.columnConfigs);
 
+    // Multiple imputation (MICE): fitted on the Training patients only, without the outcome. The completed datasets
+    // are kept for Step 7 (one model per dataset, pooled predictions); Steps 2–6 screen on the first one. Testing and
+    // new patients are imputed with the fitted chains when they are scored, so the Testing rows stay raw.
+    AppState.pipeline.miM = miM;
+    AppState.pipeline.miDatasets = null;
+    AppState.pipeline.miImputer = null;
+    AppState.pipeline.miInfo = null;
+    if (miM) {
+        const cfg = {};
+        featureCols.forEach(c => { cfg[c] = { ...AppState.columnConfigs[c], role: 'feature' }; });
+        cfg[targetCol] = { ...AppState.columnConfigs[targetCol], role: 'target' };
+        const mi = DataEngine.miceFit(trainRaw, cfg, { m: miM, seed: AppState.pipeline.seed });
+        // numbers as numbers, as the single-imputation path gives them
+        const asNumbers = rows => DataEngine.transformWithStrictImputer(rows, { fillValues: Object.fromEntries(featureCols.map(c => [c, imputer.fillValues[c]])) }, AppState.columnConfigs).rows;
+        AppState.pipeline.miDatasets = mi.datasets.map(asNumbers);
+        AppState.pipeline.miImputer = mi.imputer;
+        AppState.pipeline.miInfo = { m: miM, imputedColumns: mi.imputedColumns, rows: trainRaw.length, trace: mi.trace, traceScale: mi.traceScale };
+    }
+
     // Save pipeline state
-    AppState.pipeline.trainRows = trainTransformed.rows;
+    AppState.pipeline.trainRows = miM ? AppState.pipeline.miDatasets[0] : trainTransformed.rows;
     AppState.pipeline.trainRawRows = trainRaw; // same patients and order, before imputation (for leak-free CV folds)
-    AppState.pipeline.testRows = testTransformed.rows;
+    AppState.pipeline.testRows = miM ? testRaw : testTransformed.rows;
     AppState.pipeline.imputer = imputer;
     AppState.pipeline.featureCols = featureCols;
     AppState.pipeline.targetCol = targetCol;
@@ -194,7 +215,7 @@ function renderPipelineStep1Results(trainMissing = 0, testMissing = 0) {
                 <td><strong>${escapeHtml(col)}</strong></td>
                 <td><span class="pill pill-${conf.role || 'feature'}">${conf.role || 'feature'}</span></td>
                 <td><span class="pill pill-${conf.type || 'continuous'}">${conf.type || 'continuous'}</span></td>
-                <td><strong style="color: var(--accent-emerald);">${escapeHtml(fmtValue(fillVal))}</strong></td>
+                <td><strong style="color: var(--accent-emerald);">${AppState.pipeline.miM ? `MICE (${AppState.pipeline.miM} completed datasets)` : escapeHtml(fmtValue(fillVal))}</strong></td>
                 <td style="font-size: 12px; color: var(--text-secondary);">${statsStr}</td>
             </tr>
         `;

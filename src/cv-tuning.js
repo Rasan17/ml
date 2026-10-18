@@ -289,7 +289,30 @@ async function buildPipelineFolds(trainRows, cols, k, seed, onFold, inFoldSelect
     cols.forEach(c => { cfg[c] = p.columnConfigs[c]; });
     cfg[targetCol] = p.columnConfigs[targetCol];
     // The pipeline's own preprocessing for one fold: imputation, SMOTENC, optional top-70% selection, encoding
-    const prepareFold = async (tr, va) => {
+    const prepareFold = async (tr, va, f) => {
+        // Multiple imputation (Step 1): MICE refitted on the fold's learning rows; each completed dataset balanced
+        // and encoded like the first; the fold is scored with pooled models (fitAndScoreAny)
+        if (raw && p.miM) {
+            const cfgMI = {};
+            p.featureCols.forEach(c => { cfgMI[c] = { ...p.columnConfigs[c], role: 'feature' }; });
+            cfgMI[targetCol] = { ...p.columnConfigs[targetCol], role: 'target' };
+            const mi = DataEngine.miceFit(tr, cfgMI, { m: p.miM, seed: (seed + 104729 * (f + 1)) >>> 0 });
+            const fills = { fillValues: Object.fromEntries(p.featureCols.map(c => [c, (p.imputer && p.imputer.fillValues[c]) ?? 0])) };
+            const balanced = mi.datasets.map(d => DataEngine.applySMOTENC(DataEngine.transformWithStrictImputer(d, fills, p.columnConfigs).rows, cols, targetCol, p.columnConfigs, seed).balancedRows);
+            let foldCols = cols, foldCfg = cfg;
+            if (inFoldSelection) {
+                foldCols = await selectTop70InFold(balanced[0], cols, targetCol, seed);
+                foldCfg = {};
+                foldCols.forEach(c => { foldCfg[c] = p.columnConfigs[c]; });
+                foldCfg[targetCol] = p.columnConfigs[targetCol];
+            }
+            const prep = DataEngine.prepareDataset(balanced[0], foldCfg, foldCols, targetCol);
+            prep.fillValues = {};
+            prep.imputation = { configs: p.columnConfigs, mice: mi.imputer };
+            const sets = balanced.map(rows => { const t = DataEngine.prepareTestingDataset(rows, prep); return { X: t.X, y: t.y }; });
+            const te = DataEngine.prepareTestingDataset(va, prep);
+            return { set: { Xtr: sets[0].X, ytr: sets[0].y, Xva: te.X, yva: te.y, targetClasses: prep.targetClasses, mi: sets }, unknownClassCount: te.unknownClassCount, meta: foldCols };
+        }
         let foldImputer = p.imputer;
         if (raw) {
             foldImputer = DataEngine.fitStrictImputer(tr, p.featureCols, targetCol, p.columnConfigs, p.imputeStrategy || 'median');

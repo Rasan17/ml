@@ -1,5 +1,6 @@
 // pipeline-train.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from pipeline.js)
 import { fitModel } from './compute.js';
+import { fitPooledModel } from './multiple-imputation.js';
 import { youdenThreshold } from './validation-core.js';
 import { AppState, actionAttrs, compareEvalResults, describeNNTraining, displayModelName, escapeHtml, fmtR2, parseSeed, rankingMetricLabel, summariseHeldOutSet, trainingMedian } from './core.js';
 import { TUNABLE_MODELS, TUNE_MAX_ROWS, bootstrapFor, buildPipelineFolds, ciScopeNote, ciSpan, cvSummaryFrom, fitRecalibrator, formatCvScore, readDecisionThreshold, readRecalibration, recalibrateAndEvaluate, renderTuningReport, runTuningOnFolds, testPatientGroups } from './cv-tuning.js';
@@ -83,6 +84,13 @@ async function executePipelineStep7() {
         );
         // New patients' blank predictors are filled with the pipeline's training-only fill values
         fullPrep.fillValues = { ...(AppState.pipeline.imputer ? AppState.pipeline.imputer.fillValues : {}) };
+        // Multiple imputation (Step 1): Testing and new patients are imputed with the fitted MICE chains
+        const pipeMI = AppState.pipeline.miM && AppState.pipeline.miDatasets ? AppState.pipeline : null;
+        if (pipeMI) {
+            fullPrep.fillValues = {};
+            fullPrep.imputation = { configs: AppState.pipeline.columnConfigs, mice: pipeMI.miImputer };
+            fullPrep.multipleImputation = pipeMI.miInfo;
+        }
         // Single source for the class count: the encoder's class list
         const numClasses = isClassification ? fullPrep.targetClasses.length : 1;
 
@@ -107,7 +115,19 @@ async function executePipelineStep7() {
             targetCol
         );
         top70Prep.fillValues = fullPrep.fillValues;
+        if (pipeMI) { top70Prep.imputation = fullPrep.imputation; top70Prep.multipleImputation = fullPrep.multipleImputation; }
         const top70TestTrans = DataEngine.prepareTestingDataset(AppState.pipeline.testRows, top70Prep);
+        // With multiple imputation each completed dataset is balanced (SMOTENC, when Step 5 applied it) and encoded
+        // like the first; every model is then trained once per dataset and the predictions pooled
+        let fitPipe = fitModel;
+        if (pipeMI) {
+            const smote = AppState.pipeline.smotencResult && AppState.pipeline.smotencResult.applied;
+            const balancedSets = pipeMI.miDatasets.map((d, l) => (l === 0 ? AppState.pipeline.balancedTrainRows
+                : smote ? DataEngine.applySMOTENC(d, activeCols, targetCol, AppState.pipeline.columnConfigs, AppState.pipeline.seed).balancedRows : d));
+            const setsFor = pr => balancedSets.map(rows => { const t = DataEngine.prepareTestingDataset(rows, pr); return { X: t.X, y: t.y }; });
+            const setsByX = new Map([[fullPrep.X, setsFor(fullPrep)], [top70Prep.X, setsFor(top70Prep)]]);
+            fitPipe = (id, isClf, nc, hp, X, y, opts) => (setsByX.has(X) ? fitPooledModel(id, isClf, nc, hp, setsByX.get(X), opts) : fitModel(id, isClf, nc, hp, X, y, opts));
+        }
 
         const benchmarkList = [];
 
@@ -174,7 +194,7 @@ async function executePipelineStep7() {
         await new Promise(r => setTimeout(r, 60));
         const isAborted = () => Boolean(watchdog && watchdog.aborted);
         // Training runs in the background worker when available (same models and settings as before)
-        const knn = await fitModel('knn', isClassification, numClasses, { ...pHp.knn, seed: evalSeed }, top70Prep.X, top70Prep.y, { isAborted });
+        const knn = await fitPipe('knn', isClassification, numClasses, { ...pHp.knn, seed: evalSeed }, top70Prep.X, top70Prep.y, { isAborted });
         const knnEval = await ModelEngine.evaluateAsync(knn, top70TestTrans.X, top70TestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
         const nReinstated = Array.from(AppState.pipeline.reinstatedFeatures || []).filter(f => top70Cols.includes(f)).length;
         const reducedLabel = nReinstated ? `Top 70% + ${nReinstated} reinstated (${top70Cols.length} features)` : `Top 70% (${top70Cols.length} features)`;
@@ -186,7 +206,7 @@ async function executePipelineStep7() {
         if (isClassification) {
             if (watchdog) watchdog.tick(stepOf('nb'), `Training Model ${stepOf('nb')}/${totalModels}: Naive Bayes (Top 70% features only)...`);
             await new Promise(r => setTimeout(r, 60));
-            const nb = await fitModel('nb', isClassification, numClasses, { ...pHp.nb, seed: evalSeed }, top70Prep.X, top70Prep.y, { isAborted });
+            const nb = await fitPipe('nb', isClassification, numClasses, { ...pHp.nb, seed: evalSeed }, top70Prep.X, top70Prep.y, { isAborted });
             const nbEval = await ModelEngine.evaluateAsync(nb, top70TestTrans.X, top70TestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
             nbEval.featuresUsed = reducedLabel;
             nbEval.constraintNote = "Bottom 30% RF-importance features removed (fewer noisy inputs; does not make features conditionally independent)." + (nReinstated ? ` ${nReinstated} of them reinstated by the user.` : '') + (tunedTag('nb') ? ` Variance smoothing ${pHp.nb.varSmoothing}.` + tunedTag('nb') : '');
@@ -197,7 +217,7 @@ async function executePipelineStep7() {
         // selects features per split, so no RF-importance pruning is applied.
         if (watchdog) watchdog.tick(stepOf('rf'), `Training Model ${stepOf('rf')}/${totalModels}: Random Forest (all surviving features)...`);
         await new Promise(r => setTimeout(r, 60));
-        const rfFinal = await fitModel('rf', isClassification, numClasses, { ...pHp.rf, seed: evalSeed }, fullPrep.X, fullPrep.y, {
+        const rfFinal = await fitPipe('rf', isClassification, numClasses, { ...pHp.rf, seed: evalSeed }, fullPrep.X, fullPrep.y, {
             isAborted, onProgress: () => { if (watchdog) watchdog.tick(stepOf('rf'), `Training Model ${stepOf('rf')}/${totalModels}: Random Forest (all surviving features)...`); }
         });
         const rfEval = await ModelEngine.evaluateAsync(rfFinal, fullTestTrans.X, fullTestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
@@ -209,7 +229,7 @@ async function executePipelineStep7() {
         // early stopping on an internal validation split of the training rows (the test set is never used)
         if (watchdog) watchdog.tick(stepOf('gbm'), `Training Model ${stepOf('gbm')}/${totalModels}: Gradient-Boosted Trees (all surviving features)...`);
         await new Promise(r => setTimeout(r, 60));
-        const gbm = await fitModel('gbm', isClassification, numClasses, { ...pHp.gbm, seed: evalSeed }, fullPrep.X, fullPrep.y, {
+        const gbm = await fitPipe('gbm', isClassification, numClasses, { ...pHp.gbm, seed: evalSeed }, fullPrep.X, fullPrep.y, {
             isAborted, onProgress: () => { if (watchdog) watchdog.tick(stepOf('gbm'), `Training Model ${stepOf('gbm')}/${totalModels}: Gradient-Boosted Trees...`); }
         });
         const gbmEval = await ModelEngine.evaluateAsync(gbm, fullTestTrans.X, fullTestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
@@ -222,7 +242,7 @@ async function executePipelineStep7() {
         await new Promise(r => setTimeout(r, 60));
         const dnnParams = { ...pHp.nn };
         // The test split is never shown to the model: the NN carves its own validation split from the training rows
-        const dnn = await fitModel('nn', isClassification, numClasses, dnnParams, fullPrep.X, fullPrep.y, {
+        const dnn = await fitPipe('nn', isClassification, numClasses, dnnParams, fullPrep.X, fullPrep.y, {
             isAborted,
             onProgress: (ep, tot) => {
                 if (ep === 'tick') return;
@@ -239,7 +259,7 @@ async function executePipelineStep7() {
         // D. Logistic / Ridge Regression (Strict constraint: L2 penalization against collinearity)
         if (watchdog) watchdog.tick(stepOf('glm'), `Training Model ${stepOf('glm')}/${totalModels}: Logistic / Ridge Regression (L2 lambda = ${pHp.glm.lambdaL2})...`);
         await new Promise(r => setTimeout(r, 60));
-        const glm = await fitModel('glm', isClassification, numClasses, { ...pHp.glm, seed: evalSeed }, fullPrep.X, fullPrep.y, { isAborted });
+        const glm = await fitPipe('glm', isClassification, numClasses, { ...pHp.glm, seed: evalSeed }, fullPrep.X, fullPrep.y, { isAborted });
         const glmEval = await ModelEngine.evaluateAsync(glm, fullTestTrans.X, fullTestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
         glmEval.featuresUsed = `All Surviving (${activeCols.length} features)`;
         glmEval.constraintNote = `Applied Ridge L2 penalization (λ = ${pHp.glm.lambdaL2}) to stabilize against minor collinearity.` + tunedTag('glm');
@@ -250,7 +270,7 @@ async function executePipelineStep7() {
         await new Promise(r => setTimeout(r, 60));
         // Same base models for classification and regression (consistent with the Step 4 default)
         const ensembleConfig = { ...pHp.ensemble };
-        const ensemble = await fitModel('ensemble', isClassification, numClasses, ensembleConfig, fullPrep.X, fullPrep.y, {
+        const ensemble = await fitPipe('ensemble', isClassification, numClasses, ensembleConfig, fullPrep.X, fullPrep.y, {
             isAborted,
             onProgress: (curr, tot, info) => {
                 if (curr === 'tick' || !watchdog) return;
