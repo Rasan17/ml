@@ -3832,6 +3832,54 @@ function renderExplainPanel(containerId, items, rows, isClassification) {
         </div>`;
 }
 
+// =========================================================================
+// MICE CONVERGENCE: mean imputed value of each numerical predictor after every round, one line per imputation.
+// Converged chains level off and overlap; a line still trending at the last rounds suggests more rounds.
+// =========================================================================
+// Gelman–Rubin potential scale reduction after a burn-in of 2 rounds (chains = imputations); about 1 when the
+// chains have mixed, larger when they are still apart. With 8 rounds per chain it is approximate: on converged
+// chains (30 runs of the demo cohort) it exceeded 1.2 in about 1% of checks and never 1.3, hence the 1.3 threshold.
+// null with fewer than 2 chains or 4 rounds after burn-in.
+function miceRhat(chains, burn = 2) {
+    const ok = chains.filter(v => v.length - burn >= 4);
+    if (ok.length < 2) return null;
+    const n = Math.min(...ok.map(v => v.length)) - burn, tails = ok.map(v => v.slice(v.length - n));
+    const means = tails.map(v => v.reduce((a, b) => a + b, 0) / n), grand = means.reduce((a, b) => a + b, 0) / means.length;
+    const W = tails.reduce((a, v, j) => a + v.reduce((x, y) => x + (y - means[j]) ** 2, 0) / (n - 1), 0) / tails.length;
+    const B = n * means.reduce((a, mu) => a + (mu - grand) ** 2, 0) / (means.length - 1);
+    if (!(W > 0)) return B > 0 ? Infinity : 1;
+    return Math.sqrt((((n - 1) / n) * W + B / n) / W);
+}
+
+function renderMiceDiagnostics(containerId, mi) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    if (!mi || !Array.isArray(mi.trace) || !mi.trace.length) { box.innerHTML = ''; return; }
+    const cols = Object.keys(mi.trace[0] || {}).slice(0, 6);
+    if (!cols.length) { box.innerHTML = ''; return; }
+    const drifting = [], rhats = [];
+    const charts = cols.map(c => {
+        const series = mi.trace.map((t, l) => ({ name: `Imputation ${l + 1}`, colour: CURVE_COLOURS[l % CURVE_COLOURS.length], points: (t[c] || []).map((v, it) => ({ x: it + 1, y: v })) }));
+        const all = series.flatMap(se => se.points.map(p => p.y));
+        const sd = (mi.traceScale && mi.traceScale[c] && mi.traceScale[c].sd) || 1;
+        const rhat = miceRhat(mi.trace.map(t => t[c] || []));
+        if (rhat !== null && rhat > 1.3) drifting.push(`${c} (R̂ ${rhat.toFixed(2)})`);
+        rhats.push(rhat);
+        const lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.15 || sd * 0.1 || 1;
+        return `<div><div class="tune-muted" style="font-weight: 600;">${escapeHtml(c)}</div>${lineChartSvg({ series, xLabel: 'Round', yLabel: 'Mean imputed', xMin: 0, xMax: (mi.trace[0][c] || []).length || 10, yMin: lo - pad, yMax: hi + pad, aria: `MICE convergence for ${c}` })}</div>`;
+    });
+    box.innerHTML = `
+        <div class="cal-panel">
+            <div class="tune-title">🧩 Did the multiple imputation converge? (MICE diagnostics)</div>
+            <p class="tune-muted">For each numerical predictor with missing values, the mean of its imputed values after each of the ${(mi.trace[0][cols[0]] || []).length} rounds, one line per imputation (${mi.trace.length}). Converged imputations level off after the first few rounds and mix around the same level; lines that keep rising or falling at the end suggest the chains needed more rounds.${Object.keys(mi.trace[0]).length > cols.length ? ` First ${cols.length} predictors shown.` : ''}</p>
+            <div class="mice-diag-grid">${charts.join('')}</div>
+            ${mi.trace.length < 2 ? '' : drifting.length
+                ? `<div class="tune-warn">⚠️ Possible non-convergence: ${drifting.map(escapeHtml).join(', ')}. The imputations differ more between chains than within them after the first 2 rounds (Gelman–Rubin R̂ above 1.3; approximate with 10 rounds). Treat the imputations of these predictors with caution; consider more rounds, or whether the variable can be predicted from the others.</div>`
+                : `<div class="explain-box">✓ No sign of non-convergence: after the first 2 rounds the chains vary as much within as between them (Gelman–Rubin R̂ ${rhats.filter(v => v !== null).length ? `${Math.min(...rhats.filter(v => v !== null)).toFixed(2)}–${Math.max(...rhats.filter(v => v !== null)).toFixed(2)}` : 'n/a'}; below 1.3 for every predictor shown; approximate with 10 rounds). Round-to-round wiggles are expected: each round draws new donor values.</div>`}
+            ${chartLegend(mi.trace.map((_, l) => ({ label: `Imputation ${l + 1}`, colour: CURVE_COLOURS[l % CURVE_COLOURS.length] })))}
+        </div>`;
+}
+
 
 // =========================================================================
 // MINIMUM SAMPLE SIZE (Riley et al. criteria, as in pmsampsize) for the current outcome and predictors
@@ -4240,7 +4288,7 @@ async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onPr
     });
     prep.X = sets[0].X;
     prep.y = sets[0].y;
-    prep.multipleImputation = { m, imputedColumns: mi.imputedColumns, rows: rawRows.length };
+    prep.multipleImputation = { m, imputedColumns: mi.imputedColumns, rows: rawRows.length, trace: mi.trace || null, traceScale: mi.traceScale || null };
     return { prep, sets, imputedColumns: mi.imputedColumns };
 }
 
@@ -5677,6 +5725,9 @@ function renderEvaluationDashboard() {
         ev: evalRes, prep, name: displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel),
         design: isOptionB ? 'B' : isOptionC ? 'C' : 'A', dataset: AppState.fileName
     });
+
+    // Convergence of the multiple imputation behind the active model (when MICE was used)
+    renderMiceDiagnostics('mice-diagnostics-container', prep && prep.multipleImputation);
 
     // Calibration and decision-threshold panel (binary outcomes)
     renderCalibrationPanel('calibration-panel-container', isOptionC ? [] :
@@ -9731,7 +9782,7 @@ function collect(source) {
         split: top && top.protocol === 'option-a' ? describeSplit(top.splitInfo) : null, seed: top ? top.splitSeed : null,
         models: res.map(r => ({ name: (MODEL_INFO[r.modelId] || {}).name || r.modelId, ev: r.evalRes, hp: r.hyperparams })),
         best: res[0] ? { name: (MODEL_INFO[res[0].modelId] || {}).name || res[0].modelId, ev: res[0].evalRes } : null,
-        missing: AppState.completeCase ? 'complete-case analysis (rows with an empty cell removed)' : top && top.multipleImputation ? `multiple imputation by chained equations with predictive mean matching (${top.multipleImputation.m} imputations), fitted on the training patients without the outcome; one model was fitted per imputed dataset and predictions were pooled by averaging; test and new patients were imputed with the same imputation models` : `single imputation with the methods chosen per predictor, fitted on the training data only${AppState.missingIndicators ? ', with "was missing" indicator predictors' : ''}`,
+        missing: AppState.completeCase ? 'complete-case analysis (rows with an empty cell removed)' : top && top.multipleImputation ? `multiple imputation by chained equations with predictive mean matching (${top.multipleImputation.m} imputations), fitted on the training patients without the outcome; one model was fitted per imputed dataset and predictions were pooled by averaging; test and new patients were imputed with the same imputation models${top.cv && top.cv.imputation ? `; cross-validation folds: ${top.cv.imputation}` : ''}${top.multipleImputation.insideResamples ? `; bootstrap resamples: ${top.multipleImputation.insideResamples}` : ''}` : `single imputation with the methods chosen per predictor, fitted on the training data only${AppState.missingIndicators ? ', with "was missing" indicator predictors' : ''}`,
         imbalance: 'no resampling in the standard workflow',
         selection: top && top.cv ? `${top.cv.folds}-fold cross-validation within the training set (imputation, encoding and scaling refitted in each fold)` : (res.length > 1 ? 'best test-set result (optimistic)' : 'single prespecified model'),
         tuning: AppState.tuningReport ? 'key hyperparameters tuned by cross-validation within the training set' : 'user-specified hyperparameters',

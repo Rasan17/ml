@@ -155,6 +155,22 @@ try:
     chk('Riley minimum sample size, binary outcome: 3 criteria and final size (vs pmsampsize)', app_n, ref_n, 0.5)
 except ImportError:
     print('pmsampsize not installed: Riley sample-size check skipped (pip install pmsampsize)')
+# Multiple imputation under MAR: the app's MICE (PMM) vs scikit-learn's IterativeImputer with posterior draws,
+# pooled over 10 imputations: mean and SD of the imputed variable, its correlation and slope with the predictor.
+# Different algorithms, so agreement within a tolerance is checked (both should recover the same quantities).
+if 'mice' in o:
+    from sklearn.experimental import enable_iterative_imputer  # noqa: F401
+    from sklearn.impute import IterativeImputer
+    M = np.array([[r['x1'], np.nan if r['x2'] is None else r['x2'], r['x3']] for r in o['mice']['rows']], dtype=float)
+    per = []
+    for k in range(10):
+        Z = IterativeImputer(sample_posterior=True, max_iter=10, random_state=k).fit_transform(M)
+        a, b = Z[:, 0], Z[:, 1]
+        per.append([b.mean(), b.std(ddof=1), np.corrcoef(a, b)[0, 1], np.cov(a, b, ddof=1)[0, 1] / a.var(ddof=1)])
+    ref = np.mean(per, axis=0)
+    # Tolerance 0.05: PMM (5 donors, as in R's mice) slightly attenuates when missingness is concentrated where
+    # observed donors are scarce (here about 1% in the mean and 3% in the slope, see README "Known limitations")
+    chk('MICE (PMM) pooled mean, SD, correlation, slope under MAR vs scikit-learn IterativeImputer', o['mice']['pooled'], ref, 0.05)
 w=max(len(x[1]) for x in res)
 for st,nm,d,t in res: print(f'{st}  {nm:<{w}}  max|diff|={d:.2e}  (tol {t:.0e})')
 print(f"\n{sum(1 for x in res if x[0]=='PASS')}/{len(res)} checks passed")

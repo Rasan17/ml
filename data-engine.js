@@ -1387,7 +1387,7 @@
                 };
             };
 
-            const datasets = [], chains = [];
+            const datasets = [], chains = [], trace = []; // trace: per imputation, each numeric column's mean imputed value after every round
             for (const l of (chainList || Array.from({ length: m }, (_, k) => k))) {
                 const rng = this.createPRNG(seed + 1009 * l);
                 const cur = {}, src = {}; // current values, and the row each imputed value was taken from
@@ -1396,6 +1396,8 @@
                     const obs = obsOf[c];
                     missingIdx[c].forEach(i => { const d = obs[Math.floor(rng() * obs.length)]; cur[c][i] = coded[c][d]; src[c][i] = d; });
                 });
+                const traceL = {};
+                incomplete.forEach(c => { if (numeric[c]) traceL[c] = []; });
                 for (let it = 0; it < iterations; it++) {
                     incomplete.forEach(c => {
                         const f = fitModel(cur, c, rng, obsOf[c]);
@@ -1405,8 +1407,11 @@
                         const find = numeric[c] ? nearestSorted(poolPred) : (target => nearest(target, poolPred, rng));
                         missingIdx[c].forEach(i => { const d = pool[find(pred(f, i, f.betaStar), rng)]; cur[c][i] = coded[c][d]; src[c][i] = d; });
                     });
+                    // Convergence diagnostic: mean of the imputed values of each numeric column after this round
+                    Object.keys(traceL).forEach(c => { const idx = missingIdx[c]; let sm = 0; for (const i of idx) sm += cur[c][i]; traceL[c].push(Number((sm / idx.length).toPrecision(6))); });
                     if (onProgress) onProgress(l + 1, m, it + 1, iterations);
                 }
+                trace.push(traceL);
                 // The completed dataset: imputed cells take the donor's original text value
                 const data = rows.map(r => ({ ...r }));
                 incomplete.forEach(c => missingIdx[c].forEach(i => { data[i][c] = rows[src[c][i]][c]; }));
@@ -1426,8 +1431,14 @@
                 });
                 chains.push(models);
             }
+            // Observed mean and SD of each traced column, to judge the size of any drift across rounds
+            const traceScale = {};
+            incomplete.filter(c => numeric[c]).forEach(c => {
+                const v = obsOf[c].map(i => coded[c][i]), mu = v.reduce((a, b) => a + b, 0) / v.length;
+                traceScale[c] = { mean: Number(mu.toPrecision(6)), sd: Number(Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / Math.max(1, v.length - 1)).toPrecision(6)) };
+            });
             return {
-                datasets, imputedColumns: incomplete,
+                datasets, imputedColumns: incomplete, trace, traceScale,
                 imputer: { kind: 'mice', m, iterations: Math.min(iterations, 5), donors, columns: usable, numeric, levels, start, chains, seed }
             };
         },
@@ -1437,6 +1448,7 @@
             const first = parts[0];
             return {
                 datasets: [].concat(...parts.map(r => r.datasets)), imputedColumns: first.imputedColumns,
+                trace: [].concat(...parts.map(r => r.trace || [])), traceScale: first.traceScale,
                 imputer: { ...first.imputer, chains: [].concat(...parts.map(r => r.imputer.chains)) }
             };
         },

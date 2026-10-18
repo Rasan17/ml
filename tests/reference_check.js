@@ -80,5 +80,27 @@ out.riley = [[24, 0.174, 0.288], [10, 0.3, 0.1], [30, 0.05, 0.04], [15, 0.5, 0.2
     const r = ME.rileySampleSize({ type: 'binary', p, prevalence: prev, r2 });
     return { p, prev, r2, n: r.n, crit: r.criteria.map(c => c.n) };
 });
+// Multiple imputation (MICE with predictive mean matching) on MAR data: pooled estimates, compared in Python with
+// scikit-learn's IterativeImputer (posterior draws). The methods differ (PMM vs Bayesian ridge draws), so the check
+// is agreement of the pooled estimates within a tolerance, not identical imputations.
+{
+    const r3 = DE.createPRNG(77), g3 = () => Math.sqrt(-2 * Math.log(r3() || 1e-12)) * Math.cos(2 * Math.PI * r3());
+    const miRows = Array.from({ length: 2000 }, () => {
+        const x1 = g3(), x3 = 0.5 * x1 + g3() * 0.8, x2 = 1 + 0.7 * x1 + 0.3 * x3 + 0.6 * g3();
+        const miss = r3() < 1 / (1 + Math.exp(-(-1 + 1.5 * x1)));
+        return { x1: Number(x1.toFixed(4)), x2: miss ? null : Number(x2.toFixed(4)), x3: Number(x3.toFixed(4)) };
+    });
+    const cfg = { x1: { role: 'feature', type: 'continuous' }, x2: { role: 'feature', type: 'continuous' }, x3: { role: 'feature', type: 'continuous' }, Y: { role: 'target', type: 'nominal' } };
+    const asRows = miRows.map(r => ({ x1: String(r.x1), x2: r.x2 === null ? '' : String(r.x2), x3: String(r.x3), Y: 'a' }));
+    const mi = DE.miceFit(asRows, cfg, { m: 10, seed: 5 });
+    const stats = d => {
+        const a = d.map(r => Number(r.x1)), b = d.map(r => Number(r.x2)), n = a.length;
+        const ma = a.reduce((x, y) => x + y, 0) / n, mb = b.reduce((x, y) => x + y, 0) / n;
+        let sab = 0, saa = 0, sbb = 0; a.forEach((v, i) => { sab += (v - ma) * (b[i] - mb); saa += (v - ma) ** 2; sbb += (b[i] - mb) ** 2; });
+        return [mb, Math.sqrt(sbb / (n - 1)), sab / Math.sqrt(saa * sbb), sab / saa];
+    };
+    const per = mi.datasets.map(stats);
+    out.mice = { rows: miRows, pooled: [0, 1, 2, 3].map(j => per.reduce((x, p) => x + p[j], 0) / per.length) };
+}
 fs.writeFileSync(path.join(__dirname,'reference_values.json'),JSON.stringify(out));
 console.log('App values written to tests/reference_values.json; now run: python3 tests/reference_check.py');

@@ -1,7 +1,7 @@
 // evaluation-dashboard.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from standard-training.js)
 import { AppState, MODEL_INFO, actionAttrs, displayModelName, escapeHtml, fmtR2, rankingMetricLabel, renderExploratoryCutoffTable, summariseHeldOutSet } from './core.js';
 import { ciScopeNote, ciSpan, describeSplit, formatCvScore } from './cv-tuning.js';
-import { renderCalibrationPanel, renderExplainPanel, renderOddsRatioPanel, renderOptimismPanel } from './panels.js';
+import { renderCalibrationPanel, renderExplainPanel, renderOddsRatioPanel, renderOptimismPanel, renderMiceDiagnostics } from './panels.js';
 import { DOM } from './shell.js';
 import { renderSubgroupPanel } from './subgroups.js';
 import { syncRankingSelectors } from './training-actions.js';
@@ -112,6 +112,9 @@ function renderEvaluationDashboard() {
         ev: evalRes, prep, name: displayModelName(AppState.deployedModelId || AppState.selectedModelId, AppState.trainedModel),
         design: isOptionB ? 'B' : isOptionC ? 'C' : 'A', dataset: AppState.fileName
     });
+
+    // Convergence of the multiple imputation behind the active model (when MICE was used)
+    renderMiceDiagnostics('mice-diagnostics-container', prep && prep.multipleImputation);
 
     // Calibration and decision-threshold panel (binary outcomes)
     renderCalibrationPanel('calibration-panel-container', isOptionC ? [] :

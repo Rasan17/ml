@@ -127,7 +127,7 @@ async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onPr
     });
     prep.X = sets[0].X;
     prep.y = sets[0].y;
-    prep.multipleImputation = { m, imputedColumns: mi.imputedColumns, rows: rawRows.length };
+    prep.multipleImputation = { m, imputedColumns: mi.imputedColumns, rows: rawRows.length, trace: mi.trace || null, traceScale: mi.traceScale || null };
     return { prep, sets, imputedColumns: mi.imputedColumns };
 }
 

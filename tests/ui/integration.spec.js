@@ -367,6 +367,8 @@ test('one imputation choice: with MICE the Step 3 table shows MICE only, folds a
     await page.click('#train-model-btn');
     await expect(page.locator('#train-status')).toContainText(/Complete/, { timeout: 170000 });
     await expect(page.locator('#retrain-status-banner')).toContainText('MICE (5 completed datasets, pooled models) refitted in each fold');
+    await expect(page.locator('#mice-diagnostics-container')).toContainText('Did the multiple imputation converge');
+    await expect(page.locator('#mice-diagnostics-container')).toContainText('Gelman');
     // bootstrap validation: MICE inside every resample, pooled MICE final model
     await page.check('#val-mode-c', { force: true });
     await page.selectOption('#bootstrap-reps', { index: 0 });

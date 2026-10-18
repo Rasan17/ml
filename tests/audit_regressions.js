@@ -262,6 +262,37 @@ const rejects = async (fn, what) => { try { await fn(); } catch (e) { return e.m
         return 'evaluation text dropped; ensemble markup, reserved values and an oversized tree refused';
     });
 
+    await check('MICE validity: under MAR it recovers the true mean and correlation, 95% intervals cover the truth, complete cases are biased', async () => {
+        // x1 ~ N(0,1) fully observed; x2 = 1 + 0.7·x1 + N(0, 0.7²) (true mean 1, correlation ≈ 0.71);
+        // x2 missing at random with probability expit(−1 + 1.5·x1): patients with high x1 (hence high x2) are missing more
+        const rng = DE.createPRNG(2026), gauss = () => Math.sqrt(-2 * Math.log(rng() || 1e-12)) * Math.cos(2 * Math.PI * rng());
+        const reps = 60, n = 400, m = 5, trueMean = 1, trueCorr = 0.7 / Math.sqrt(0.49 + 0.49);
+        let cover = 0, biasMI = 0, biasCC = 0, corrMI = 0, missShare = 0;
+        const corr = (a, b) => { const ma = a.reduce((x, y) => x + y, 0) / a.length, mb = b.reduce((x, y) => x + y, 0) / b.length; let sab = 0, saa = 0, sbb = 0; a.forEach((v, i) => { sab += (v - ma) * (b[i] - mb); saa += (v - ma) ** 2; sbb += (b[i] - mb) ** 2; }); return sab / Math.sqrt(saa * sbb); };
+        for (let r = 0; r < reps; r++) {
+            const rows = Array.from({ length: n }, () => {
+                const x1 = gauss(), x2 = 1 + 0.7 * x1 + 0.7 * gauss();
+                const miss = rng() < 1 / (1 + Math.exp(-(-1 + 1.5 * x1)));
+                return { x1: x1.toFixed(4), x2: miss ? '' : x2.toFixed(4), Y: 'a' };
+            });
+            const cfg = { x1: { role: 'feature', type: 'continuous' }, x2: { role: 'feature', type: 'continuous' }, Y: { role: 'target', type: 'nominal' } };
+            const mi = DE.miceFit(rows, cfg, { m, seed: 100 + r });
+            const est = mi.datasets.map(d => { const v = d.map(x => Number(x.x2)); const mu = v.reduce((a, b) => a + b, 0) / n; const sd = Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / (n - 1)); return { coef: [mu], se: [sd / Math.sqrt(n)] }; });
+            const pooled = ME.poolRubin(est, n - 1)[0];
+            if (pooled.low <= trueMean && trueMean <= pooled.high) cover++;
+            biasMI += (pooled.coef - trueMean) / reps;
+            corrMI += mi.datasets.reduce((a, d) => a + corr(d.map(x => Number(x.x1)), d.map(x => Number(x.x2))), 0) / m / reps;
+            const obs = rows.filter(x => x.x2 !== '').map(x => Number(x.x2));
+            biasCC += (obs.reduce((a, b) => a + b, 0) / obs.length - trueMean) / reps;
+            missShare += (1 - obs.length / n) / reps;
+        }
+        assert(Math.abs(biasMI) < 0.03, `MICE mean biased by ${biasMI.toFixed(3)}`);
+        assert(biasCC < -0.15, `complete cases should be clearly biased downwards (got ${biasCC.toFixed(3)})`);
+        assert(Math.abs(corrMI - trueCorr) < 0.04, `MICE correlation ${corrMI.toFixed(3)} vs true ${trueCorr.toFixed(3)}`);
+        assert(cover / reps >= 0.85 && cover / reps <= 1, `95% interval coverage ${(cover / reps * 100).toFixed(0)}%`);
+        return `${(missShare * 100).toFixed(0)}% missing (MAR): mean bias MICE ${biasMI.toFixed(3)} vs complete cases ${biasCC.toFixed(3)}; correlation ${corrMI.toFixed(3)} (true ${trueCorr.toFixed(3)}); 95% CI coverage ${(cover / reps * 100).toFixed(0)}% over ${reps} datasets`;
+    });
+
     console.log(results.join('\n'));
     console.log(`\n${passed}/${passed + failed} audit regression checks passed`);
     if (failed) process.exit(1);
