@@ -116,6 +116,42 @@ const rejects = async (fn, what) => { try { await fn(); } catch (e) { return e.m
         return Object.keys(cases).join(', ') + ' all flagged; logistic not flagged';
     });
 
+    await check('Model-file format 2: only schema fields written, every type and outcome reloads identically, version 1 files still load', async () => {
+        const rng = DE.createPRNG(8);
+        const X = Array.from({ length: 90 }, () => [rng(), rng(), rng() > 0.5 ? 1 : 0]);
+        const y2 = X.map(x => (x[0] + x[1] > 1 ? 1 : 0)), y3 = X.map(x => (x[0] < 0.33 ? 0 : x[0] < 0.66 ? 1 : 2)), yr = X.map(x => x[0] + 2 * x[1]);
+        const done = [];
+        for (const [id, kind] of [['glm', 2], ['glm', 3], ['glm', 'reg'], ['rf', 2], ['rf', 'reg'], ['knn', 2], ['knn', 'reg'], ['nb', 3], ['gbm', 2], ['gbm', 3], ['gbm', 'reg'], ['nn', 2], ['ensemble', 2]]) {
+            const clf = kind !== 'reg', y = kind === 3 ? y3 : kind === 2 ? y2 : yr;
+            const m = ME.createModel(id, clf, clf ? kind : 2, { seed: 1, epochs: 5, numTrees: 10, nEstimators: 20, baseModels: ['rf', 'glm', 'knn'] });
+            if (id === 'nn' || id === 'ensemble') await m.fit(X, y); else m.fit(X, y);
+            const ser = await ME.serializeModel(m);
+            const fields = ME.MODEL_FILE_SCHEMA[ser.type];
+            Object.keys(ser.state || {}).forEach(k => assert(Object.prototype.hasOwnProperty.call(fields, k), `${id}: wrote non-schema field "${k}"`));
+            const back = await ME.deserializeModel(JSON.parse(JSON.stringify(ser)));
+            const out = o => JSON.stringify([o.pred, o.probabilities || null]);
+            assert(X.every(x => out(m.predictSingle(x)) === out(back.predictSingle(x))), `${id} (${kind}): predictions changed after reload`);
+            done.push(`${id}/${kind}`);
+        }
+        // isotonic-recalibrated model
+        const base = ME.createModel('rf', true, 2, { seed: 2, numTrees: 10 }); base.fit(X, y2);
+        const cal = ME.fitIsotonic(y2, X.map(x => Number(base.predictSingle(x).probabilities[1] || 0)));
+        const wrapped = ME.wrapCalibrated(base, cal);
+        const wb = await ME.deserializeModel(JSON.parse(JSON.stringify(await ME.serializeModel(wrapped))));
+        assert(X.every(x => wrapped.predictSingle(x).probabilities[1] === wb.predictSingle(x).probabilities[1]), 'isotonic recalibration changed after reload');
+        const baseSer = JSON.parse(JSON.stringify(await ME.serializeModel(base)));
+        const badCal = await rejects(() => ME.deserializeModel({ type: 'calibrated', calibrator: { type: 'isotonic', x: [0, 'a'], y: [0, 1] }, base: baseSer }), 'an invalid calibrator');
+        assert(/recalibration/.test(badCal), `wrong reason for refusing the calibrator: ${badCal}`);
+        // a version-1 style file (extra internal fields) loads; extra fields are ignored
+        const g = ME.createModel('glm', true, 2, { seed: 1 }); g.fit(X, y2);
+        const v1 = JSON.parse(JSON.stringify(await ME.serializeModel(g)));
+        v1.state.someOldInternalCache = [1, 2, 3];
+        const gb = await ME.deserializeModel(v1);
+        assert(gb.someOldInternalCache === undefined && X.every(x => g.predictSingle(x).pred === gb.predictSingle(x).pred), 'version-1 file did not load cleanly');
+        await rejects(() => ME.deserializeModel({ type: 'glm', state: { ...v1.state, numClasses: 'two' } }), 'a field of the wrong kind');
+        return `${done.length} model/outcome combinations, isotonic recalibration, version-1 file`;
+    });
+
     console.log(results.join('\n'));
     console.log(`\n${passed}/${passed + failed} audit regression checks passed`);
     if (failed) process.exit(1);

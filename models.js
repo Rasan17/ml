@@ -2676,30 +2676,57 @@
             return { converged: true, n, events: y.reduce((a, v) => a + v, 0), rows };
         },
 
+        // Model-file schema (format version 2): for each model type, the only fields written to and read from a
+        // file, with the kind of value each must hold. Files are therefore independent of other internal
+        // properties, and every value read is type-checked. An entry may map a file name to a different
+        // internal property ({ kind, prop }) if internals are renamed later. Version 1 files use the same names.
+        // ---------------------------------------------------------------------------------------------
+        MODEL_FILE_SCHEMA: (() => {
+            const common = { seed: 'num', trainingInfo: 'json', usedFallback: 'bool', fallbackReason: 'str', weightingNote: 'str', fallbackNote: 'str', featureImportances: 'array' };
+            const s = {
+                glm: { isClassification: 'bool', numClasses: 'num', lr: 'num', epochs: 'num', lambdaL2: 'num', solver: 'str', weights: 'array', bias: 'json' },
+                rf: { isClassification: 'bool', splitMode: 'str', numTrees: 'num', maxDepth: 'num', minSamplesSplit: 'num', featureRatio: 'json' },
+                tree: { isClassification: 'bool', exactSplits: 'bool', maxDepth: 'num', minSamplesSplit: 'num', maxFeatures: 'num' },
+                knn: { isClassification: 'bool', k: 'num', metric: 'str', weighting: 'str', p: 'num', trainX: 'array', trainY: 'array', tieKeys: 'typed', trainFlat: 'typed' },
+                nb: { varSmoothing: 'num', priorMode: 'str', classes: 'array', priors: 'object', means: 'object', variances: 'object', bernoulliP: 'object', isBinaryFeature: 'array' },
+                gbm: { isClassification: 'bool', numClasses: 'num', nEstimators: 'num', learningRate: 'num', maxDepth: 'num', minSamplesLeaf: 'num', lambda: 'num', subsample: 'num', maxBins: 'num', earlyStopping: 'bool', validationFraction: 'num', patience: 'num', trees: 'array', init: 'array', binEdges: 'array' },
+                nn: { isClassification: 'bool', numClasses: 'num', hiddenLayers: 'array', activation: 'str', learningRate: 'num', epochs: 'num', batchSize: 'num', dropoutRate: 'num', optimizerName: 'str', l2Reg: 'num', earlyStopping: 'bool', validationFraction: 'num', patience: 'num' },
+                ensemble: { isClassification: 'bool', numClasses: 'num', voting: 'str', selectedBaseIds: 'array', weights: 'array', baseMetrics: 'array', userHyperparams: 'object' }
+            };
+            Object.keys(s).forEach(t => { s[t] = { ...common, ...s[t] }; });
+            return s;
+        })(),
+
         // ---------------------------------------------------------------------------------------------
         // Saving and loading trained models (JSON). Arrays only; TF.js networks are stored as topology +
         // base64 weights. k-NN models keep their (scaled) training cases, which is flagged on export.
         // ---------------------------------------------------------------------------------------------
-        async serializeModel(model) {
+        async serializeModel(model, schemaType = null) {
             if (!model) return null;
-            const plain = (obj, skip = []) => {
+            const SCHEMA = this.MODEL_FILE_SCHEMA;
+            const typeOf = m => (m instanceof RandomForest ? 'rf' : m instanceof DecisionTree ? 'tree' : m instanceof GeneralizedLinearModel ? 'glm' : m instanceof KNNModel ? 'knn'
+                : m instanceof GaussianNaiveBayes ? 'nb' : m instanceof GradientBoostingModel ? 'gbm' : m instanceof DeepNeuralNetwork ? 'nn' : m instanceof EnsembleModel ? 'ensemble' : null);
+            // Only the fields of the model's schema are written (never other internal properties)
+            const plain = (obj) => {
+                const fields = SCHEMA[schemaType || typeOf(obj)] || {};
                 const o = {};
-                Object.keys(obj).forEach(k => {
-                    if (skip.includes(k) || k === 'rng' || typeof obj[k] === 'function') return;
-                    const v = obj[k];
-                    o[k] = ArrayBuffer.isView(v) ? { __typed: v.constructor.name, data: Array.from(v) } : v;
+                Object.keys(fields).forEach(name => {
+                    const spec = fields[name], prop = typeof spec === 'object' ? spec.prop : name;
+                    const v = obj[prop];
+                    if (v === undefined || typeof v === 'function') return;
+                    o[name] = ArrayBuffer.isView(v) ? { __typed: v.constructor.name, data: Array.from(v) } : v;
                 });
                 return o;
             };
             if (model instanceof RandomForest) {
-                return { type: 'rf', state: plain(model, ['trees']), trees: model.trees.map(t => ({ state: plain(t, ['root']), root: t.root })) };
+                return { type: 'rf', state: plain(model), trees: model.trees.map(t => ({ state: plain(t), root: t.root })) };
             }
             if (model instanceof GeneralizedLinearModel) return { type: 'glm', state: plain(model) };
             if (model instanceof KNNModel) return { type: 'knn', state: plain(model) };
             if (model instanceof GaussianNaiveBayes) return { type: 'nb', state: plain(model) };
             if (model instanceof GradientBoostingModel) return { type: 'gbm', state: plain(model) };
             if (model instanceof DeepNeuralNetwork) {
-                const out = { type: 'nn', state: plain(model, ['tfModel', 'fallbackGLM', 'history']) };
+                const out = { type: 'nn', state: plain(model) };
                 if (model.fallbackGLM) out.fallbackGLM = await this.serializeModel(model.fallbackGLM);
                 if (model.tfModel) {
                     let artifacts = null;
@@ -2722,7 +2749,7 @@
             if (model instanceof EnsembleModel) {
                 const items = [];
                 for (const it of model.models) items.push({ ...it, model: await this.serializeModel(it.model) });
-                return { type: 'ensemble', state: plain(model, ['models']), models: items };
+                return { type: 'ensemble', state: plain(model), models: items.map(it => ({ id: it.id, model: it.model })) };
             }
             throw new Error('This model type cannot be exported.');
         },
@@ -2734,18 +2761,26 @@
             // or touch the object's prototype, so a crafted file cannot install code
             const TYPED = { Float64Array, Float32Array, Int32Array, Uint32Array, Int16Array, Uint16Array, Int8Array, Uint8Array, Uint8ClampedArray };
             const FORBIDDEN = new Set(['__proto__', 'constructor', 'prototype']);
-            const restore = (proto, state) => {
+            const SCHEMA = this.MODEL_FILE_SCHEMA;
+            const kindOk = (kind, v) => v === null || (kind === 'num' ? typeof v === 'number' && isFinite(v) : kind === 'bool' ? typeof v === 'boolean' : kind === 'str' ? typeof v === 'string'
+                : kind === 'array' ? Array.isArray(v) : kind === 'object' ? typeof v === 'object' && !Array.isArray(v) : kind === 'typed' ? (typeof v === 'object' && v.__typed !== undefined) : true);
+            // Only the fields of the type's schema are read, each checked for its kind; other fields are ignored
+            const restore = (proto, state, type) => {
                 if (state !== undefined && (state === null || typeof state !== 'object' || Array.isArray(state))) throw new Error('Invalid model file: model state is not an object.');
+                const fields = SCHEMA[type];
                 const m = Object.create(proto);
                 Object.keys(state || {}).forEach(k => {
                     if (FORBIDDEN.has(k) || typeof proto[k] === 'function') throw new Error(`Invalid model file: field "${k}" is not allowed.`);
+                    if (!Object.prototype.hasOwnProperty.call(fields, k)) return; // not part of the model file format
+                    const spec = fields[k], kind = typeof spec === 'object' ? spec.kind : spec, prop = typeof spec === 'object' ? spec.prop : k;
                     const v = state[k];
+                    if (!kindOk(kind, v)) throw new Error(`Invalid model file: field "${k}" should be ${kind === 'num' ? 'a number' : kind === 'bool' ? 'true or false' : kind === 'str' ? 'text' : kind === 'typed' ? 'a numeric array' : `an ${kind}`}.`);
                     if (v && typeof v === 'object' && v.__typed !== undefined) {
                         const T = Object.prototype.hasOwnProperty.call(TYPED, v.__typed) ? TYPED[v.__typed] : null;
                         if (!T || !Array.isArray(v.data) || !v.data.every(x => typeof x === 'number')) throw new Error(`Invalid model file: field "${k}" is not a numeric array.`);
-                        m[k] = new T(v.data);
+                        m[prop] = new T(v.data);
                     } else {
-                        m[k] = v;
+                        m[prop] = v;
                     }
                 });
                 m.rng = createPRNG(m.seed);
@@ -2753,16 +2788,16 @@
             };
             if (typeof obj !== 'object' || typeof obj.type !== 'string') throw new Error('Invalid model file: unknown model type.');
             if (obj.type === 'rf') {
-                const m = restore(RandomForest.prototype, obj.state);
-                m.trees = obj.trees.map(t => { const tr = restore(DecisionTree.prototype, t.state); tr.root = t.root; return tr; });
+                const m = restore(RandomForest.prototype, obj.state, 'rf');
+                m.trees = obj.trees.map(t => { const tr = restore(DecisionTree.prototype, t.state, 'tree'); tr.root = t.root; return tr; });
                 return m;
             }
-            if (obj.type === 'glm') return restore(GeneralizedLinearModel.prototype, obj.state);
-            if (obj.type === 'knn') return restore(KNNModel.prototype, obj.state);
-            if (obj.type === 'nb') return restore(GaussianNaiveBayes.prototype, obj.state);
-            if (obj.type === 'gbm') return restore(GradientBoostingModel.prototype, obj.state);
+            if (obj.type === 'glm') return restore(GeneralizedLinearModel.prototype, obj.state, 'glm');
+            if (obj.type === 'knn') return restore(KNNModel.prototype, obj.state, 'knn');
+            if (obj.type === 'nb') return restore(GaussianNaiveBayes.prototype, obj.state, 'nb');
+            if (obj.type === 'gbm') return restore(GradientBoostingModel.prototype, obj.state, 'gbm');
             if (obj.type === 'nn') {
-                const m = restore(DeepNeuralNetwork.prototype, obj.state);
+                const m = restore(DeepNeuralNetwork.prototype, obj.state, 'nn');
                 m.history = { loss: [], valLoss: [], accuracy: [], valAccuracy: [] };
                 m.fallbackGLM = obj.fallbackGLM ? await this.deserializeModel(obj.fallbackGLM) : null;
                 m.tfModel = null;
@@ -2781,12 +2816,15 @@
                 return new MIPooledModel(models);
             }
             if (obj.type === 'calibrated') {
-                return new CalibratedModel(await this.deserializeModel(obj.base), obj.calibrator);
+                const c = obj.calibrator, nums = a => Array.isArray(a) && a.every(v => typeof v === 'number' && isFinite(v));
+                const ok = c && typeof c === 'object' && ((c.type === 'platt' && Number.isFinite(c.a) && Number.isFinite(c.b)) || (c.type === 'isotonic' && nums(c.x) && nums(c.y) && c.x.length === c.y.length));
+                if (!ok) throw new Error('Invalid model file: recalibration settings are not valid.');
+                return new CalibratedModel(await this.deserializeModel(obj.base), { type: c.type, a: c.a, b: c.b, x: c.x, y: c.y, n: Number.isFinite(c.n) ? c.n : null });
             }
             if (obj.type === 'ensemble') {
-                const m = restore(EnsembleModel.prototype, obj.state);
+                const m = restore(EnsembleModel.prototype, obj.state, 'ensemble');
                 m.models = [];
-                for (const it of obj.models) m.models.push({ ...it, model: await this.deserializeModel(it.model) });
+                for (const it of obj.models) m.models.push({ id: typeof it.id === 'string' ? it.id : null, model: await this.deserializeModel(it.model) });
                 return m;
             }
             throw new Error(`Unknown model type in file: ${obj.type}`);

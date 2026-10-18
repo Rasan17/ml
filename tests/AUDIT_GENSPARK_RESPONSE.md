@@ -28,8 +28,8 @@ on every push.
 
 These are larger architectural changes, deferred:
 
-- A single shared fold-preparation engine for both workflows. Both now refit imputation inside folds, but by two code paths.
-- Versioned model-file schemas independent of internal object layouts. The format version is now checked, and newer files are refused with an explanation.
-- A persistent analysis-summary bar. Steps 5 and 6 already show the active model's provenance.
+- A single shared fold-preparation engine for both workflows. Both now refit imputation inside folds, but by two code paths. *(Done in a later commit: see below.)*
+- ~~Versioned model-file schemas independent of internal object layouts.~~ **Done (model-file format 2):** each model type has a published schema (`ModelEngine.MODEL_FILE_SCHEMA`) listing the only fields written and read, each type-checked on loading; other internal properties never reach a file, and unknown fields in a file are ignored. Version 1 files still load. Recalibration settings are validated too. Tested on 13 model/outcome combinations, isotonic recalibration and a version-1 file (`audit_regressions.js`).
+- ~~A persistent analysis-summary bar.~~ **Done:** a bar under the step tabs shows the dataset, outcome and positive class, records and patients, predictors, validation design, missing-data handling, recalibration and the active research model (browser test).
 
 An independent statistical and security review of the corrected workflows remains advisable before high-stakes use, as the audit recommends.

@@ -16,7 +16,9 @@ import { scheduleAnalysisSummary } from './analysis-summary.js';
 // included, except where the method needs them (k-NN models and k-NN imputation), which is flagged.
 // =========================================================================
 const MODEL_FILE_FORMAT = 'ummp-trained-model';
-const MODEL_FILE_VERSION = 1;
+// Version 2: model parameters follow ModelEngine.MODEL_FILE_SCHEMA (only listed, type-checked fields); version 1
+// files (earlier releases) use the same field names and still load
+const MODEL_FILE_VERSION = 2;
 
 function sanitizedPrep(prep) {
     const keep = ['featureCols', 'featureMetadata', 'totalDimensions', 'targetCol', 'isClassification', 'targetClasses',
