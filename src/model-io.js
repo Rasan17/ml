@@ -56,7 +56,10 @@ function evaluationSummary(ev) {
     const drop = new Set(['actuals', 'predictions', 'probPositive', 'probMatrix', 'validRows', 'confMatrix']);
     const out = {};
     Object.keys(ev).forEach(k => { if (!drop.has(k) && typeof ev[k] !== 'function') out[k] = ev[k]; });
-    return JSON.parse(JSON.stringify(out));
+    const res = JSON.parse(JSON.stringify(out));
+    // A date split records the dates of individual records at its boundaries: only the month goes into a shared file
+    if (res.splitInfo) ['trainUntil', 'testFrom', 'testUntil'].forEach(k => { if (typeof res.splitInfo[k] === 'string') res.splitInfo[k] = res.splitInfo[k].slice(0, 7); });
+    return res;
 }
 
 // Whether a serialised model holds training patients' values: a k-NN model anywhere inside it, including inside
@@ -146,6 +149,31 @@ function validateImportedPrep(prep) {
     prep.typicality = okT ? t : null;
 }
 
+// The evaluation summary in a model file is untrusted: only numbers, true/false and nested lists or objects of
+// them are kept (no text, which could reach the page or reports), apart from two fields with fixed values
+function sanitizeEvaluation(e, depth = 0) {
+    const ENUMS = { protocol: ['option-a', 'option-b', 'option-c', 'pipeline'], probabilityType: ['model', 'vote', 'neighbours', 'recalibrated', 'blend'] };
+    const clean = (v, d, key) => {
+        if (typeof v === 'number') return isFinite(v) ? v : undefined;
+        if (typeof v === 'boolean' || v === null) return v;
+        if (typeof v === 'string') return key && ENUMS[key] && ENUMS[key].includes(v) ? v : undefined;
+        if (d > 4) return undefined;
+        if (Array.isArray(v)) return v.length <= 10000 ? v.map(x => clean(x, d + 1)).filter(x => x !== undefined) : undefined;
+        if (typeof v === 'object') {
+            const o = {};
+            Object.keys(v).slice(0, 500).forEach(k => {
+                if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
+                const c = clean(v[k], d + 1, k);
+                if (c !== undefined) o[k] = c;
+            });
+            return o;
+        }
+        return undefined;
+    };
+    const out = clean(e && typeof e === 'object' && !Array.isArray(e) ? e : {}, depth);
+    return out || {};
+}
+
 // The imported model must predict a typical patient (all predictors at their fitted defaults) with valid output
 function checkImportedModel(model, prep) {
     if (!model || typeof model.predictSingle !== 'function') throw new Error('The file does not contain a usable model.');
@@ -170,7 +198,9 @@ async function importTrainedModel(file) {
         checkImportedModel(model, prep);
         AppState.trainedModel = model;
         AppState.prepMeta = prep;
-        AppState.evalResults = { ...(bundle.evaluation || {}), decisionThreshold: bundle.decisionThreshold ?? (bundle.evaluation || {}).decisionThreshold, isClassification: prep.isClassification };
+        const evalIn = sanitizeEvaluation(bundle.evaluation);
+        const thr = [bundle.decisionThreshold, evalIn.decisionThreshold].find(v => typeof v === 'number' && v > 0 && v < 1);
+        AppState.evalResults = { ...evalIn, decisionThreshold: thr ?? null, isClassification: prep.isClassification };
         AppState.deployedSource = 'imported';
         AppState.deployedModelId = bundle.model && bundle.model.id;
         AppState.importedModelInfo = { name: (bundle.model && bundle.model.name) || 'Imported model', exportedAt: bundle.exportedAt, dataset: bundle.trainingDataset && bundle.trainingDataset.name, version: bundle.software && bundle.software.version };

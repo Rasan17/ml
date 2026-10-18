@@ -4,7 +4,7 @@
 import { AppState, APP_VERSION, MODEL_INFO, RESEARCH_USE_NOTICE, rankingMetricLabel } from './core.js';
 import { describeSplit } from './cv-tuning.js';
 
-const esc = s => String(s === null || s === undefined ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = s => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pct = v => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : 'n/a');
 const n3 = v => (typeof v === 'number' ? v.toFixed(3) : 'n/a');
 const ci = (ev, k, f) => (ev && ev.ci && ev.ci[k] ? ` (95% CI ${f(ev.ci[k][0])}–${f(ev.ci[k][1])})` : '');
@@ -69,23 +69,23 @@ function buildChecklist(source) {
         ['Title', 'Identify the study as developing and/or evaluating a prediction model, the target population and the outcome.', `Outcome: "${esc(d.target)}". ${AUTHOR}`, 'author'],
         ['Abstract', 'Structured summary of objectives, data, methods, results and conclusions.', AUTHOR, 'author'],
         ['Background and objectives', 'Healthcare context, rationale, intended use and users of the model; study objectives.', AUTHOR, 'author'],
-        ['Data sources', 'Study design and data sources, dates of data collection.', `Dataset: ${esc(AppState.fileName || 'n/a')} (${d.nTotal ?? 'n/a'} records). ${AUTHOR} (design, setting, dates)`, 'partly'],
-        ['Participants', 'Eligibility criteria, setting, treatments received.', `${d.excludedOutcome ? `${d.excludedOutcome} records without an outcome were excluded. ` : ''}${AUTHOR}`, 'partly'],
+        ['Data sources', 'Study design and data sources, dates of data collection.', `Dataset: ${esc(AppState.fileName || 'n/a')} (${esc(d.nTotal ?? 'n/a')} records). ${AUTHOR} (design, setting, dates)`, 'partly'],
+        ['Participants', 'Eligibility criteria, setting, treatments received.', `${d.excludedOutcome ? `${esc(d.excludedOutcome)} records without an outcome were excluded. ` : ''}${AUTHOR}`, 'partly'],
         ['Data preparation', 'Pre-processing, data quality checks, and whether these were consistent across training and evaluation.', `Encoding (one-hot for categorical, standardisation for continuous, rank scaling for ordinal) fitted on the training data only and applied unchanged to evaluation data. Excluded or identifier columns: ${esc(d.excludedPredictors.join(', ') || 'none')}.`, 'auto'],
         ['Outcome', 'Definition of the outcome, how and when it was assessed, blinding.', `Outcome variable "${esc(d.target)}". ${AUTHOR} (clinical definition, timing, assessors)`, 'partly'],
         ['Predictors', 'Definition of all predictors, how and when measured; reasons for their choice.', `${d.predictors.length} candidate predictors: ${esc(d.predictors.join(', '))}. ${AUTHOR} (definitions, timing)`, 'partly'],
-        ['Sample size', 'How the study size was arrived at; justification against minimum sample size criteria.', `${d.nTotal ?? 'n/a'} records; the app's Riley et al. minimum sample-size check is shown in Step 4. ${AUTHOR} (justification)`, 'partly'],
+        ['Sample size', 'How the study size was arrived at; justification against minimum sample size criteria.', `${esc(d.nTotal ?? 'n/a')} records; the app's Riley et al. minimum sample-size check is shown in Step 4. ${AUTHOR} (justification)`, 'partly'],
         ['Missing data', 'Amount of missing data and how it was handled.', esc(d.missing), 'auto'],
         ['Analytical methods: models', 'Type of models, model-building steps, hyperparameter tuning.', `Models: ${esc(d.models.map(m => m.name).join(', '))}. Hyperparameters: ${esc(d.tuning)}.`, 'auto'],
-        ['Analytical methods: validation', 'Internal validation approach and how performance was estimated.', `Validation: ${esc(d.validation)}. Model selection: ${esc(d.selection)}.${d.seed !== null && d.seed !== undefined ? ` Random seed ${d.seed}.` : ''}`, 'auto'],
-        ['Analytical methods: performance measures', 'Measures of discrimination, calibration and clinical utility, with uncertainty.', `Discrimination (ROC-AUC / C-index, DeLong comparison), calibration (plot, slope, intercept, Brier score), decision curve analysis; percentile bootstrap 95% CIs over test patients${d.source === 'standard' && d.threshold ? `; decision threshold ${d.threshold}` : ''}.`, 'auto'],
+        ['Analytical methods: validation', 'Internal validation approach and how performance was estimated.', `Validation: ${esc(d.validation)}. Model selection: ${esc(d.selection)}.${d.seed !== null && d.seed !== undefined ? ` Random seed ${esc(d.seed)}.` : ''}`, 'auto'],
+        ['Analytical methods: performance measures', 'Measures of discrimination, calibration and clinical utility, with uncertainty.', `Discrimination (ROC-AUC / C-index, DeLong comparison), calibration (plot, slope, intercept, Brier score), decision curve analysis; percentile bootstrap 95% CIs over test patients${d.source === 'standard' && d.threshold ? `; decision threshold ${esc(d.threshold)}` : ''}.`, 'auto'],
         ['Class imbalance', 'Methods used to handle class imbalance and their effect on calibration.', esc(d.imbalance) + (d.recalibration && d.recalibration !== 'none' ? `; recalibration: ${esc(d.recalibration)}` : ''), 'auto'],
         ['Fairness', 'Approaches to assess and address model fairness across groups.', `The app's subgroup panel reports, for a chosen column on the Testing set, the number of patients and events, AUC, observed and mean predicted risk (O:E), Brier score, sensitivity, specificity and net benefit in each group; results are not copied here automatically. ${AUTHOR} (state the groups examined, e.g. sex, age group, ethnicity, site, and what was found)`, 'partly'],
-        ['Model output', 'What the model outputs (probabilities, classes) and how thresholds were chosen.', `Probabilities for each outcome class (or a numerical prediction); class assignment at a decision threshold of ${d.threshold ?? 0.5} chosen a priori, not tuned on the test set.`, 'auto'],
+        ['Model output', 'What the model outputs (probabilities, classes) and how thresholds were chosen.', `Probabilities for each outcome class (or a numerical prediction); class assignment at a decision threshold of ${esc(d.threshold ?? 0.5)} chosen a priori, not tuned on the test set.`, 'auto'],
         ['Ethics, funding, conflicts, protocol, registration', 'Ethical approval, funding, competing interests, protocol and registration.', AUTHOR, 'author'],
         ['Open science', 'Availability of data, code and the model.', `Analysis performed in-browser with Universal Medical ML/NeuralNet Predictor v${APP_VERSION}; the trained model and settings can be exported as JSON files for sharing. ${AUTHOR} (data and code availability statements)`, 'partly'],
         ['Patient and public involvement', 'Details of any patient and public involvement.', AUTHOR, 'author'],
-        ['Results: participants', 'Flow of participants, characteristics of training and evaluation data.', `Training ${d.nTrain ?? 'n/a'}, evaluation ${d.nTest ?? 'n/a'} records. ${AUTHOR} (flow diagram, baseline characteristics table)`, 'partly'],
+        ['Results: participants', 'Flow of participants, characteristics of training and evaluation data.', `Training ${esc(d.nTrain ?? 'n/a')}, evaluation ${esc(d.nTest ?? 'n/a')} records. ${AUTHOR} (flow diagram, baseline characteristics table)`, 'partly'],
         ['Results: model specification', 'Full model details so it can be used or evaluated by others.', 'Exportable trained-model file (preprocessing, parameters, threshold); for logistic models, coefficients / odds ratios are shown in the app.', 'auto'],
         ['Results: performance', 'Performance estimates with confidence intervals, for each model and the final model.', `Final model (${esc(d.best ? d.best.name : 'n/a')}): ${esc(performanceText(d.best && d.best.ev))}.<br>${d.models.map(m => `${esc(m.name)}: ${esc(performanceText(m.ev))}`).join('<br>')}`, 'auto'],
         ['Discussion: interpretation, limitations, usability', 'Interpretation, limitations (including bias and generalisability) and implications for practice.', `Note: single-centre/temporal limitations, small test sets, and that probabilities ${d.recalibration && d.recalibration !== 'none' ? 'were recalibrated' : 'were not recalibrated'}. ${AUTHOR}`, 'partly']
@@ -110,7 +110,7 @@ function methodsParagraph(d) {
 function downloadTripodChecklist(source) {
     const { d, items } = buildChecklist(source);
     const statusLabel = { auto: 'Pre-filled', partly: 'Partly pre-filled', author: 'Authors' };
-    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TRIPOD+AI Reporting Checklist (pre-filled)</title>
 <style>body{font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#0f172a;background:#fff;margin:24px auto;max-width:1000px;padding:0 16px}
 h1{font-size:20px}h2{font-size:16px;margin-top:28px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top;text-align:left}

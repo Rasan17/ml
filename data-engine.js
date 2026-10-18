@@ -254,6 +254,18 @@
                 dataRows.push(obj);
             }
 
+            // Cell values that are names of JavaScript's built-in object properties ("constructor", "__proto__",
+            // "toString", …) would break the lookups the analysis keys by category value: refuse them clearly
+            const RESERVED = new Set(Object.getOwnPropertyNames(Object.prototype));
+            for (let r = 0; r < dataRows.length; r++) {
+                for (const h of headers) {
+                    const v = dataRows[r][h];
+                    if (v && RESERVED.has(String(v).trim())) {
+                        throw new Error(`Row ${r + 2}, column "${h}" contains "${String(v).trim()}", a reserved word that the app cannot use as a value. Please rename it (e.g. "${String(v).trim()}_value") and load the file again.`);
+                    }
+                }
+            }
+
             return {
                 headers,
                 rows: dataRows,

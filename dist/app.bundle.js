@@ -4085,6 +4085,12 @@ function miCacheKey(rows, columnConfigs, m, seed) {
     }
     return `${m}|${seed}|${rows.length}|${text.length}|${(h1 >>> 0).toString(16)}${(h2 >>> 0).toString(16)}`;
 }
+function matchesRows(mi, rows, m) {
+    if (!Array.isArray(mi.datasets) || mi.datasets.length !== m || !mi.imputer || !Array.isArray(mi.imputer.chains) || mi.imputer.chains.length !== m) return false;
+    return mi.datasets.every(d => Array.isArray(d) && d.length === rows.length && d.every((r, i) => r && typeof r === 'object' &&
+        Object.keys(rows[i]).every(k => DataEngine.isMissing(rows[i][k]) ? !DataEngine.isMissing(r[k]) || r[k] === rows[i][k] : String(r[k]) === String(rows[i][k]))));
+}
+
 function clearImputationCache() { miCache.clear(); updateImputedDataButtons(); }
 
 // "Save imputed data" file: the cached imputations (completed datasets and the fitted imputation models),
@@ -4130,7 +4136,7 @@ function loadImputedDataFile(file) {
         if (data.format !== MI_FILE_FORMAT) { alert(`This imputed-data file was made by a version of the app with a different imputation method (${data.appVersion || 'unknown version'}), so it cannot be reused; the imputation will be run again when you train.`); return; }
         let added = 0;
         data.entries.forEach(en => {
-            if (en && typeof en.key === 'string' && en.mi && Array.isArray(en.mi.datasets) && en.mi.imputer && Array.isArray(en.mi.imputer.chains)) { miCache.set(en.key, en.mi); added++; }
+            if (en && typeof en.key === 'string' && en.mi && Array.isArray(en.mi.datasets) && en.mi.imputer && Array.isArray(en.mi.imputer.chains)) { miCache.set(en.key, { ...en.mi, fromFile: true }); added++; }
         });
         while (miCache.size > MI_CACHE_SIZE) miCache.delete(miCache.keys().next().value);
         updateImputedDataButtons();
@@ -4153,6 +4159,9 @@ async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onPr
     const plainRows = rawRows.map(r => ({ ...r }));
     const key = miCacheKey(plainRows, columnConfigs, m, seed);
     let mi = miCache.get(key);
+    // Imputed data loaded from a file are used only if they really are these patients: every observed value
+    // (and the outcome) must match, row by row, and the structure must be complete; otherwise re-impute
+    if (mi && mi.fromFile && !matchesRows(mi, plainRows, m)) { miCache.delete(key); mi = null; }
     if (mi) {
         miCache.delete(key); miCache.set(key, mi); // most recently used last
         if (onReuse) onReuse();
@@ -6128,7 +6137,7 @@ function runSinglePrediction() {
 
     let ensembleDetailsHtml = '';
     if (result.ensembleDetails && result.ensembleDetails.length > 0) {
-        const weightsStr = result.ensembleDetails.map(d => `${d.id.toUpperCase()}: ${Math.round((d.normalizedWeight !== undefined ? d.normalizedWeight : d.weight) * 100)}%`).join(' &bull; ');
+        const weightsStr = result.ensembleDetails.map(d => { const w = Number(d.normalizedWeight !== undefined ? d.normalizedWeight : d.weight); return `${escapeHtml(String(d.id).toUpperCase())}: ${isFinite(w) ? Math.round(w * 100) : '?'}%`; }).join(' &bull; ');
         ensembleDetailsHtml = `
             <div style="font-size: 11px; color: var(--accent-cyan); margin-top: 5px; font-weight: 600;">
                 Ensemble Blend: ${weightsStr}
@@ -6136,9 +6145,9 @@ function runSinglePrediction() {
         `;
     }
 
-    const activeSeed = (AppState.trainedModel && AppState.trainedModel.seed !== undefined && AppState.trainedModel.seed !== null)
-        ? AppState.trainedModel.seed
-        : (AppState.evalResults?.seed !== null && AppState.evalResults?.seed !== undefined ? AppState.evalResults.seed : null);
+    // A seed is a number; anything else (e.g. from a tampered model file) is not shown
+    const seedOf = v => (typeof v === 'number' && isFinite(v) ? v : null);
+    const activeSeed = seedOf(AppState.trainedModel && AppState.trainedModel.seed) ?? seedOf(AppState.evalResults && AppState.evalResults.seed);
 
     const seedSnippet = activeSeed !== null
         ? ` &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px; cursor: pointer;" ${actionAttrs('copySeedToClipboard', activeSeed)} title="Click to copy reproducibility seed">🌱 ${activeSeed} 📋</code>`
@@ -8779,7 +8788,10 @@ function evaluationSummary(ev) {
     const drop = new Set(['actuals', 'predictions', 'probPositive', 'probMatrix', 'validRows', 'confMatrix']);
     const out = {};
     Object.keys(ev).forEach(k => { if (!drop.has(k) && typeof ev[k] !== 'function') out[k] = ev[k]; });
-    return JSON.parse(JSON.stringify(out));
+    const res = JSON.parse(JSON.stringify(out));
+    // A date split records the dates of individual records at its boundaries: only the month goes into a shared file
+    if (res.splitInfo) ['trainUntil', 'testFrom', 'testUntil'].forEach(k => { if (typeof res.splitInfo[k] === 'string') res.splitInfo[k] = res.splitInfo[k].slice(0, 7); });
+    return res;
 }
 
 // Whether a serialised model holds training patients' values: a k-NN model anywhere inside it, including inside
@@ -8869,6 +8881,31 @@ function validateImportedPrep(prep) {
     prep.typicality = okT ? t : null;
 }
 
+// The evaluation summary in a model file is untrusted: only numbers, true/false and nested lists or objects of
+// them are kept (no text, which could reach the page or reports), apart from two fields with fixed values
+function sanitizeEvaluation(e, depth = 0) {
+    const ENUMS = { protocol: ['option-a', 'option-b', 'option-c', 'pipeline'], probabilityType: ['model', 'vote', 'neighbours', 'recalibrated', 'blend'] };
+    const clean = (v, d, key) => {
+        if (typeof v === 'number') return isFinite(v) ? v : undefined;
+        if (typeof v === 'boolean' || v === null) return v;
+        if (typeof v === 'string') return key && ENUMS[key] && ENUMS[key].includes(v) ? v : undefined;
+        if (d > 4) return undefined;
+        if (Array.isArray(v)) return v.length <= 10000 ? v.map(x => clean(x, d + 1)).filter(x => x !== undefined) : undefined;
+        if (typeof v === 'object') {
+            const o = {};
+            Object.keys(v).slice(0, 500).forEach(k => {
+                if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
+                const c = clean(v[k], d + 1, k);
+                if (c !== undefined) o[k] = c;
+            });
+            return o;
+        }
+        return undefined;
+    };
+    const out = clean(e && typeof e === 'object' && !Array.isArray(e) ? e : {}, depth);
+    return out || {};
+}
+
 // The imported model must predict a typical patient (all predictors at their fitted defaults) with valid output
 function checkImportedModel(model, prep) {
     if (!model || typeof model.predictSingle !== 'function') throw new Error('The file does not contain a usable model.');
@@ -8893,7 +8930,9 @@ async function importTrainedModel(file) {
         checkImportedModel(model, prep);
         AppState.trainedModel = model;
         AppState.prepMeta = prep;
-        AppState.evalResults = { ...(bundle.evaluation || {}), decisionThreshold: bundle.decisionThreshold ?? (bundle.evaluation || {}).decisionThreshold, isClassification: prep.isClassification };
+        const evalIn = sanitizeEvaluation(bundle.evaluation);
+        const thr = [bundle.decisionThreshold, evalIn.decisionThreshold].find(v => typeof v === 'number' && v > 0 && v < 1);
+        AppState.evalResults = { ...evalIn, decisionThreshold: thr ?? null, isClassification: prep.isClassification };
         AppState.deployedSource = 'imported';
         AppState.deployedModelId = bundle.model && bundle.model.id;
         AppState.importedModelInfo = { name: (bundle.model && bundle.model.name) || 'Imported model', exportedAt: bundle.exportedAt, dataset: bundle.trainingDataset && bundle.trainingDataset.name, version: bundle.software && bundle.software.version };
@@ -9415,6 +9454,9 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
     }
 
     const multi = perCol.filter(c => c.levels && c.levels > 2).sort((a, b) => b.df - a.df).slice(0, 3);
+    // A categorical predictor with nearly as many categories as records is probably an identifier: it would
+    // overfit badly, and its values (e.g. patient IDs) would be stored in exported model files
+    const idLike = perCol.filter(c => c.levels && c.levels > 20 && c.levels >= 0.5 * withOutcome.length);
     const counted = candidates !== null && candidates > P ? `the ${candidates} candidate parameters considered` : 'your selection';
     const statusText = {
         ok: `✓ ${counted === 'your selection' ? 'Your selection meets' : `The ${candidates} candidate parameters considered meet`} these planning criteria for regression models, under the stated assumptions (anticipated R², one record per patient unless patients are grouped). This is a planning guide, not proof that a model will perform well.`,
@@ -9429,6 +9471,7 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
             <div class="${status === 'ok' ? 'explain-box' : 'tune-warn'}" style="margin-top: 6px;">${statusText}</div>
             <table class="data-table thr-table"><thead><tr><th>Guide</th><th>Largest number of parameters</th><th>Comment</th></tr></thead>
                 <tbody>${rows4.map(([g, v, c]) => `<tr><td>${escapeHtml(g)}</td><td><strong>${v}</strong>${Pv > v ? ' <span class="tune-sd">(you have ' + Pv + ')</span>' : ''}</td><td>${escapeHtml(c)}</td></tr>`).join('')}</tbody></table>
+            ${idLike.length ? `<div class="tune-warn">⚠️ <strong>Looks like an identifier:</strong> ${idLike.map(c => `"${escapeHtml(c.col)}" (${c.levels} categories in ${withOutcome.length} records)`).join(', ')}. Untick it (or set it to Meta / ID): identifiers cannot predict new patients, and their values would be stored in exported model files.</div>` : ''}
             ${multi.length ? `<p class="tune-muted">Categorical predictors use one parameter per category beyond the first: ${multi.map(c => `"${escapeHtml(c.col)}" ${c.levels} categories = ${c.df}`).join('; ')}. Grouping rare categories saves parameters.</p>` : ''}
             ${groupOf ? '' : `<p class="tune-muted">${escapeHtml(UNIT_NOTE)}</p>`}
             <p class="tune-muted">A parameter is one number the model estimates: 1 for each numerical or ordered predictor, and (categories − 1) for an unordered categorical one. Choose predictors from clinical knowledge and earlier studies before looking at their association with the outcome: selecting them by p-value in the same patients makes the model look better than it is, and every predictor considered counts towards overfitting, not only those kept. SMOTENC and other balancing add no real patients. Riley et al. (BMJ 2020) with the default anticipated R² (15% of the maximum, as in pmsampsize; Step 4 lets you change it); 20–50 and 200 per parameter: van der Ploeg, Austin and Steyerberg, “Modern modelling techniques are data hungry” (BMC Med Res Methodol 2014;14:137).</p>
@@ -9542,7 +9585,7 @@ function refreshPipelineModelGuide() {
 // words; authors must check them against the official checklist and complete the items marked for them.
 
 
-const esc = s => String(s === null || s === undefined ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = s => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pct = v => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : 'n/a');
 const n3 = v => (typeof v === 'number' ? v.toFixed(3) : 'n/a');
 const ci = (ev, k, f) => (ev && ev.ci && ev.ci[k] ? ` (95% CI ${f(ev.ci[k][0])}–${f(ev.ci[k][1])})` : '');
@@ -9607,23 +9650,23 @@ function buildChecklist(source) {
         ['Title', 'Identify the study as developing and/or evaluating a prediction model, the target population and the outcome.', `Outcome: "${esc(d.target)}". ${AUTHOR}`, 'author'],
         ['Abstract', 'Structured summary of objectives, data, methods, results and conclusions.', AUTHOR, 'author'],
         ['Background and objectives', 'Healthcare context, rationale, intended use and users of the model; study objectives.', AUTHOR, 'author'],
-        ['Data sources', 'Study design and data sources, dates of data collection.', `Dataset: ${esc(AppState.fileName || 'n/a')} (${d.nTotal ?? 'n/a'} records). ${AUTHOR} (design, setting, dates)`, 'partly'],
-        ['Participants', 'Eligibility criteria, setting, treatments received.', `${d.excludedOutcome ? `${d.excludedOutcome} records without an outcome were excluded. ` : ''}${AUTHOR}`, 'partly'],
+        ['Data sources', 'Study design and data sources, dates of data collection.', `Dataset: ${esc(AppState.fileName || 'n/a')} (${esc(d.nTotal ?? 'n/a')} records). ${AUTHOR} (design, setting, dates)`, 'partly'],
+        ['Participants', 'Eligibility criteria, setting, treatments received.', `${d.excludedOutcome ? `${esc(d.excludedOutcome)} records without an outcome were excluded. ` : ''}${AUTHOR}`, 'partly'],
         ['Data preparation', 'Pre-processing, data quality checks, and whether these were consistent across training and evaluation.', `Encoding (one-hot for categorical, standardisation for continuous, rank scaling for ordinal) fitted on the training data only and applied unchanged to evaluation data. Excluded or identifier columns: ${esc(d.excludedPredictors.join(', ') || 'none')}.`, 'auto'],
         ['Outcome', 'Definition of the outcome, how and when it was assessed, blinding.', `Outcome variable "${esc(d.target)}". ${AUTHOR} (clinical definition, timing, assessors)`, 'partly'],
         ['Predictors', 'Definition of all predictors, how and when measured; reasons for their choice.', `${d.predictors.length} candidate predictors: ${esc(d.predictors.join(', '))}. ${AUTHOR} (definitions, timing)`, 'partly'],
-        ['Sample size', 'How the study size was arrived at; justification against minimum sample size criteria.', `${d.nTotal ?? 'n/a'} records; the app's Riley et al. minimum sample-size check is shown in Step 4. ${AUTHOR} (justification)`, 'partly'],
+        ['Sample size', 'How the study size was arrived at; justification against minimum sample size criteria.', `${esc(d.nTotal ?? 'n/a')} records; the app's Riley et al. minimum sample-size check is shown in Step 4. ${AUTHOR} (justification)`, 'partly'],
         ['Missing data', 'Amount of missing data and how it was handled.', esc(d.missing), 'auto'],
         ['Analytical methods: models', 'Type of models, model-building steps, hyperparameter tuning.', `Models: ${esc(d.models.map(m => m.name).join(', '))}. Hyperparameters: ${esc(d.tuning)}.`, 'auto'],
-        ['Analytical methods: validation', 'Internal validation approach and how performance was estimated.', `Validation: ${esc(d.validation)}. Model selection: ${esc(d.selection)}.${d.seed !== null && d.seed !== undefined ? ` Random seed ${d.seed}.` : ''}`, 'auto'],
-        ['Analytical methods: performance measures', 'Measures of discrimination, calibration and clinical utility, with uncertainty.', `Discrimination (ROC-AUC / C-index, DeLong comparison), calibration (plot, slope, intercept, Brier score), decision curve analysis; percentile bootstrap 95% CIs over test patients${d.source === 'standard' && d.threshold ? `; decision threshold ${d.threshold}` : ''}.`, 'auto'],
+        ['Analytical methods: validation', 'Internal validation approach and how performance was estimated.', `Validation: ${esc(d.validation)}. Model selection: ${esc(d.selection)}.${d.seed !== null && d.seed !== undefined ? ` Random seed ${esc(d.seed)}.` : ''}`, 'auto'],
+        ['Analytical methods: performance measures', 'Measures of discrimination, calibration and clinical utility, with uncertainty.', `Discrimination (ROC-AUC / C-index, DeLong comparison), calibration (plot, slope, intercept, Brier score), decision curve analysis; percentile bootstrap 95% CIs over test patients${d.source === 'standard' && d.threshold ? `; decision threshold ${esc(d.threshold)}` : ''}.`, 'auto'],
         ['Class imbalance', 'Methods used to handle class imbalance and their effect on calibration.', esc(d.imbalance) + (d.recalibration && d.recalibration !== 'none' ? `; recalibration: ${esc(d.recalibration)}` : ''), 'auto'],
         ['Fairness', 'Approaches to assess and address model fairness across groups.', `The app's subgroup panel reports, for a chosen column on the Testing set, the number of patients and events, AUC, observed and mean predicted risk (O:E), Brier score, sensitivity, specificity and net benefit in each group; results are not copied here automatically. ${AUTHOR} (state the groups examined, e.g. sex, age group, ethnicity, site, and what was found)`, 'partly'],
-        ['Model output', 'What the model outputs (probabilities, classes) and how thresholds were chosen.', `Probabilities for each outcome class (or a numerical prediction); class assignment at a decision threshold of ${d.threshold ?? 0.5} chosen a priori, not tuned on the test set.`, 'auto'],
+        ['Model output', 'What the model outputs (probabilities, classes) and how thresholds were chosen.', `Probabilities for each outcome class (or a numerical prediction); class assignment at a decision threshold of ${esc(d.threshold ?? 0.5)} chosen a priori, not tuned on the test set.`, 'auto'],
         ['Ethics, funding, conflicts, protocol, registration', 'Ethical approval, funding, competing interests, protocol and registration.', AUTHOR, 'author'],
         ['Open science', 'Availability of data, code and the model.', `Analysis performed in-browser with Universal Medical ML/NeuralNet Predictor v${APP_VERSION}; the trained model and settings can be exported as JSON files for sharing. ${AUTHOR} (data and code availability statements)`, 'partly'],
         ['Patient and public involvement', 'Details of any patient and public involvement.', AUTHOR, 'author'],
-        ['Results: participants', 'Flow of participants, characteristics of training and evaluation data.', `Training ${d.nTrain ?? 'n/a'}, evaluation ${d.nTest ?? 'n/a'} records. ${AUTHOR} (flow diagram, baseline characteristics table)`, 'partly'],
+        ['Results: participants', 'Flow of participants, characteristics of training and evaluation data.', `Training ${esc(d.nTrain ?? 'n/a')}, evaluation ${esc(d.nTest ?? 'n/a')} records. ${AUTHOR} (flow diagram, baseline characteristics table)`, 'partly'],
         ['Results: model specification', 'Full model details so it can be used or evaluated by others.', 'Exportable trained-model file (preprocessing, parameters, threshold); for logistic models, coefficients / odds ratios are shown in the app.', 'auto'],
         ['Results: performance', 'Performance estimates with confidence intervals, for each model and the final model.', `Final model (${esc(d.best ? d.best.name : 'n/a')}): ${esc(performanceText(d.best && d.best.ev))}.<br>${d.models.map(m => `${esc(m.name)}: ${esc(performanceText(m.ev))}`).join('<br>')}`, 'auto'],
         ['Discussion: interpretation, limitations, usability', 'Interpretation, limitations (including bias and generalisability) and implications for practice.', `Note: single-centre/temporal limitations, small test sets, and that probabilities ${d.recalibration && d.recalibration !== 'none' ? 'were recalibrated' : 'were not recalibrated'}. ${AUTHOR}`, 'partly']
@@ -9648,7 +9691,7 @@ function methodsParagraph(d) {
 function downloadTripodChecklist(source) {
     const { d, items } = buildChecklist(source);
     const statusLabel = { auto: 'Pre-filled', partly: 'Partly pre-filled', author: 'Authors' };
-    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TRIPOD+AI Reporting Checklist (pre-filled)</title>
 <style>body{font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#0f172a;background:#fff;margin:24px auto;max-width:1000px;padding:0 16px}
 h1{font-size:20px}h2{font-size:16px;margin-top:28px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top;text-align:left}
@@ -9783,7 +9826,7 @@ function downloadHtmlReport(source) {
         <li>Predicted probabilities can be miscalibrated; check the calibration results before reading them as risks.</li>
         <li>Associations learned by the models are not causal effects.</li></ul>`);
     const title = `Prediction model report: ${d.target || 'outcome'}`;
-    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title><style>${REPORT_CSS}</style></head><body>
 <h1>${escapeHtml(title)}</h1>
 <div class="meta">Dataset: ${escapeHtml(AppState.fileName || '—')} · ${source === 'pipeline' ? '7-step pipeline' : 'Standard workflow'} · Universal Medical ML/NeuralNet Predictor ${escapeHtml(APP_VERSION)} · generated ${escapeHtml(new Date().toLocaleString('en-GB'))}</div>
@@ -9829,7 +9872,7 @@ function downloadValidationReport() {
         <li>An O:E ratio away from 1 or an intercept away from 0 means the average risk differs from the development setting (case mix, care); a slope below 1 means predictions are too extreme. These are commonly corrected by updating the model's calibration with local data, which should itself be validated.</li>
         <li>Small validation cohorts give wide confidence intervals; at least 100–200 patients with the outcome (and as many without) are commonly recommended.</li></ul>`);
     const title = `Validation report: ${name} for ${prep.targetCol}`;
-    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title><style>${REPORT_CSS}</style></head><body>
 <h1>${escapeHtml(title)}</h1>
 <div class="meta">Universal Medical ML/NeuralNet Predictor ${escapeHtml(APP_VERSION)} · generated ${escapeHtml(new Date().toLocaleString('en-GB'))}</div>
@@ -10015,18 +10058,21 @@ function collectFormState(rootSelector) {
     return state;
 }
 
-function applyFormState(state) {
-    if (!state) return;
+function applyFormState(state, rootSelector) {
+    if (!state || typeof state !== 'object') return;
+    // Only controls inside the part of the page the settings were saved from can be restored
+    const root = document.querySelector(rootSelector);
+    if (!root) return;
     const fire = (el, types) => types.forEach(t => el.dispatchEvent(new Event(t, { bubbles: true })));
     // Radios first: some (seed mode, validation mode) reset related inputs when they change
     Object.keys(state).filter(k => k.startsWith('radio:')).forEach(k => {
         const name = k.slice(6);
-        const el = Array.from(document.querySelectorAll('input[type="radio"]')).find(r => r.name === name && r.value === state[k]);
+        const el = Array.from(root.querySelectorAll('input[type="radio"]')).find(r => r.name === name && r.value === state[k]);
         if (el && !el.checked) { el.checked = true; fire(el, ['change']); }
     });
     Object.keys(state).filter(k => !k.startsWith('radio:')).forEach(id => {
         const el = document.getElementById(id);
-        if (!el || !isRememberedControl(el)) return;
+        if (!el || !root.contains(el) || !isRememberedControl(el)) return;
         if (el.type === 'checkbox') {
             if (el.checked !== Boolean(state[id])) { el.checked = Boolean(state[id]); fire(el, ['change']); }
         } else if (el.value !== String(state[id])) {
@@ -10076,6 +10122,13 @@ function collectSettings() {
 }
 
 // Browser memory (per-viewer convenience; may be unavailable or cleared, so always optional)
+// Removes every set of settings this app remembered in this browser
+function forgetStoredSettings() {
+    try {
+        Object.keys(localStorage).filter(k => k.startsWith(SETTINGS_KEY_PREFIX)).forEach(k => localStorage.removeItem(k));
+    } catch (e) { /* storage unavailable */ }
+}
+
 function saveSettingsToBrowser() {
     if (!AppState.parsedData) return;
     try {
@@ -10184,14 +10237,14 @@ function applySettings(settings) {
     // Standard workflow (Step 4)
     const std = settings.standard || {};
     AppState.completeCase = Boolean(std.completeCase);
-    if (std.rankingMetricClf) AppState.rankingMetricClf = std.rankingMetricClf;
-    if (std.rankingMetricReg) AppState.rankingMetricReg = std.rankingMetricReg;
+    if (Object.prototype.hasOwnProperty.call(RANKING_METRICS.classification, std.rankingMetricClf)) AppState.rankingMetricClf = std.rankingMetricClf;
+    if (Object.prototype.hasOwnProperty.call(RANKING_METRICS.regression, std.rankingMetricReg)) AppState.rankingMetricReg = std.rankingMetricReg;
     if (AppState.applyModelSelection && std.selectedModelIds) AppState.applyModelSelection(std.modelScope, std.selectedModelIds);
-    applyFormState(std.form);
+    applyFormState(std.form, '#step-4-content');
 
     // 7-step pipeline
     const pipe = settings.pipeline || {};
-    applyFormState(pipe.form);
+    applyFormState(pipe.form, '#step-pipeline-content');
     AppState.pendingPipelineDropped = (pipe.droppedFeatures || []).filter(f => headers.includes(f));
     AppState.pendingPipelineReinstated = (pipe.reinstatedFeatures || []).filter(f => headers.includes(f));
     AppState.pendingPipelineEvalSeed = pipe.evalSeed !== undefined && pipe.evalSeed !== '' ? String(pipe.evalSeed)
@@ -10541,7 +10594,10 @@ function start() {
     // Clear session: stops background work and reloads the page, which discards every dataset, result, model and
     // cached imputation held in memory. Browser storage holds only saved settings (choices and column names).
     document.getElementById('clear-session-btn')?.addEventListener('click', () => {
-        if (!confirm('Remove all data from this page?\n\nEvery loaded dataset, result, trained model and cached imputation is discarded (files you saved are not affected). Saved analysis settings remembered in this browser contain no patient values and are kept.')) return;
+        if (!confirm('Remove all data from this page?\n\nEvery loaded dataset, result, trained model and cached imputation is discarded (files you saved are not affected).')) return;
+        // Settings remembered in this browser hold choices, column names, file names and category labels (e.g.
+        // the positive class), not patient rows; on a shared computer they should go too
+        if (confirm('Also forget the analysis settings this browser remembered for your datasets?\n\nThey contain no patient rows but do include file names, column names and category labels. Choose OK on a shared computer.')) forgetStoredSettings();
         cancelAll('Session cleared.');
         clearImputationCache();
         location.reload();

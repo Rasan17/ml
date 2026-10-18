@@ -32,7 +32,7 @@ import { refreshModelSampleGuide } from './predictor-budget.js';
 import { downloadTripodChecklist } from './tripod.js';
 import { downloadHtmlReport, downloadValidationReport } from './html-report.js';
 import './external-validation.js';
-import { handleUnexpectedError } from './settings.js';
+import { forgetStoredSettings, handleUnexpectedError } from './settings.js';
 import { initAnalysisSummary } from './analysis-summary.js';
 import './interpretation.js';
 
@@ -100,7 +100,10 @@ function start() {
     // Clear session: stops background work and reloads the page, which discards every dataset, result, model and
     // cached imputation held in memory. Browser storage holds only saved settings (choices and column names).
     document.getElementById('clear-session-btn')?.addEventListener('click', () => {
-        if (!confirm('Remove all data from this page?\n\nEvery loaded dataset, result, trained model and cached imputation is discarded (files you saved are not affected). Saved analysis settings remembered in this browser contain no patient values and are kept.')) return;
+        if (!confirm('Remove all data from this page?\n\nEvery loaded dataset, result, trained model and cached imputation is discarded (files you saved are not affected).')) return;
+        // Settings remembered in this browser hold choices, column names, file names and category labels (e.g.
+        // the positive class), not patient rows; on a shared computer they should go too
+        if (confirm('Also forget the analysis settings this browser remembered for your datasets?\n\nThey contain no patient rows but do include file names, column names and category labels. Choose OK on a shared computer.')) forgetStoredSettings();
         cancelAll('Session cleared.');
         clearImputationCache();
         location.reload();

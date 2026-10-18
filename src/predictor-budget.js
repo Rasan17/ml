@@ -96,6 +96,9 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
     }
 
     const multi = perCol.filter(c => c.levels && c.levels > 2).sort((a, b) => b.df - a.df).slice(0, 3);
+    // A categorical predictor with nearly as many categories as records is probably an identifier: it would
+    // overfit badly, and its values (e.g. patient IDs) would be stored in exported model files
+    const idLike = perCol.filter(c => c.levels && c.levels > 20 && c.levels >= 0.5 * withOutcome.length);
     const counted = candidates !== null && candidates > P ? `the ${candidates} candidate parameters considered` : 'your selection';
     const statusText = {
         ok: `✓ ${counted === 'your selection' ? 'Your selection meets' : `The ${candidates} candidate parameters considered meet`} these planning criteria for regression models, under the stated assumptions (anticipated R², one record per patient unless patients are grouped). This is a planning guide, not proof that a model will perform well.`,
@@ -110,6 +113,7 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
             <div class="${status === 'ok' ? 'explain-box' : 'tune-warn'}" style="margin-top: 6px;">${statusText}</div>
             <table class="data-table thr-table"><thead><tr><th>Guide</th><th>Largest number of parameters</th><th>Comment</th></tr></thead>
                 <tbody>${rows4.map(([g, v, c]) => `<tr><td>${escapeHtml(g)}</td><td><strong>${v}</strong>${Pv > v ? ' <span class="tune-sd">(you have ' + Pv + ')</span>' : ''}</td><td>${escapeHtml(c)}</td></tr>`).join('')}</tbody></table>
+            ${idLike.length ? `<div class="tune-warn">⚠️ <strong>Looks like an identifier:</strong> ${idLike.map(c => `"${escapeHtml(c.col)}" (${c.levels} categories in ${withOutcome.length} records)`).join(', ')}. Untick it (or set it to Meta / ID): identifiers cannot predict new patients, and their values would be stored in exported model files.</div>` : ''}
             ${multi.length ? `<p class="tune-muted">Categorical predictors use one parameter per category beyond the first: ${multi.map(c => `"${escapeHtml(c.col)}" ${c.levels} categories = ${c.df}`).join('; ')}. Grouping rare categories saves parameters.</p>` : ''}
             ${groupOf ? '' : `<p class="tune-muted">${escapeHtml(UNIT_NOTE)}</p>`}
             <p class="tune-muted">A parameter is one number the model estimates: 1 for each numerical or ordered predictor, and (categories − 1) for an unordered categorical one. Choose predictors from clinical knowledge and earlier studies before looking at their association with the outcome: selecting them by p-value in the same patients makes the model look better than it is, and every predictor considered counts towards overfitting, not only those kept. SMOTENC and other balancing add no real patients. Riley et al. (BMJ 2020) with the default anticipated R² (15% of the maximum, as in pmsampsize; Step 4 lets you change it); 20–50 and 200 per parameter: van der Ploeg, Austin and Steyerberg, “Modern modelling techniques are data hungry” (BMC Med Res Methodol 2014;14:137).</p>

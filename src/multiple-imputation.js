@@ -30,6 +30,12 @@ function miCacheKey(rows, columnConfigs, m, seed) {
     }
     return `${m}|${seed}|${rows.length}|${text.length}|${(h1 >>> 0).toString(16)}${(h2 >>> 0).toString(16)}`;
 }
+function matchesRows(mi, rows, m) {
+    if (!Array.isArray(mi.datasets) || mi.datasets.length !== m || !mi.imputer || !Array.isArray(mi.imputer.chains) || mi.imputer.chains.length !== m) return false;
+    return mi.datasets.every(d => Array.isArray(d) && d.length === rows.length && d.every((r, i) => r && typeof r === 'object' &&
+        Object.keys(rows[i]).every(k => DataEngine.isMissing(rows[i][k]) ? !DataEngine.isMissing(r[k]) || r[k] === rows[i][k] : String(r[k]) === String(rows[i][k]))));
+}
+
 function clearImputationCache() { miCache.clear(); updateImputedDataButtons(); }
 
 // "Save imputed data" file: the cached imputations (completed datasets and the fitted imputation models),
@@ -75,7 +81,7 @@ function loadImputedDataFile(file) {
         if (data.format !== MI_FILE_FORMAT) { alert(`This imputed-data file was made by a version of the app with a different imputation method (${data.appVersion || 'unknown version'}), so it cannot be reused; the imputation will be run again when you train.`); return; }
         let added = 0;
         data.entries.forEach(en => {
-            if (en && typeof en.key === 'string' && en.mi && Array.isArray(en.mi.datasets) && en.mi.imputer && Array.isArray(en.mi.imputer.chains)) { miCache.set(en.key, en.mi); added++; }
+            if (en && typeof en.key === 'string' && en.mi && Array.isArray(en.mi.datasets) && en.mi.imputer && Array.isArray(en.mi.imputer.chains)) { miCache.set(en.key, { ...en.mi, fromFile: true }); added++; }
         });
         while (miCache.size > MI_CACHE_SIZE) miCache.delete(miCache.keys().next().value);
         updateImputedDataButtons();
@@ -98,6 +104,9 @@ async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onPr
     const plainRows = rawRows.map(r => ({ ...r }));
     const key = miCacheKey(plainRows, columnConfigs, m, seed);
     let mi = miCache.get(key);
+    // Imputed data loaded from a file are used only if they really are these patients: every observed value
+    // (and the outcome) must match, row by row, and the structure must be complete; otherwise re-impute
+    if (mi && mi.fromFile && !matchesRows(mi, plainRows, m)) { miCache.delete(key); mi = null; }
     if (mi) {
         miCache.delete(key); miCache.set(key, mi); // most recently used last
         if (onReuse) onReuse();

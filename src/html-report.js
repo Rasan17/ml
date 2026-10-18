@@ -108,7 +108,7 @@ function downloadHtmlReport(source) {
         <li>Predicted probabilities can be miscalibrated; check the calibration results before reading them as risks.</li>
         <li>Associations learned by the models are not causal effects.</li></ul>`);
     const title = `Prediction model report: ${d.target || 'outcome'}`;
-    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title><style>${REPORT_CSS}</style></head><body>
 <h1>${escapeHtml(title)}</h1>
 <div class="meta">Dataset: ${escapeHtml(AppState.fileName || '—')} · ${source === 'pipeline' ? '7-step pipeline' : 'Standard workflow'} · Universal Medical ML/NeuralNet Predictor ${escapeHtml(APP_VERSION)} · generated ${escapeHtml(new Date().toLocaleString('en-GB'))}</div>
@@ -154,7 +154,7 @@ function downloadValidationReport() {
         <li>An O:E ratio away from 1 or an intercept away from 0 means the average risk differs from the development setting (case mix, care); a slope below 1 means predictions are too extreme. These are commonly corrected by updating the model's calibration with local data, which should itself be validated.</li>
         <li>Small validation cohorts give wide confidence intervals; at least 100–200 patients with the outcome (and as many without) are commonly recommended.</li></ul>`);
     const title = `Validation report: ${name} for ${prep.targetCol}`;
-    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title><style>${REPORT_CSS}</style></head><body>
 <h1>${escapeHtml(title)}</h1>
 <div class="meta">Universal Medical ML/NeuralNet Predictor ${escapeHtml(APP_VERSION)} · generated ${escapeHtml(new Date().toLocaleString('en-GB'))}</div>

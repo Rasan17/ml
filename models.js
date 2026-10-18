@@ -2793,6 +2793,17 @@
             if (typeof obj !== 'object' || typeof obj.type !== 'string') throw new Error('Invalid model file: unknown model type.');
             if (obj.type === 'rf') {
                 const m = restore(RandomForest.prototype, obj.state, 'rf');
+                if (!Array.isArray(obj.trees) || obj.trees.length > 5000) throw new Error('Invalid model file: forest trees are missing or too many.');
+                // Tree nodes are plain data; a crafted, extremely deep or huge tree would exhaust the browser
+                const checkTree = root => {
+                    const stack = [[root, 0]]; let nodes = 0;
+                    while (stack.length) {
+                        const [nd, d] = stack.pop();
+                        if (!nd || typeof nd !== 'object' || d > 200 || ++nodes > 2e6) throw new Error('Invalid model file: a tree is malformed or too large.');
+                        ['left', 'right'].forEach(k => { if (nd[k]) stack.push([nd[k], d + 1]); });
+                    }
+                };
+                obj.trees.forEach(t => checkTree(t && t.root));
                 m.trees = obj.trees.map(t => { const tr = restore(DecisionTree.prototype, t.state, 'tree'); tr.root = t.root; return tr; });
                 return m;
             }
@@ -2807,6 +2818,11 @@
                 m.tfModel = null;
                 if (obj.tf) {
                     if (typeof tf === 'undefined') throw new Error('TensorFlow.js is needed to load this neural network.');
+                    // The weights must match their declared shapes exactly (a crafted shape could exhaust memory)
+                    const specs = Array.isArray(obj.tf.weightSpecs) ? obj.tf.weightSpecs : null;
+                    const bytesOf = sp => { const n = (sp.shape || []).reduce((a, d) => a * (Number.isInteger(d) && d >= 0 ? d : NaN), 1); return n * (sp.dtype === 'float32' || sp.dtype === 'int32' || !sp.dtype ? 4 : NaN); };
+                    const declared = specs ? specs.reduce((a, sp) => a + bytesOf(sp), 0) : NaN;
+                    if (typeof obj.tf.weightData !== 'string' || !(declared >= 0) || declared > 2e8 || Math.floor(obj.tf.weightData.replace(/=+$/, '').length * 3 / 4) !== declared) throw new Error('Invalid model file: neural-network weights do not match their description.');
                     const bin = atob(obj.tf.weightData);
                     const bytes = new Uint8Array(bin.length);
                     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -2827,8 +2843,23 @@
             }
             if (obj.type === 'ensemble') {
                 const m = restore(EnsembleModel.prototype, obj.state, 'ensemble');
+                // Items of the ensemble's lists are checked too: base-model ids from the known list, numeric weights
+                const IDS = ['nn', 'rf', 'gbm', 'glm', 'knn', 'nb'];
+                const num = v => typeof v === 'number' && isFinite(v);
+                if (m.weights && !(Array.isArray(m.weights) && m.weights.every(num))) throw new Error('Invalid model file: ensemble weights are not numbers.');
+                if (m.selectedBaseIds && !(Array.isArray(m.selectedBaseIds) && m.selectedBaseIds.every(id => IDS.includes(id)))) throw new Error('Invalid model file: unknown ensemble base model.');
+                if (m.baseMetrics) {
+                    if (!Array.isArray(m.baseMetrics)) throw new Error('Invalid model file: ensemble metrics are not a list.');
+                    m.baseMetrics = m.baseMetrics.map(b => {
+                        if (!b || typeof b !== 'object' || !IDS.includes(b.id) || !num(b.weight)) throw new Error('Invalid model file: ensemble metrics are not valid.');
+                        const o = { id: b.id, weight: b.weight };
+                        ['balancedAccuracy', 'mse'].forEach(k => { if (num(b[k])) o[k] = b[k]; });
+                        return o;
+                    });
+                }
                 m.models = [];
-                for (const it of obj.models) m.models.push({ id: typeof it.id === 'string' ? it.id : null, model: await this.deserializeModel(it.model) });
+                if (!Array.isArray(obj.models)) throw new Error('Invalid model file: ensemble base models missing.');
+                for (const it of obj.models) m.models.push({ id: it && IDS.includes(it.id) ? it.id : null, model: await this.deserializeModel(it && it.model) });
                 return m;
             }
             throw new Error(`Unknown model type in file: ${obj.type}`);

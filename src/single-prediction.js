@@ -99,7 +99,7 @@ function runSinglePrediction() {
 
     let ensembleDetailsHtml = '';
     if (result.ensembleDetails && result.ensembleDetails.length > 0) {
-        const weightsStr = result.ensembleDetails.map(d => `${d.id.toUpperCase()}: ${Math.round((d.normalizedWeight !== undefined ? d.normalizedWeight : d.weight) * 100)}%`).join(' &bull; ');
+        const weightsStr = result.ensembleDetails.map(d => { const w = Number(d.normalizedWeight !== undefined ? d.normalizedWeight : d.weight); return `${escapeHtml(String(d.id).toUpperCase())}: ${isFinite(w) ? Math.round(w * 100) : '?'}%`; }).join(' &bull; ');
         ensembleDetailsHtml = `
             <div style="font-size: 11px; color: var(--accent-cyan); margin-top: 5px; font-weight: 600;">
                 Ensemble Blend: ${weightsStr}
@@ -107,9 +107,9 @@ function runSinglePrediction() {
         `;
     }
 
-    const activeSeed = (AppState.trainedModel && AppState.trainedModel.seed !== undefined && AppState.trainedModel.seed !== null)
-        ? AppState.trainedModel.seed
-        : (AppState.evalResults?.seed !== null && AppState.evalResults?.seed !== undefined ? AppState.evalResults.seed : null);
+    // A seed is a number; anything else (e.g. from a tampered model file) is not shown
+    const seedOf = v => (typeof v === 'number' && isFinite(v) ? v : null);
+    const activeSeed = seedOf(AppState.trainedModel && AppState.trainedModel.seed) ?? seedOf(AppState.evalResults && AppState.evalResults.seed);
 
     const seedSnippet = activeSeed !== null
         ? ` &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px; cursor: pointer;" ${actionAttrs('copySeedToClipboard', activeSeed)} title="Click to copy reproducibility seed">🌱 ${activeSeed} 📋</code>`

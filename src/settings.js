@@ -1,6 +1,6 @@
 // settings.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { setMissingIndicators } from './variables.js';
-import { APP_VERSION, AppState, escapeHtml } from './core.js';
+import { APP_VERSION, AppState, RANKING_METRICS, escapeHtml } from './core.js';
 import { executeImputation, renderImputationTable } from './imputation.js';
 import { goToStep } from './navigation.js';
 import { goToPipelineSubstep, updatePipelineCompleteCaseInfo } from './pipeline.js';
@@ -75,18 +75,21 @@ function collectFormState(rootSelector) {
     return state;
 }
 
-function applyFormState(state) {
-    if (!state) return;
+function applyFormState(state, rootSelector) {
+    if (!state || typeof state !== 'object') return;
+    // Only controls inside the part of the page the settings were saved from can be restored
+    const root = document.querySelector(rootSelector);
+    if (!root) return;
     const fire = (el, types) => types.forEach(t => el.dispatchEvent(new Event(t, { bubbles: true })));
     // Radios first: some (seed mode, validation mode) reset related inputs when they change
     Object.keys(state).filter(k => k.startsWith('radio:')).forEach(k => {
         const name = k.slice(6);
-        const el = Array.from(document.querySelectorAll('input[type="radio"]')).find(r => r.name === name && r.value === state[k]);
+        const el = Array.from(root.querySelectorAll('input[type="radio"]')).find(r => r.name === name && r.value === state[k]);
         if (el && !el.checked) { el.checked = true; fire(el, ['change']); }
     });
     Object.keys(state).filter(k => !k.startsWith('radio:')).forEach(id => {
         const el = document.getElementById(id);
-        if (!el || !isRememberedControl(el)) return;
+        if (!el || !root.contains(el) || !isRememberedControl(el)) return;
         if (el.type === 'checkbox') {
             if (el.checked !== Boolean(state[id])) { el.checked = Boolean(state[id]); fire(el, ['change']); }
         } else if (el.value !== String(state[id])) {
@@ -136,6 +139,13 @@ function collectSettings() {
 }
 
 // Browser memory (per-viewer convenience; may be unavailable or cleared, so always optional)
+// Removes every set of settings this app remembered in this browser
+function forgetStoredSettings() {
+    try {
+        Object.keys(localStorage).filter(k => k.startsWith(SETTINGS_KEY_PREFIX)).forEach(k => localStorage.removeItem(k));
+    } catch (e) { /* storage unavailable */ }
+}
+
 function saveSettingsToBrowser() {
     if (!AppState.parsedData) return;
     try {
@@ -244,14 +254,14 @@ function applySettings(settings) {
     // Standard workflow (Step 4)
     const std = settings.standard || {};
     AppState.completeCase = Boolean(std.completeCase);
-    if (std.rankingMetricClf) AppState.rankingMetricClf = std.rankingMetricClf;
-    if (std.rankingMetricReg) AppState.rankingMetricReg = std.rankingMetricReg;
+    if (Object.prototype.hasOwnProperty.call(RANKING_METRICS.classification, std.rankingMetricClf)) AppState.rankingMetricClf = std.rankingMetricClf;
+    if (Object.prototype.hasOwnProperty.call(RANKING_METRICS.regression, std.rankingMetricReg)) AppState.rankingMetricReg = std.rankingMetricReg;
     if (AppState.applyModelSelection && std.selectedModelIds) AppState.applyModelSelection(std.modelScope, std.selectedModelIds);
-    applyFormState(std.form);
+    applyFormState(std.form, '#step-4-content');
 
     // 7-step pipeline
     const pipe = settings.pipeline || {};
-    applyFormState(pipe.form);
+    applyFormState(pipe.form, '#step-pipeline-content');
     AppState.pendingPipelineDropped = (pipe.droppedFeatures || []).filter(f => headers.includes(f));
     AppState.pendingPipelineReinstated = (pipe.reinstatedFeatures || []).filter(f => headers.includes(f));
     AppState.pendingPipelineEvalSeed = pipe.evalSeed !== undefined && pipe.evalSeed !== '' ? String(pipe.evalSeed)
@@ -337,4 +347,4 @@ function handleUnexpectedError(err) {
     try { showSeedToast(`⚠️ Unexpected error: ${msg}. Please check your data/settings and retry.`); } catch (e) { /* ignore */ }
 }
 
-export { SETTINGS_SCHEMA, SETTINGS_APP, SETTINGS_KEY_PREFIX, SETTINGS_MAX_STORED, VARIABLE_FIELDS, datasetSignature, isRememberedControl, collectFormState, applyFormState, collectSettings, saveSettingsToBrowser, readStoredSettings, downloadSettings, loadSettingsFile, offerStoredSettings, applySettings, runStandardWithSettings, runPipelineWithSettings, handleUnexpectedError };
+export { forgetStoredSettings, SETTINGS_SCHEMA, SETTINGS_APP, SETTINGS_KEY_PREFIX, SETTINGS_MAX_STORED, VARIABLE_FIELDS, datasetSignature, isRememberedControl, collectFormState, applyFormState, collectSettings, saveSettingsToBrowser, readStoredSettings, downloadSettings, loadSettingsFile, offerStoredSettings, applySettings, runStandardWithSettings, runPipelineWithSettings, handleUnexpectedError };

@@ -234,6 +234,34 @@ const rejects = async (fn, what) => { try { await fn(); } catch (e) { return e.m
         return `slopes ${out.join(', ')} match IRLS; macro-F1 ${ev.macroF1}`;
     });
 
+    await check('Independent review (security): crafted model fields refused or neutralised; reserved CSV values refused; oversized trees refused', async () => {
+        // Imported evaluation summary keeps only numbers (no text that could reach the page)
+        const src = fs.readFileSync(path.join(dir, 'src', 'model-io.js'), 'utf8');
+        const fnText = src.slice(src.indexOf('function sanitizeEvaluation'), src.indexOf('\n}\n', src.indexOf('function sanitizeEvaluation')) + 2);
+        const sanitizeEvaluation = new Function(`${fnText}; return sanitizeEvaluation;`)();
+        const clean = sanitizeEvaluation({ seed: '<meta http-equiv="refresh" content="0;url=https://x">', rocAuc: 0.8, protocol: 'option-a', splitInfo: { method: '<b>' }, ci: { rocAuc: [0.7, 0.9] }, ['__proto__']: { polluted: 1 } });
+        assert(clean.seed === undefined && clean.rocAuc === 0.8 && clean.protocol === 'option-a' && clean.splitInfo.method === undefined && clean.ci.rocAuc[1] === 0.9, `evaluation not sanitised: ${JSON.stringify(clean)}`);
+        assert(({}).polluted === undefined, 'prototype polluted');
+        // Ensemble base-model metrics with markup are refused
+        const ens = ME.createModel('ensemble', true, 2, { seed: 1, baseModels: ['glm', 'knn'] });
+        const X = Array.from({ length: 40 }, (_, i) => [i % 7, i % 3]), y = X.map(x => (x[0] > 3 ? 1 : 0));
+        await ens.fit(X, y);
+        const ser = JSON.parse(JSON.stringify(await ME.serializeModel(ens)));
+        const bad = JSON.parse(JSON.stringify(ser)); bad.state.baseMetrics = [{ id: '<u>x</u>', weight: 1 }];
+        await rejects(() => ME.deserializeModel(bad), 'markup in ensemble metrics');
+        assert((await ME.deserializeModel(ser)).predictSingle(X[0]), 'the genuine ensemble no longer loads');
+        // Reserved words as CSV values
+        await rejects(() => DE.parseCSV('Sex,Y\nconstructor,1\n'), 'a "constructor" value');
+        await rejects(() => DE.parseCSV('Sex,Y\nM,__proto__\n'), 'a "__proto__" outcome');
+        // An absurdly deep tree is refused
+        const rf = ME.createModel('rf', true, 2, { seed: 1, numTrees: 2 }); rf.fit(X, y);
+        const rser = JSON.parse(JSON.stringify(await ME.serializeModel(rf)));
+        let node = { value: 0 }; for (let d = 0; d < 300; d++) node = { featureIndex: 0, threshold: 0, left: node, right: { value: 1 } };
+        rser.trees[0].root = node;
+        await rejects(() => ME.deserializeModel(rser), 'a 300-level tree');
+        return 'evaluation text dropped; ensemble markup, reserved values and an oversized tree refused';
+    });
+
     console.log(results.join('\n'));
     console.log(`\n${passed}/${passed + failed} audit regression checks passed`);
     if (failed) process.exit(1);
