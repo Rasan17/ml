@@ -11,3 +11,10 @@ test-results/
 playwright-report/
 # Local Python environments for the audit tools
 .venv-*/
+
+# Office lock files, and large media kept out of the repository (distributed as release attachments instead)
+~$*
+*.mp4
+*.mov
+*.pptx
+workflow-guide/

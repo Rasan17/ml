@@ -35,6 +35,7 @@ import './external-validation.js';
 import { forgetStoredSettings, handleUnexpectedError } from './settings.js';
 import { initAnalysisSummary } from './analysis-summary.js';
 import './interpretation.js';
+import { downloadModelCard } from './model-card.js';
 
 AppState.pipeline = createEmptyPipelineState(42);
 
@@ -106,16 +107,18 @@ function start() {
             if (changed) el.dispatchEvent(new Event('change', { bubbles: true }));
         }));
     };
-    let savedLevel = 'advanced';
-    try { savedLevel = localStorage.getItem('ummp-ui-level') || 'advanced'; } catch (e) { /* storage unavailable */ }
+    // First visit: Beginner (recommended defaults); the choice is then remembered in this browser
+    let savedLevel = 'beginner';
+    try { savedLevel = localStorage.getItem('ummp-ui-level') || 'beginner'; } catch (e) { /* storage unavailable */ }
     if (levelSel) {
-        levelSel.value = ['beginner', 'intermediate', 'advanced'].includes(savedLevel) ? savedLevel : 'advanced';
+        levelSel.value = ['beginner', 'intermediate', 'advanced'].includes(savedLevel) ? savedLevel : 'beginner';
         applyLevel(levelSel.value, levelSel.value !== 'advanced');
         levelSel.addEventListener('change', () => {
             applyLevel(levelSel.value, true);
             try { localStorage.setItem('ummp-ui-level', levelSel.value); } catch (e) { /* storage unavailable */ }
         });
     }
+    document.getElementById('model-card-btn')?.addEventListener('click', downloadModelCard);
     // Start page task choice
     document.getElementById('task-develop')?.addEventListener('click', () => {
         const input = document.getElementById('csv-file-input');

@@ -474,3 +474,33 @@ test('7-step pipeline: Step 4 significance screening is repeated inside every cr
     await expect(page.locator('body')).toContainText('Step 4 screening repeated inside cross-validation');
     expect(errors).toEqual([]);
 });
+
+test.describe('first visit', () => {
+    test.use({ storageState: { cookies: [], origins: [] } });
+    test('a first-time visitor starts at the Beginner level', async ({ page }) => {
+        const errors = watch(page);
+        await page.goto('/index.html');
+        await expect(page.locator('#ui-level-select')).toHaveValue('beginner');
+        await expect(page.locator('.ui-level-note')).toBeVisible();
+        expect(errors).toEqual([]);
+    });
+});
+
+test('model card: a one-page summary of the active model, and the research-use confirmation before Step 5', async ({ page }) => {
+    test.setTimeout(300000);
+    const errors = [], dialogs = [];
+    page.on('pageerror', e => errors.push(String(e)));
+    page.on('dialog', d => { dialogs.push(d.message()); d.accept(); });
+    await page.goto('/index.html');
+    await toStep4(page);
+    await page.locator('.model-card[data-model-id="glm"]').click({ position: { x: 12, y: 12 } });
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText(/Complete/, { timeout: 170000 });
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#model-card-btn')]);
+    const html = fs.readFileSync(await dl.path(), 'utf8');
+    for (const t of ['Model card:', 'Intended use', 'Known limitations', 'ROC-AUC', 'Content-Security-Policy', 'Shunt_Response']) expect(html).toContain(t);
+    await page.click('button.step-tab[data-step="5"]');
+    await expect.poll(() => dialogs.join(' ')).toContain('Research and education use only');
+    await expect(page.locator('#step-5-content')).toBeVisible();
+    expect(errors).toEqual([]);
+});

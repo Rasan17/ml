@@ -27,7 +27,7 @@ The **Universal Medical ML/NeuralNet Predictor** provides clinical researchers, 
 ### 1. Complete Client-Side Data Privacy (supports GDPR/HIPAA-aligned use)
 - Runs locally in modern browsers via HTML5, Vanilla JavaScript, and TensorFlow.js.
 - Patient health records and uploaded CSVs are processed solely in client memory—**zero data is transmitted to external servers**.
-- A Content-Security-Policy in the page lets the browser contact only the app's own files (`connect-src 'self'`), so data cannot be sent to any other server.
+- A Content-Security-Policy in the page lets the browser contact only the app's own files (`connect-src 'self'`), so data cannot be sent to any other server. It keeps `'unsafe-eval'` for scripts because TensorFlow.js needs it to start (without it the neural network silently falls back to a linear model; confirmed by removing it). Imported model and settings files are read as plain data only, so this does not let a file run code. Inline styles are still allowed; moving the interface's inline styles into CSS classes, so that this allowance can be removed, is planned.
 - Checked on the deployed site (October 2026): during a full analysis every network request went to the app's own address, all to fetch its own files and sample data; nothing was sent out, and no third-party scripts, fonts or analytics are loaded.
 - Files you choose to export can contain patient values, and say so before saving: models using k-NN (model or missing-value filling) or multiple imputation, and the "Save imputed data" file. Settings files and reports contain no patient values. **🧹 Clear session and patient data** discards everything held by the page.
 - Keeping data in the browser supports GDPR/HIPAA-aligned workflows, but software alone cannot make a study compliant: lawful basis, de-identification, device security and governance remain the user's and institution's responsibility.
@@ -178,7 +178,9 @@ Reproducibility is a fundamental prerequisite in scientific and clinical researc
 - **In plain language:** after training, a panel explains the active model's results for clinicians: what is predicted and for whom, what the probability means given its calibration, AUC in words, comparison with giving everyone the average risk, false negatives and positives per 100 patients at the chosen threshold, and the limits of the validation design.
 - **Unusual patients:** single and batch predictions flag a patient whose combination of predictor values is unlike the training patients (Mahalanobis distance beyond the 99th / 99.9th percentile of the training patients), even when every value is within range. Only aggregate statistics are stored.
 - **Calibration panel:** calibration-in-the-large (observed vs mean predicted, O:E), 95% intervals on each plotted group, and the Brier score with its reference (everyone given the observed rate) and scaled Brier.
-- **Interface levels:** the start page offers Beginner (recommended defaults, fewer choices), Intermediate (adds validation and metric choices: model-selection method, ranking metric, decision threshold, recalibration) and Advanced (every setting, the default). Settings hidden at a level are reset to their recommended defaults, so nothing hidden affects the analysis; loading a settings file switches to Advanced. The level is remembered in the browser.
+- **Interface levels:** the start page offers Beginner (recommended defaults, fewer choices), Intermediate (adds validation and metric choices: model-selection method, ranking metric, decision threshold, recalibration) and Advanced (every setting). First-time visitors start at Beginner. Settings hidden at a level are reset to their recommended defaults, so nothing hidden affects the analysis; loading a settings file switches to Advanced. The level is remembered in the browser.
+- **Model card:** a one-page summary of the active model (intended use, development population, predictors, missing-data handling, validation design, performance with intervals, known limitations), downloadable as printable HTML next to the model file.
+- **Research-use confirmation:** before Single Prediction is first used in a session, the app asks the user to confirm research use, since software that informs individual patient care can be a regulated medical device (in the UK, MHRA).
 - **Analysis summary:** a bar under the step tabs always shows the dataset, outcome and positive class, records (and patients when a patient column is set), predictors, validation design, missing-data handling, recalibration and the active research model.
 - **Enough data for each model?** Before training (Step 4; pipeline Step 7), each selected model is listed with the data it needs for the current predictors (logistic regression and naive Bayes 10–20 events per parameter plus the Riley criteria; random forest, boosted trees, neural network, k-NN and ensemble 200+), what the Training set has, and a verdict (enough data / borderline / exploratory only).
 - **Exact Random Forest splits** (default below 5,000 patients).
@@ -257,10 +259,10 @@ The benchmark runs the app's own engine (with the real TensorFlow.js network) on
 
 ## 🚀 How to Run
 
-**Online:** open **https://rasan17.github.io/ai/** in any modern browser (Safari, Chrome, Edge, Firefox). Everything runs in your browser; uploaded data never leaves your computer.
+**Online:** open **https://rasan17.github.io/ml/** in any modern browser (Safari, Chrome, Edge, Firefox). Everything runs in your browser; uploaded data never leaves your computer.
 
 **Locally:** the application is built entirely with client-side web technologies, so no installation, node packages or build steps are required.
-1. Download the repository (`git clone https://github.com/Rasan17/ai.git`, or *Code → Download ZIP* on GitHub).
+1. Download the repository (`git clone https://github.com/Rasan17/ml.git`, or *Code → Download ZIP* on GitHub). To share the source as a zip, use `git archive --format=zip -o ml-source.zip HEAD`, which contains only the tracked files (no `node_modules`, `.git`, Office lock files or local media).
 2. Serve the folder with any local web server and open it in the browser:
    ```bash
    cd ai

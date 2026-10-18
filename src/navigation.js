@@ -230,6 +230,12 @@ function goToStep(stepNum) {
             alert("Please train a machine learning model first in Step 4.");
             return;
         }
+        // Predictions for an individual patient: confirmed once per session as research use only (software that
+        // informs individual patient care can be a regulated medical device)
+        if (num === 5 && !AppState.researchUseAcknowledged) {
+            if (!confirm('Research and education use only\n\nPredictions from this app are not validated for decisions about an individual patient\'s care and must not be used for them. Software used to inform patient care can be a regulated medical device (in the UK, MHRA). Use predictions only to explore the model, for example with test cases or de-identified research data.\n\nContinue?')) return;
+            AppState.researchUseAcknowledged = true;
+        }
     }
 
     AppState.currentStep = stepNum;

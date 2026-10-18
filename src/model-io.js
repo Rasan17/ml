@@ -220,6 +220,8 @@ function updateModelExportButton() {
     scheduleAnalysisSummary(); // the active model may have changed
     const btn = document.getElementById('model-export-btn');
     if (btn) { btn.disabled = !AppState.trainedModel; btn.title = AppState.trainedModel ? 'Save the active model (with its fitted preprocessing) as a file' : 'Train or deploy a model first'; }
+    const card = document.getElementById('model-card-btn');
+    if (card) { card.disabled = !AppState.trainedModel; card.title = AppState.trainedModel ? 'One-page summary of the active model: intended use, population, performance and limitations' : 'Train or deploy a model first'; }
 }
 
 function downloadPipelineProtocolReport() {
