@@ -48,7 +48,9 @@ async function selectModels(page, ids) {
 test('numerical outcome: multiple imputation, subgroups, explanation and report', async ({ page }) => {
     const errors = watch(page);
     await loadVariant(page, 'numeric');
+    await page.click('button.step-tab[data-step="3"]'); // the imputation choice is in Step 3
     await page.selectOption('#mi-select', 'mice5');
+    await page.click('button.step-tab[data-step="4"]');
     await selectModels(page, ['glm', 'rf']);
     await page.click('#train-model-btn');
     await expect(page.locator('#train-status')).toContainText('Tournament Complete', { timeout: 170000 });

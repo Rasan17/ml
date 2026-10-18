@@ -2128,7 +2128,7 @@ function goToStep(stepNum) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
-    if (stepNum === 3 || stepNum === '3') renderImputationTable();
+    if (stepNum === 3 || stepNum === '3') { renderImputationTable(); updateImputationEstimate(); }
     if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); refreshModelSampleGuide(); }
     if (stepNum === 5 || stepNum === '5') renderSinglePredictionForm();
     if (stepNum === 'survival') renderSurvivalSetup();
@@ -10105,7 +10105,9 @@ function collectSettings() {
             selectedModelIds: (AppState.selectedModelIds || []).slice(),
             rankingMetricClf: AppState.rankingMetricClf || 'macroF1',
             rankingMetricReg: AppState.rankingMetricReg || 'r2',
-            form: collectFormState('#step-4-content')
+            form: collectFormState('#step-4-content'),
+            // The imputation choice sits in Step 3 (one pane for single and multiple imputation)
+            multipleImputation: document.getElementById('mi-select')?.value || 'single'
         },
         pipeline: {
             form: collectFormState('#step-pipeline-content'),
@@ -10241,6 +10243,10 @@ function applySettings(settings) {
     if (Object.prototype.hasOwnProperty.call(RANKING_METRICS.regression, std.rankingMetricReg)) AppState.rankingMetricReg = std.rankingMetricReg;
     if (AppState.applyModelSelection && std.selectedModelIds) AppState.applyModelSelection(std.modelScope, std.selectedModelIds);
     applyFormState(std.form, '#step-4-content');
+    // Imputation choice (Step 3); older settings files kept it in the Step 4 form
+    const miVal = ['single', 'mice5', 'mice10'].find(v => v === (std.multipleImputation || (std.form || {})['mi-select']));
+    const miEl = document.getElementById('mi-select');
+    if (miEl && miVal && miEl.value !== miVal) { miEl.value = miVal; miEl.dispatchEvent(new Event('change', { bubbles: true })); }
 
     // 7-step pipeline
     const pipe = settings.pipeline || {};

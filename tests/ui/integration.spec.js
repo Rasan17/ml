@@ -13,6 +13,12 @@ function watch(page) {
     page.on('dialog', d => d.accept());
     return errors;
 }
+// The imputation choice is in Step 3 (one pane for single and multiple imputation)
+async function chooseMI(page, value) {
+    await page.click('button.step-tab[data-step="3"]');
+    await page.selectOption('#mi-select', value);
+    await page.click('button.step-tab[data-step="4"]');
+}
 async function toStep4(page) {
     await page.click('#sample-shunt-large-btn');
     await expect(page.locator('#data-stats-grid')).toContainText('420');
@@ -25,7 +31,7 @@ test('settings with the newer controls are saved and restored', async ({ page })
     const errors = watch(page);
     await page.goto('/index.html');
     await toStep4(page);
-    await page.selectOption('#mi-select', 'mice10');
+    await chooseMI(page, 'mice10');
     await page.selectOption('#recalibration-select', 'isotonic');
     await page.selectOption('#rf-split-select', 'exact', { force: true }); // in the Random Forest settings panel (hidden until RF is configured)
     await page.check('input[name="validation-mode"][value="bootstrap"]', { force: true });
@@ -59,7 +65,7 @@ test('a multiply imputed, recalibrated model gives identical predictions after e
     const errors = watch(page);
     await page.goto('/index.html');
     await toStep4(page);
-    await page.selectOption('#mi-select', 'mice5');
+    await chooseMI(page, 'mice5');
     await page.selectOption('#recalibration-select', 'platt');
     await page.locator('.model-card[data-model-id="glm"]').click();
     await page.click('#train-model-btn');
@@ -91,7 +97,7 @@ test('batch prediction with blanks and an out-of-range value', async ({ page }) 
     const errors = watch(page);
     await page.goto('/index.html');
     await toStep4(page);
-    await page.selectOption('#mi-select', 'mice5');
+    await chooseMI(page, 'mice5');
     await page.locator('.model-card[data-model-id="rf"]').click();
     await page.click('#train-model-btn');
     await expect(page.locator('#train-status')).toContainText(/Deployed|Complete/, { timeout: 170000 });
@@ -112,7 +118,7 @@ test('Option B with multiple imputation on the external validation cohort', asyn
     const errors = watch(page);
     await page.goto('/index.html');
     await toStep4(page);
-    await page.selectOption('#mi-select', 'mice5');
+    await chooseMI(page, 'mice5');
     await page.check('input[name="validation-mode"][value="separate"]', { force: true });
     await page.getByRole('button', { name: 'Load Built-In Validation Cohort' }).click();
     await expect(page.locator('#option-b-container')).toContainText('Hospital D');
@@ -179,7 +185,7 @@ test('multiple imputation is done once: reused for a second model, and saved and
     const errors = watch(page);
     await page.goto('/index.html');
     await toStep4(page);
-    await page.selectOption('#mi-select', 'mice5');
+    await chooseMI(page, 'mice5');
     // record every progress message of the imputation rounds
     await page.evaluate(() => {
         window.__miRounds = 0;
@@ -202,7 +208,7 @@ test('multiple imputation is done once: reused for a second model, and saved and
     const saved = await dl.path();
     await page.goto('/index.html');
     await toStep4(page);
-    await page.selectOption('#mi-select', 'mice5');
+    await chooseMI(page, 'mice5');
     await page.setInputFiles('#mi-file-input', saved);
     await expect(page.locator('#mi-file-status')).toContainText('Loaded');
     await page.evaluate(() => {

@@ -144,7 +144,9 @@ test('multiple imputation: pooled models on the iNPH cohort, with blanks at pred
     await page.click('button.step-tab[data-step="3"]');
     await page.click('#apply-imputation-btn');
     await page.click('button.step-tab[data-step="4"]');
+    await page.click('button.step-tab[data-step="3"]'); // the imputation choice is in Step 3
     await page.selectOption('#mi-select', 'mice5');
+    await page.click('button.step-tab[data-step="4"]');
     await selectModels(page, ['glm', 'rf']);
     await page.click('#train-model-btn');
     await expect(page.locator('#train-status')).toContainText('Tournament Complete', { timeout: 150000 });

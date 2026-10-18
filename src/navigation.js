@@ -256,7 +256,7 @@ function goToStep(stepNum) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
-    if (stepNum === 3 || stepNum === '3') renderImputationTable();
+    if (stepNum === 3 || stepNum === '3') { renderImputationTable(); updateImputationEstimate(); }
     if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); refreshModelSampleGuide(); }
     if (stepNum === 5 || stepNum === '5') renderSinglePredictionForm();
     if (stepNum === 'survival') renderSurvivalSetup();
