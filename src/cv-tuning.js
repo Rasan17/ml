@@ -120,6 +120,7 @@ function splitRowsForWorkflow(rows, labels, trainRatio, isClassification, seed, 
         if (!sp.groupCol || sp.groupCol === target) throw new Error('Choose the column that identifies each patient for the "keep each patient\'s records together" split.');
         const res = DataEngine.trainTestSplitGrouped(rows, labels, rows.map(r => r[sp.groupCol]), trainRatio, seed);
         res.info.column = sp.groupCol;
+        DataEngine.assertDisjointSplit(res.trainX, res.testX, r => r[sp.groupCol]);
         return res;
     }
     if (sp.method === 'time') {
@@ -127,10 +128,12 @@ function splitRowsForWorkflow(rows, labels, trainRatio, isClassification, seed, 
         const res = DataEngine.trainTestSplitTemporal(rows, labels, rows.map(r => r[sp.dateCol]), trainRatio);
         res.info.column = sp.dateCol;
         if (!res.testX.length) throw new Error(`No usable dates found in "${sp.dateCol}" for a date-based split.`);
+        DataEngine.assertDisjointSplit(res.trainX, res.testX);
         return res;
     }
     const res = DataEngine.trainTestSplit(rows, labels, trainRatio, isClassification, seed);
     res.info = { method: 'random' };
+    DataEngine.assertDisjointSplit(res.trainX, res.testX);
     return res;
 }
 

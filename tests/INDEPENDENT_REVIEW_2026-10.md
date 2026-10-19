@@ -109,3 +109,12 @@ No exploitable issue was found in the changed code. Untrusted text is escaped in
 Two new automated checks:
 - **ESLint `no-undef` over `src/`, run in CI.** It catches a function used after being deleted, as happened once during this work. The module check only covers cross-module imports.
 - **The Cox bootstrap reference check described above.**
+
+### Runtime safeguards (added after the second round)
+
+Several defects in this review came from interactions between features, which tests written for the expected routes did not cover. Three checks now run on every analysis:
+1. **The outcome is never a predictor.** Encoding, single imputation and MICE refuse a predictor marked as the follow-up time or event (`DataEngine.assertNoOutcomeAsPredictor`).
+2. **No patient on both sides of a split.** Every Option A split and every cross-validation fold is checked for shared records or shared patients (`DataEngine.assertDisjointSplit`).
+3. **Possible leakage is flagged before training** in the standard workflow, the 7-step pipeline and for time-to-event outcomes (`src/safeguards.js`). The trigger is a single predictor with AUC ≥ 0.99, |rank correlation| ≥ 0.99 or C-index ≥ 0.97 on its own. The user must confirm to continue.
+
+When first run on the built-in datasets, the leakage check flagged two older simulated demos: the 40-patient shunt cohort and the cardiometabolic cohort. In these, several predictors separate the outcome perfectly; in the first, for example, "DESH sign present" corresponds exactly to "responder". The check is correct; the demos are unrealistically clean. The 420-patient iNPH demo, its validation cohort, the survival demo and the public breast-cancer data are not flagged.

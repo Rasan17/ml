@@ -1,4 +1,5 @@
 // pipeline-step1.js: part of the Universal Medical ML/NeuralNet Predictor application controller (split from pipeline.js)
+import { confirmNoLeakageForTarget } from './safeguards.js';
 import { AppState, escapeHtml, fmtValue, parseSeed } from './core.js';
 import { describeSplit, splitRowsForWorkflow } from './cv-tuning.js';
 import { updatePipelineActiveDeploymentStatus, updatePredictionProvenanceBar } from './pipeline-results.js';
@@ -29,6 +30,8 @@ function executePipelineStep1() {
     const featureCols = Object.keys(AppState.columnConfigs).filter(col =>
         col !== targetCol && AppState.columnConfigs[col].role !== 'meta'
     );
+    DataEngine.assertNoOutcomeAsPredictor(AppState.columnConfigs);
+    if (!confirmNoLeakageForTarget(AppState.parsedData.rows, featureCols, AppState.columnConfigs, targetCol)) return;
 
     if (featureCols.length === 0) {
         alert("No predictor feature columns found. Ensure at least one column is configured as a feature.");

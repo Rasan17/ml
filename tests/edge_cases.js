@@ -177,6 +177,29 @@ function makeRows(n, fn) { return Array.from({ length: n }, (_, i) => fn(i)); }
         return `beta ${m.beta[0].toFixed(3)}, C ${c}`;
     });
 
+    await check('Safeguard: a follow-up time or event marked as a predictor stops encoding, single imputation and MICE', async () => {
+        const rows = makeRows(30, i => ({ a: i % 7, t: 1 + i, y: i % 2 ? 'Yes' : 'No' }));
+        const cfg = { a: { role: 'feature', type: 'continuous', imputationStrategy: 'median' }, t: { role: 'feature', type: 'continuous', survivalTime: true, imputationStrategy: 'median' }, y: { role: 'target', type: 'nominal' } };
+        const stopped = f => { try { f(); return false; } catch (e) { return /Safeguard/.test(e.message); } };
+        assert(stopped(() => DE.prepareFeaturesAndTarget(rows, cfg)), 'encoding not stopped');
+        assert(stopped(() => DE.imputeDataset(rows, cfg, {})), 'imputation not stopped');
+        assert(stopped(() => DE.miceFit(rows, cfg, { m: 1, iterations: 1 })), 'MICE not stopped');
+        cfg.t.role = 'meta';
+        DE.prepareFeaturesAndTarget(rows, cfg); // allowed once it is not a predictor
+        return 'stopped in all three';
+    });
+
+    await check('Safeguard: a record or patient on both sides of a split is refused', async () => {
+        const rows = makeRows(10, i => ({ id: 'P' + (i % 5), a: i }));
+        const stopped = f => { try { f(); return false; } catch (e) { return /Safeguard/.test(e.message); } };
+        assert(stopped(() => DE.assertDisjointSplit(rows.slice(0, 6), rows.slice(5))), 'shared record not refused');
+        assert(stopped(() => DE.assertDisjointSplit(rows.slice(0, 5), rows.slice(5), r => r.id)), 'shared patient not refused');
+        DE.assertDisjointSplit(rows.slice(0, 5), rows.slice(5)); // different records: allowed
+        const split = DE.trainTestSplit(rows, rows.map(r => r.a % 2 ? 'Y' : 'N'), 0.7, true, 3);
+        DE.assertDisjointSplit(split.trainX, split.testX);
+        return 'refused';
+    });
+
     results.forEach(r => console.log(r));
     console.log(`\n${passed}/${passed + failed} edge-case checks passed`);
     process.exit(failed ? 1 : 0);

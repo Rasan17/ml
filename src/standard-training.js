@@ -12,6 +12,7 @@ import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapResamples, bootstrapRes
 import { scheduleAnalysisSummary } from './analysis-summary.js';
 import { survivalSpec } from './outcome-type.js';
 import { runSurvivalAnalysis } from './survival.js';
+import { confirmNoLeakage, confirmNoLeakageForTarget } from './safeguards.js';
 
 // Step 4 for a time-to-event outcome (chosen in Step 2): a Cox model with the Step 2 predictors and the Step 3
 // missing-data handling (single imputation methods, complete cases or MICE), validated by the design chosen here:
@@ -25,6 +26,10 @@ async function trainSurvivalStep4(spec) {
     const ratio = Math.min(0.95, Math.max(0.50, trainPct / 100));
     const seed = splitSeedForCV();
     const miM = AppState.completeCase ? 0 : readMultipleImputation();
+    if (!confirmNoLeakage(AppState.parsedData.rows, preds, AppState.columnConfigs, { type: 'survival', timeCol: spec.timeCol, eventCol: spec.eventCol, eventValue: spec.eventValue })) {
+        DOM.trainStatus.innerHTML = '<span style="color: var(--accent-amber);">Stopped: check the predictors flagged as possible leakage in Step 2.</span>';
+        return;
+    }
     const extra = validation === 'bootstrap'
         ? { B: parseInt(document.getElementById('bootstrap-reps')?.value, 10) || 100, groupCol: document.getElementById('bootstrap-group-col')?.value || null, quickPlain: miM > 0 && miceQuickApproximation() }
         : validation === 'separate' ? { externalRows: AppState.separateTestRawRows || [] } : {};
@@ -51,6 +56,13 @@ async function startModelTraining() {
     }
     const survSpec = survivalSpec();
     if (survSpec) { await trainSurvivalStep4(survSpec); return; }
+    {
+        const cfgs = AppState.columnConfigs, tCol = Object.keys(cfgs).find(c => cfgs[c].role === 'target');
+        if (!confirmNoLeakageForTarget(AppState.parsedData.rows, Object.keys(cfgs).filter(c => cfgs[c].role === 'feature'), cfgs, tCol)) {
+            DOM.trainStatus.innerHTML = '<span style="color: var(--accent-amber);">Stopped: check the predictors flagged as possible leakage in Step 2.</span>';
+            return;
+        }
+    }
 
     const watchdog = AppState.watchdogs ? AppState.watchdogs.step4 : null;
     const runDataset = AppState.datasetRun; // results are installed only if the same dataset is still loaded

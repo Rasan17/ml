@@ -125,6 +125,7 @@ async function buildFolds(rawRows, k, o, prepareFold, onFold) {
     for (let f = 0; f < k; f++) {
         const tr = cap.rows.filter((_, i) => fold[i] !== f);
         const va = cap.rows.filter((_, i) => fold[i] === f);
+        DataEngine.assertDisjointSplit(tr, va, groupOf); // a patient never in both the learning and validation rows of a fold
         const out = await prepareFold(tr, va, f);
         if (isClassification && out.unknownClassCount) throw new Error(`Cross-validation is not possible: fold ${f + 1} has an outcome group that its training rows lack. Use fewer folds or more patients.`);
         sets.push(out.set);

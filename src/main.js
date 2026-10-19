@@ -36,6 +36,7 @@ import './external-validation.js';
 import { forgetStoredSettings, handleUnexpectedError } from './settings.js';
 import { initAnalysisSummary } from './analysis-summary.js';
 import './interpretation.js';
+import './safeguards.js';
 import { downloadModelCard } from './model-card.js';
 
 AppState.pipeline = createEmptyPipelineState(42);

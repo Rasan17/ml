@@ -509,6 +509,7 @@
          * Row deletion ('drop' strategy, missing outcome) is decided per row from that row's own data.
          */
         imputeDataset(rows, columnConfigs, columnAnalysis, fittedPlan = null) {
+            this.assertNoOutcomeAsPredictor(columnConfigs);
             let workingRows = rows.map(r => ({ ...r }));
             const audit = [];
             const rowsToDrop = new Set();
@@ -757,7 +758,36 @@
         /**
          * Preprocess features and target into numeric arrays for machine learning models
          */
+        /**
+         * Safeguard, checked wherever predictors are encoded or imputed: no part of the outcome may be a predictor.
+         * Throws if a predictor is marked as the follow-up time or event of a time-to-event outcome, or if a
+         * column is both predictor and outcome. Applies whatever route led there (interface, settings file, code).
+         */
+        assertNoOutcomeAsPredictor(columnConfigs) {
+            Object.keys(columnConfigs || {}).forEach(col => {
+                const c = columnConfigs[col];
+                if (c && c.role === 'feature' && (c.survivalTime || c.survivalEvent)) {
+                    throw new Error(`Safeguard: "${col}" is part of the time-to-event outcome (${c.survivalTime ? 'follow-up time' : 'event status'}) and cannot be used as a predictor. The analysis was stopped.`);
+                }
+            });
+        },
+
+        /**
+         * Safeguard: a training/testing split must not share a patient. Same record object in both, or (when
+         * records are grouped by patient) the same patient in both, throws.
+         */
+        assertDisjointSplit(trainRows, testRows, groupOf = null) {
+            const seen = new Set(trainRows);
+            if (testRows.some(r => seen.has(r))) throw new Error('Safeguard: the same record is in both the training and the testing data. The analysis was stopped.');
+            if (groupOf) {
+                const g = new Set(trainRows.map(groupOf).map(String));
+                const shared = testRows.map(groupOf).map(String).find(k => g.has(k));
+                if (shared !== undefined) throw new Error(`Safeguard: patient "${shared}" has records in both the training and the testing data. The analysis was stopped.`);
+            }
+        },
+
         prepareFeaturesAndTarget(rows, columnConfigs) {
+            this.assertNoOutcomeAsPredictor(columnConfigs);
             const featureCols = [];
             let targetCol = null;
 
@@ -1267,6 +1297,7 @@
          * computed separately (e.g. in parallel workers) and merged in order equal a single run (mergeMiceParts).
          */
         miceFit(rows, columnConfigs, { m = 5, iterations = 10, seed = 2024, donors = 5, maxDonors = 500, maxFitRows = 2000, maxSearch = 1000, onProgress = null, chains: chainList = null } = {}) {
+            this.assertNoOutcomeAsPredictor(columnConfigs); // the outcome must never inform the imputation
             const cols = Object.keys(columnConfigs).filter(c => columnConfigs[c].role === 'feature');
             const numeric = {}, levels = {}, start = {};
             cols.forEach(c => {
