@@ -251,7 +251,7 @@ function applySettings(settings) {
         if (!saved || !AppState.columnConfigs[h]) return;
         const cfg = AppState.columnConfigs[h];
         // Optional choices absent from the saved file must not linger from the current session
-        ['prevRole', 'prevImputationStrategy', 'positiveClass', 'ordinalOrder'].forEach(f => { delete cfg[f]; });
+        ['prevRole', 'prevImputationStrategy', 'positiveClass', 'ordinalOrder', 'survivalTime', 'survivalEvent', 'survivalDisplaced', 'survivalPrevRole'].forEach(f => { delete cfg[f]; });
         VARIABLE_FIELDS.forEach(f => { if (saved[f] !== undefined && validVariableField(f, saved[f])) cfg[f] = Array.isArray(saved[f]) ? saved[f].slice() : saved[f]; });
     });
     // Exactly one target

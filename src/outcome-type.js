@@ -18,14 +18,23 @@ function survivalSpec() {
 }
 
 // Applies the specification to the variable roles: the event column is the Target (two values), the time column is
-// kept out of the predictors (it is part of the outcome)
+// kept out of the predictors (it is part of the outcome). A column that was the outcome before is excluded, never
+// made a predictor (an outcome must not predict itself); switching back restores the earlier roles.
 function applySurvivalRoles() {
-    const s = survivalSpec(), cfgs = AppState.columnConfigs;
-    Object.keys(cfgs).forEach(c => { if (cfgs[c].survivalTime) { delete cfgs[c].survivalTime; if (cfgs[c].role === 'meta') cfgs[c].role = cfgs[c].prevRole && cfgs[c].prevRole !== 'meta' ? cfgs[c].prevRole : 'feature'; } });
+    const s = survivalSpec(), cfgs = AppState.columnConfigs, restored = [];
+    Object.keys(cfgs).forEach(c => {
+        const cfg = cfgs[c];
+        if (cfg.survivalTime) { delete cfg.survivalTime; cfg.role = cfg.survivalPrevRole && cfg.survivalPrevRole !== 'meta' ? cfg.survivalPrevRole : 'feature'; delete cfg.survivalPrevRole; }
+        if (cfg.survivalEvent) { delete cfg.survivalEvent; cfg.role = cfg.survivalPrevRole || 'feature'; delete cfg.survivalPrevRole; }
+        if (cfg.survivalDisplaced) { delete cfg.survivalDisplaced; cfg.role = 'target'; restored.push(c); }
+    });
+    // At most one outcome: the column that was the outcome before the switch wins; others are excluded
+    const targets = Object.keys(cfgs).filter(c => cfgs[c].role === 'target');
+    if (targets.length > 1) { const keep = restored[0] || targets[0]; targets.forEach(c => { if (c !== keep) cfgs[c].role = 'meta'; }); }
     if (!s) return;
-    Object.keys(cfgs).forEach(c => { if (cfgs[c].role === 'target' && c !== s.eventCol) cfgs[c].role = 'feature'; });
-    if (cfgs[s.eventCol]) { cfgs[s.eventCol].role = 'target'; cfgs[s.eventCol].type = 'nominal'; cfgs[s.eventCol].positiveClass = s.eventValue; }
-    if (cfgs[s.timeCol]) { cfgs[s.timeCol].prevRole = cfgs[s.timeCol].role; cfgs[s.timeCol].role = 'meta'; cfgs[s.timeCol].survivalTime = true; }
+    Object.keys(cfgs).forEach(c => { if (cfgs[c].role === 'target' && c !== s.eventCol && c !== s.timeCol) { cfgs[c].role = 'meta'; cfgs[c].survivalDisplaced = true; } });
+    if (cfgs[s.eventCol]) { const e = cfgs[s.eventCol]; e.survivalPrevRole = e.role; e.survivalEvent = true; e.role = 'target'; e.type = 'nominal'; e.positiveClass = s.eventValue; }
+    if (cfgs[s.timeCol]) { const t = cfgs[s.timeCol]; t.survivalPrevRole = t.role === 'target' ? 'target' : t.role; t.role = 'meta'; t.survivalTime = true; }
 }
 
 function renderOutcomeTypePanel(onChange) {
@@ -55,6 +64,7 @@ function renderOutcomeTypePanel(onChange) {
                 <label class="form-group"><span class="form-label">Value meaning "event occurred"</span><select id="ot-event-value" class="form-select">${opts(vals, ev)}</select></label>
                 <label class="form-group"><span class="form-label">Prediction horizon (same units as time)</span><input type="number" id="ot-horizon" class="form-input" min="0" step="any" value="${escapeHtml(String(horizonFor(tc, s)))}"></label>
             </div>
+            ${Object.keys(AppState.columnConfigs).filter(c => AppState.columnConfigs[c].survivalDisplaced).map(c => `<p class="tune-warn">"${escapeHtml(c)}" was the outcome column, so it is now excluded (an outcome must not be used as a predictor). Tick it below only if it is genuinely known when the prediction is made.</p>`).join('')}
             <p class="tune-muted">The time column is the time from the start of follow-up to the event, or to the last follow-up for patients without the event (censored). Both columns form the outcome: they are never used as predictors or to fill in missing values. Step 4 fits a Cox proportional-hazards model.</p>` : ''}
         </div>`;
     const commit = () => {

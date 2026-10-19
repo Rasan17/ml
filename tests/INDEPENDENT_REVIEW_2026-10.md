@@ -58,3 +58,54 @@ Checked and found sound by the reviewer:
 - **Downloads:** CSV formula protection works.
 - **Logging and clearing:** no patient data are logged; Clear session clears memory.
 - **Build and libraries:** the published bundle matches the source; no relevant CVEs in TensorFlow.js 4.22.0 or Chart.js 4.4.1.
+
+## Second round: changes since the first review (19 October 2026)
+
+Scope: everything changed after commit `6cb2eb3`. That covers:
+- time-to-event outcomes in the standard workflow (Cox model, Options A/B/C, Steps 5–6, settings, model card);
+- unified MICE;
+- recalibration in Option C;
+- MICE in the 7-step pipeline;
+- MICE diagnostics;
+- interface levels.
+
+As before, two separate AI reviewers worked from the code alone, without editing it, one statistical and one security. Each confirmed defect was fixed and is covered by a test.
+
+### Statistical review
+
+| # | Finding | Verdict | Fix |
+|---|---|---|---|
+| 1 | The follow-up time could become a predictor: "Include all", or ticking its box, turned it back into a feature, and the Cox model did not remove it | **Confirmed, high** | The time and event columns are removed from the predictors inside the analysis. Their boxes are locked, and their roles can only be changed in the outcome panel. Browser test added. |
+| 2 | Choosing a time-to-event outcome turned the previous outcome column into a predictor | **Confirmed** | It is excluded instead, with a visible note, and restored if the user switches back. Browser test added. |
+| 3 | Option A ignored the split method chosen in Step 4 (by patient, by date) | **Confirmed** | Uses the workflow's split and reports it. |
+| 4 | Option B and Step 6 weighted for censoring using the development cohort, biasing the Brier score when follow-up differs (simulated: 0.111 vs true 0.231) | **Confirmed** | The evaluated cohort's own censoring distribution is used for Options B and Step 6. |
+| 5 | The JSON report gave hazard ratios per SD while labelling them "per unit", described every design as an 80/20 split, and omitted the Option C corrected values | **Confirmed** | Hazard ratios are on the same scale as the screen, the design is described by validation mode, and an optimism-corrected section was added. Browser test added. |
+| 6 | The quick MICE approximation could act on resamples with single imputation, under a "single imputation" label | **Confirmed** | Applies only with MICE. |
+| 7 | Minor reporting issues | **Confirmed, low** | Four changes: the apparent calibration slope is shown as a reference, no longer as "1 by construction"; no bootstrap CI is shown around apparent (uncorrected) values; the hazard-ratio CIs use the model's own interval (Rubin's t interval when pooled); test patients removed by a "drop rows" choice are reported. |
+
+The reviewer checked and found sound:
+- No leakage of the time or event into imputation.
+- Options A/B/C structure.
+- The Harrell bootstrap: full process repeated, sign of the optimism, censoring weights per resample, calibration slope.
+- Rubin pooling on a common encoding.
+- Row alignment.
+- IPCW mathematics.
+- Unified MICE in folds and resamples.
+- In-fold Step 4 screening.
+
+**New external check:** the per-resample optimism for the Cox bootstrap (C-index, time-dependent AUC at the horizon, calibration slope) is compared with statsmodels `PHReg` and scikit-survival. The app scores resamples with `ModelEngine.coxResampleOptimism`. The check covers 3 new reference values (70 in total) and agrees to about 1e-15.
+
+### Security review
+
+No exploitable issue was found in the changed code. Untrusted text is escaped in the outcome panel, Cox results, model card and batch output. Settings fields are validated, and CSV formula protection, CSP and network behaviour are unchanged.
+
+| # | Finding | Verdict | Fix |
+|---|---|---|---|
+| 1 | Model files carried the MICE convergence trace; with one missing cell its value is one training patient's observed value | **Confirmed, low** | Trace left out of model files (diagnostic only). |
+| 2 | A malformed trace in an imported model could stop the evaluation page from rendering | **Confirmed, low** | Only arrays of finite numbers are drawn. |
+
+### Process change
+
+Two new automated checks:
+- **ESLint `no-undef` over `src/`, run in CI.** It catches a function used after being deleted, as happened once during this work. The module check only covers cross-module imports.
+- **The Cox bootstrap reference check described above.**

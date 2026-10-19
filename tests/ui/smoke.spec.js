@@ -256,6 +256,44 @@ test('time-to-event outcome chosen in Step 2 is fitted by Step 4 (Cox model, sin
     expect(errors).toEqual([]);
 });
 
+test('time-to-event outcome columns are protected: follow-up time never a predictor, an earlier outcome excluded; report hazard ratios per unit', async ({ page }) => {
+    const errors = watch(page);
+    await page.goto('/index.html');
+    // The last column (an outcome) would be the target; choosing a time-to-event outcome must exclude it, not make it a predictor
+    const csv = fs.readFileSync(path.join(__dirname, '..', '..', 'medical_shunt_revision_survival.csv'), 'utf8').trim().split(/\r?\n/)
+        .map((l, i) => l + ',' + (i === 0 ? 'Outcome_Status' : (l.endsWith('Yes') ? 'Revised' : 'Not revised'))).join('\n');
+    await page.setInputFiles('#csv-file-input', { name: 'survival_extra.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+    await page.click('button.step-tab[data-step="2"]');
+    await page.check('input[name="outcome-type"][value="survival"]');
+    await page.selectOption('#ot-event-col', 'Shunt_Revision');
+    await page.selectOption('#ot-event-value', 'Yes');
+    await page.fill('#ot-horizon', '24');
+    await page.dispatchEvent('#ot-horizon', 'change');
+    await expect(page.locator('#outcome-type-container')).toContainText('"Outcome_Status" was the outcome column');
+    await page.click('#var-include-all-btn');
+    await expect(page.locator('.var-include-check[data-col="Months_To_Revision_Or_Censoring"]')).not.toBeChecked();
+    await expect(page.locator('.var-include-check[data-col="Months_To_Revision_Or_Censoring"]')).toBeDisabled();
+    // Include-all ticks the earlier outcome (user's choice); untick it again for the model
+    await page.locator('.var-include-check[data-col="Outcome_Status"]').uncheck();
+    await page.click('button.step-tab[data-step="3"]');
+    await page.click('#apply-imputation-btn');
+    await page.click('button.step-tab[data-step="4"]');
+    await page.check('input[name="validation-mode"][value="split"]', { force: true });
+    await page.click('#train-model-btn');
+    const box = page.locator('#survival-step4-results');
+    await expect(box).toContainText("Harrell's C-index", { timeout: 120000 });
+    const hrTable = box.locator('table').first();
+    await expect(hrTable).not.toContainText('Months_To_Revision');
+    await expect(hrTable).not.toContainText('Outcome_Status');
+    const screenAge = await hrTable.locator('tr', { hasText: 'Age' }).locator('td').nth(1).innerText();
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#surv-report-btn')]);
+    const rep = JSON.parse(fs.readFileSync(await dl.path(), 'utf8'));
+    const age = rep.hazard_ratios.find(h => h.term === 'Age');
+    expect(age.hr.toFixed(2)).toBe(screenAge.split(' ')[0]);
+    expect(rep.design.validation).toContain('Option A');
+    expect(errors).toEqual([]);
+});
+
 test('opened directly from disk (file://), the fallback bundle runs', async ({ page }) => {
     const errors = watch(page);
     const root = path.join(__dirname, '..', '..');

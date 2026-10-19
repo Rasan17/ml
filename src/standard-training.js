@@ -2,7 +2,7 @@
 import { bootstrapRun, fitModel } from './compute.js';
 import { estimateImputationSeconds, fitPooledModel, prepareMultipleImputation, readMultipleImputation } from './multiple-imputation.js';
 import { AppState, MODEL_INFO, RANKING_METRICS, compareEvalResults, describeNNTraining, escapeHtml, fmtR2, parseSeed, rankingMetricKey, rankingMetricLabel, trainingMedian } from './core.js';
-import { TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, cvSummaryFrom, fitRecalibrator, miceQuickApproximation, plainFillConfigs, optionBTrainRawRows, readDecisionThreshold, readRecalibration, recalibrateAndEvaluate, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV, testPatientGroups } from './cv-tuning.js';
+import { TUNABLE_MODELS, applyHyperparamsToForm, bootstrapFor, buildStandardRowFolds, cvSummaryFrom, describeSplit, fitRecalibrator, miceQuickApproximation, plainFillConfigs, optionBTrainRawRows, readDecisionThreshold, readRecalibration, recalibrateAndEvaluate, renderTuningReport, runTuningOnFolds, splitRowsForWorkflow, splitSeedForCV, testPatientGroups } from './cv-tuning.js';
 import { renderEvaluationDashboard } from './evaluation-dashboard.js';
 import { saveSettingsToBrowser } from './settings.js';
 import { DOM } from './shell.js';
@@ -20,17 +20,17 @@ async function trainSurvivalStep4(spec) {
     const valMode = document.querySelector('input[name="validation-mode"]:checked')?.value || AppState.validationMode || 'split';
     const validation = valMode === 'bootstrap' ? 'bootstrap' : valMode === 'separate' ? 'separate' : 'split';
     const box = document.getElementById('survival-step4-results');
-    const preds = Object.keys(AppState.columnConfigs).filter(c => AppState.columnConfigs[c].role === 'feature');
+    const preds = Object.keys(AppState.columnConfigs).filter(c => AppState.columnConfigs[c].role === 'feature' && c !== spec.timeCol && c !== spec.eventCol);
     const trainPct = parseFloat(document.getElementById('train-pct-input')?.value) || 80;
     const ratio = Math.min(0.95, Math.max(0.50, trainPct / 100));
     const seed = splitSeedForCV();
     const miM = AppState.completeCase ? 0 : readMultipleImputation();
     const extra = validation === 'bootstrap'
-        ? { B: parseInt(document.getElementById('bootstrap-reps')?.value, 10) || 100, groupCol: document.getElementById('bootstrap-group-col')?.value || null, quickPlain: miceQuickApproximation() }
+        ? { B: parseInt(document.getElementById('bootstrap-reps')?.value, 10) || 100, groupCol: document.getElementById('bootstrap-group-col')?.value || null, quickPlain: miM > 0 && miceQuickApproximation() }
         : validation === 'separate' ? { externalRows: AppState.separateTestRawRows || [] } : {};
     DOM.trainModelBtn.disabled = true;
     try {
-        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, ...extra });
+        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, splitFn: (rows, labels, ratio, seed) => splitRowsForWorkflow(rows, labels, ratio, true, seed), describeSplit, ...extra });
         if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
         // Steps 5 and 6 now predict with the Cox model
         if (DOM.toStep5Btn) DOM.toStep5Btn.disabled = false;

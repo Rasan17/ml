@@ -24,7 +24,7 @@ function renderVariableConfigGrid() {
             <div class="var-card ${cfg.role === 'target' ? 'is-target' : (cfg.role === 'meta' ? 'is-meta' : '')}" id="card-col-${escapeHtml(col)}">
                 <div class="var-header">
                     <label class="var-include" title="${cfg.role === 'target' ? 'The outcome is always included; change its role to exclude it' : 'Tick to include this variable in the analysis; untick to exclude it'}">
-                        <input type="checkbox" class="var-include-check" data-col="${escapeHtml(col)}" ${cfg.role !== 'meta' ? 'checked' : ''} ${cfg.role === 'target' ? 'disabled' : ''} aria-label="Include ${escapeHtml(col)} in the analysis">
+                        <input type="checkbox" class="var-include-check" data-col="${escapeHtml(col)}" ${cfg.role !== 'meta' ? 'checked' : ''} ${cfg.role === 'target' || cfg.survivalTime ? 'disabled' : ''} aria-label="Include ${escapeHtml(col)} in the analysis">
                         <span class="var-name" title="${escapeHtml(col)}">${escapeHtml(col)}</span>
                     </label>
                     ${a.missingCount > 0 ? `<span class="pill pill-missing">${a.missingCount} missing (${a.missingPercent}%)</span>` : `<span class="pill" style="background: rgba(16, 185, 129, 0.1); color: var(--tag-emerald);">Complete</span>`}
@@ -86,6 +86,12 @@ function renderVariableConfigGrid() {
         sel.addEventListener('change', (e) => {
             const col = e.target.dataset.col;
             const newRole = e.target.value;
+            // Time-to-event outcome: the time and event columns, and the outcome itself, are set in the panel above
+            if (survivalSpec() && (AppState.columnConfigs[col].survivalTime || AppState.columnConfigs[col].survivalEvent || newRole === 'target')) {
+                alert('The outcome is a time to an event: choose its time and event columns in the panel above.');
+                renderVariableConfigGrid();
+                return;
+            }
 
             if (newRole === 'target') {
                 // Reset any previously selected target
@@ -156,7 +162,7 @@ function renderVariableConfigGrid() {
 // every step already ignores; the role held before exclusion is remembered so re-ticking restores it.
 function setVariableIncluded(col, include) {
     const cfg = AppState.columnConfigs[col];
-    if (!cfg || cfg.role === 'target') return;
+    if (!cfg || cfg.role === 'target' || cfg.survivalTime) return; // the outcome (incl. the follow-up time) is never a predictor
     if (!include) {
         if (cfg.role !== 'meta') { cfg.prevRole = cfg.role; cfg.role = 'meta'; }
         return;
