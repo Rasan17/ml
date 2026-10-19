@@ -49,7 +49,7 @@ function rileyMaxParameters(type, nTrain, prevalence) {
  * describes it; candidateCols (optional): every predictor considered so far, when some were dropped by
  * looking at the data (counts towards overfitting even if not kept).
  */
-function renderPredictorBudget(containerId, { rows, featureCols, targetCol, columnConfigs, trainFraction = 1, trainLabel = '', candidateCols = null, groupOf = null }) {
+function renderPredictorBudget(containerId, { rows, featureCols, targetCol, columnConfigs, trainFraction = 1, trainLabel = '', candidateCols = null, groupOf = null, eventValue = null }) {
     const box = document.getElementById(containerId);
     if (!box) return;
     if (!rows || !rows.length || !targetCol || !columnConfigs[targetCol]) {
@@ -74,9 +74,11 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
         const groups = Object.entries(units.counts).sort((a, b) => a[1] - b[1]);
         if (groups.length < 2) { box.innerHTML = ''; return; }
         [minorityLabel, minority] = groups[0];
+        // Time-to-event outcome: what limits a Cox model is the number of events (not the smaller group)
+        if (eventValue !== null) { const g = groups.find(([k]) => k === String(eventValue)); if (g) [minorityLabel, minority] = g; }
         const E = Math.round(minority * trainFraction);
-        const binary = groups.length === 2;
-        headline = `<strong>${fmt(nTrain)}</strong> training ${units.unit}${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}, of whom about <strong>${fmt(E)}</strong> are in the smaller outcome group ("${escapeHtml(minorityLabel)}", ${(minority / n * 100).toFixed(1)}%)${binary ? '' : ` of ${groups.length} groups`}.`;
+        const binary = groups.length === 2 && eventValue === null;
+        headline = `<strong>${fmt(nTrain)}</strong> training ${units.unit}${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}, of whom about <strong>${fmt(E)}</strong> ${eventValue !== null ? `had the event ("${escapeHtml(minorityLabel)}", ${(minority / n * 100).toFixed(1)}%; time-to-event outcome, Cox model: events per parameter)` : `are in the smaller outcome group ("${escapeHtml(minorityLabel)}", ${(minority / n * 100).toFixed(1)}%)${binary ? '' : ` of ${groups.length} groups`}`}.`;
         if (binary) {
             const riley = rileyMaxParameters('binary', nTrain, minority / n);
             rows4.push(['Minimum sample-size criteria (Riley et al.; logistic regression)', riley,

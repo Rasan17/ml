@@ -27,6 +27,7 @@ import './pipeline-train.js';
 import './pipeline-results.js';
 import './reports.js';
 import { updateModelExportButton } from './model-io.js';
+import './outcome-type.js';
 import './survival.js';
 import { refreshModelSampleGuide } from './predictor-budget.js';
 import { downloadTripodChecklist } from './tripod.js';

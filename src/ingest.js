@@ -102,6 +102,8 @@ function resetDerivedState() {
     clearImputationCache();
     { const ev = document.getElementById('external-validation-container'); if (ev) ev.innerHTML = ''; }
     AppState.completeCase = false;
+    AppState.outcomeType = 'standard';
+    AppState.survival = null;
     AppState.missingIndicators = false;
     const pipelineCC = document.getElementById('pipeline-complete-case');
     if (pipelineCC) pipelineCC.checked = false;
