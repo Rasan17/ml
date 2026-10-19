@@ -32,6 +32,9 @@ async function trainSurvivalStep4(spec) {
     try {
         await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, ...extra });
         if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Steps 5 and 6 now predict with the Cox model
+        if (DOM.toStep5Btn) DOM.toStep5Btn.disabled = false;
+        if (DOM.toStep6Btn) DOM.toStep6Btn.disabled = false;
         const card = document.getElementById('model-card-btn');
         if (card) { card.disabled = false; card.title = 'One-page summary of the Cox model: intended use, population, performance and limitations'; }
     } catch (err) {

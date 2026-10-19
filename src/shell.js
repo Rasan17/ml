@@ -440,9 +440,12 @@ function setupEventListeners() {
         updateTrainButtonLabel();
     }
 
+    AppState.updateTrainButtonLabel = () => updateTrainButtonLabel();
     function updateTrainButtonLabel() {
         refreshModelSampleGuide();
         if (!DOM.trainModelBtn) return;
+        // Time-to-event outcome (Step 2): Step 4 fits a Cox model whatever model card was selected before
+        if (AppState.outcomeType === 'survival') { DOM.trainModelBtn.textContent = '⏱️ Fit & Validate Cox Model (time-to-event)'; return; }
         const count = AppState.selectedModelIds.length;
         if (count === 1) {
             const mInfo = MODEL_INFO[AppState.selectedModelIds[0]] || { short: AppState.selectedModelIds[0].toUpperCase() };

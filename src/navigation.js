@@ -260,7 +260,7 @@ function goToStep(stepNum) {
 
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
     if (stepNum === 3 || stepNum === '3') { renderImputationTable(); updateImputationEstimate(); }
-    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); refreshModelSampleGuide(); }
+    if (stepNum === 4 || stepNum === '4') { if (AppState.updateTrainButtonLabel) AppState.updateTrainButtonLabel(); refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); refreshModelSampleGuide(); }
     if (stepNum === 5 || stepNum === '5') { if (survivalSpec()) renderSurvivalSinglePrediction('survival-step5'); else { const sb = document.getElementById('survival-step5'); if (sb) sb.innerHTML = ''; renderSinglePredictionForm(); } }
     if (stepNum === 'pipeline') {
         initPipelineUI();

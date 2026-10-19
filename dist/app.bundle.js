@@ -1684,9 +1684,12 @@ function setupEventListeners() {
         updateTrainButtonLabel();
     }
 
+    AppState.updateTrainButtonLabel = () => updateTrainButtonLabel();
     function updateTrainButtonLabel() {
         refreshModelSampleGuide();
         if (!DOM.trainModelBtn) return;
+        // Time-to-event outcome (Step 2): Step 4 fits a Cox model whatever model card was selected before
+        if (AppState.outcomeType === 'survival') { DOM.trainModelBtn.textContent = '⏱️ Fit & Validate Cox Model (time-to-event)'; return; }
         const count = AppState.selectedModelIds.length;
         if (count === 1) {
             const mInfo = MODEL_INFO[AppState.selectedModelIds[0]] || { short: AppState.selectedModelIds[0].toUpperCase() };
@@ -2171,7 +2174,7 @@ function goToStep(stepNum) {
 
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
     if (stepNum === 3 || stepNum === '3') { renderImputationTable(); updateImputationEstimate(); }
-    if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); refreshModelSampleGuide(); }
+    if (stepNum === 4 || stepNum === '4') { if (AppState.updateTrainButtonLabel) AppState.updateTrainButtonLabel(); refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); refreshModelSampleGuide(); }
     if (stepNum === 5 || stepNum === '5') { if (survivalSpec()) renderSurvivalSinglePrediction('survival-step5'); else { const sb = document.getElementById('survival-step5'); if (sb) sb.innerHTML = ''; renderSinglePredictionForm(); } }
     if (stepNum === 'pipeline') {
         initPipelineUI();
@@ -4818,6 +4821,9 @@ async function trainSurvivalStep4(spec) {
     try {
         await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, ...extra });
         if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Steps 5 and 6 now predict with the Cox model
+        if (DOM.toStep5Btn) DOM.toStep5Btn.disabled = false;
+        if (DOM.toStep6Btn) DOM.toStep6Btn.disabled = false;
         const card = document.getElementById('model-card-btn');
         if (card) { card.disabled = false; card.title = 'One-page summary of the Cox model: intended use, population, performance and limitations'; }
     } catch (err) {

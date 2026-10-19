@@ -1974,6 +1974,8 @@ body[data-ui-level="beginner"] .ui-level-note, body[data-ui-level="intermediate"
 /* Time-to-event outcome: Step 4 fits a Cox model, so the model choice and yes/no settings are hidden */
 .survival-step4-note { display: none; }
 body[data-outcome="survival"] .survival-step4-note { display: block; }
+body[data-outcome="survival"] #step-4-content .chart-container-box,
+body[data-outcome="survival"] #results-dashboard,
 body[data-outcome="survival"] .model-cards-grid,
 body[data-outcome="survival"] #model-sample-guide,
 body[data-outcome="survival"] #sample-size-container,

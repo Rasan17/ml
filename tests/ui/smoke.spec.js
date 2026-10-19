@@ -241,7 +241,10 @@ test('time-to-event outcome chosen in Step 2 is fitted by Step 4 (Cox model, sin
     await page.click('#train-model-btn');
     await expect(page.locator('#survival-step4-results')).toContainText('validation cohort (Dataset ii)', { timeout: 120000 });
     // Step 5: one patient; Step 6: a file of patients, validated because it has the time and event columns
-    await page.click('button.step-tab[data-step="5"]');
+    await expect(page.locator('#train-model-btn')).toContainText('Cox');
+    await expect(page.locator('#step-4-content .chart-container-box')).toBeHidden();
+    await expect(page.locator('#to-step-6-btn')).toBeEnabled();
+    await page.click('#to-step-5-btn');
     await expect(page.locator('#predict-form-grid')).toBeHidden();
     await page.click('#surv-predict-btn');
     await expect(page.locator('#surv-predict-out')).toContainText('Predicted probability of no event');
