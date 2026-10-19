@@ -3,6 +3,7 @@
 // known limitations. Downloaded as a printable HTML file (strict security policy, every value escaped).
 import { APP_VERSION, AppState, RESEARCH_USE_NOTICE, displayModelName, escapeHtml } from './core.js';
 import { SURV } from './survival.js';
+import { performanceEvidence } from './html-report.js';
 
 const cardNum = (v, d = 3) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : 'not available');
 const cardPct = v => (typeof v === 'number' && isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'not available');
@@ -72,6 +73,8 @@ function modelCardHtml() {
         ['Decision threshold', binary ? cardPct(ev.decisionThreshold || 0.5) : 'not applicable'],
         ['Reproducibility seed', typeof ev.seed === 'number' ? String(ev.seed) : 'not recorded']
     ])}</table>
+<h2>What the performance figures are</h2>
+<table>${kv(performanceEvidence({ ev, retrained: Boolean(AppState.deployedSource !== 'imported' && (AppState.allTestedResults || []).find(r => r.model === model && r.retrained)), nModels: AppState.deployedSource === 'imported' ? 1 : Math.max(1, (AppState.allTestedResults || []).length), prep }))}</table>
 <h2>Performance</h2>
 <table>${kv(rows)}</table>
 <p class="muted">${escapeHtml(ev.protocol === 'option-c' ? 'Optimism-corrected estimates from bootstrap internal validation.' : 'Estimates on patients not used to fit the model.')} Confidence intervals are bootstrap intervals over the evaluation patients where shown.</p>

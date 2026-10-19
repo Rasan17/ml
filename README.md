@@ -24,13 +24,15 @@ The **Universal Medical ML/NeuralNet Predictor** provides clinical researchers, 
 
 ## ⚙️ Core System Architecture & Workflow
 
-### 1. Complete Client-Side Data Privacy (supports GDPR/HIPAA-aligned use)
+### 1. Local processing: patient data stay in the browser
 - Runs locally in modern browsers via HTML5, Vanilla JavaScript, and TensorFlow.js.
 - Patient health records and uploaded CSVs are processed solely in client memory—**zero data is transmitted to external servers**.
 - A Content-Security-Policy in the page lets the browser contact only the app's own files (`connect-src 'self'`), so data cannot be sent to any other server. It keeps `'unsafe-eval'` for scripts because TensorFlow.js needs it to start (without it the neural network silently falls back to a linear model; confirmed by removing it). Imported model and settings files are read as plain data only, so this does not let a file run code. Inline styles are still allowed; moving the interface's inline styles into CSS classes, so that this allowance can be removed, is planned.
 - Checked on the deployed site (October 2026): during a full analysis every network request went to the app's own address, all to fetch its own files and sample data; nothing was sent out, and no third-party scripts, fonts or analytics are loaded.
 - Files you choose to export can contain patient values, and say so before saving: models using k-NN (model or missing-value filling) or multiple imputation, and the "Save imputed data" file. Settings files and reports contain no patient values. **🧹 Clear session and patient data** discards everything held by the page.
-- Keeping data in the browser supports GDPR/HIPAA-aligned workflows, but software alone cannot make a study compliant: lawful basis, de-identification, device security and governance remain the user's and institution's responsibility.
+- Batch predictions (Step 6) are downloaded as a CSV that contains the uploaded patient rows. Reports and model cards contain summary statistics (counts, ranges, performance) but no individual rows.
+- Local processing reduces risk but is **not proof of GDPR or HIPAA compliance**, and it does not protect against everything. Remaining risks include browser extensions that can read web pages, compromised or shared computers, identifiers left in uploaded or exported files, exported files stored or sent insecurely, and changes to the hosting or to the bundled libraries. Compliance depends on the deployment, the data, the lawful basis, institutional governance and security controls, and how exported files are handled.
+- Use de-identified data wherever possible. Obtain a professional security review and your institution's approval before using the app with identifiable patient data.
 
 ### 2. Flexible Variable Role & Scale Configuration
 - **Variable Roles:**
@@ -234,10 +236,10 @@ The suite includes built-in clinical datasets for instant experimentation:
 From the project folder (Node.js; the reference check also needs Python 3.12 with SciPy, scikit-learn, statsmodels, scikit-survival and pmsampsize):
 
 ```bash
-node tests/reference_check.js && python3 tests/reference_check.py   # 70 checks against SciPy / scikit-learn / statsmodels / scikit-survival / pmsampsize (incl. calibration, recalibration, DeLong, decision curve, IRLS odds ratios, Rubin's rules, t distribution, Cox model, C-index, Kaplan-Meier with Greenwood CIs, time-dependent AUC and Brier score, Cox bootstrap optimism correction, Riley sample size)
+node tests/reference_check.js && python3 tests/reference_check.py   # 73 checks against SciPy / scikit-learn / statsmodels / scikit-survival / pmsampsize (incl. calibration, recalibration, DeLong, decision curve, IRLS odds ratios, Rubin's rules, t distribution, Cox model, C-index, Kaplan-Meier with Greenwood CIs, time-dependent AUC and Brier score, survival measures with heavy ties, Cox bootstrap optimism correction, Riley sample size)
 node tests/module_check.js                                         # every import between the src/ modules resolves
 npx eslint@9.39.5 -c eslint.config.mjs src                          # no name used without being defined or imported (run in CI)
-node tests/edge_cases.js                                           # robustness: single class, all-missing, constant features, imbalance, zero-variance target
+node tests/edge_cases.js                                           # robustness: single class, all-missing, constant features, imbalance, zero-variance target, survival with no events, all-tied times or a horizon beyond follow-up
 node tests/audit_regressions.js                                    # one check per defect reproduced by the external audit (Oct 2026; responses: tests/AUDIT_GENSPARK_RESPONSE.md, tests/AUDIT_CHATGPT_RESPONSE.md, tests/INDEPENDENT_REVIEW_2026-10.md): model-file safety, k-NN export warning, isotonic ties, CSV headers/quotes/infinities, infeasible CV, non-estimable survival Brier
 node tests/end_to_end.js                                           # 26 end-to-end checks: binary/multiclass/regression, missing values, unseen categories, rare outcome, tiny cohort, patient/date splits, calibration, threshold, NN fallback, batch = evaluation preprocessing, export/import of all model types; Option C on pure noise (tuning repeated, .632+ for flexible models, model-selection correction); .632+ no-information rates; TreeSHAP and sampled Shapley vs brute force; time-dependent AUC/Brier under censoring
 python3 tests/benchmark_vs_python.py                               # app vs scikit-learn / PyTorch / imbalanced-learn (~2 min)

@@ -3030,6 +3030,9 @@
             // Not estimable (null) when a patient who should contribute has no censoring support (weight 1/0):
             // leaving them out would silently bias the score, possibly to 0. Also null when nobody contributes.
             const gTau = this.kmAt(censKM, tau);
+            // A horizon at or beyond the last follow-up time: nobody is observed there, so it is not estimable
+            // (as in scikit-survival, which requires the horizon to lie within the follow-up)
+            if (!time.length || tau >= Math.max(...time) || !(gTau > 0)) return null;
             let sum = 0, contributors = 0;
             for (let i = 0; i < time.length; i++) {
                 if (time[i] <= tau && event[i] === 1) {

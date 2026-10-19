@@ -43,6 +43,43 @@ function reportItems(source) {
     return (AppState.allTestedResults || []).map(r => ({ name: displayModelName(r.modelId, r.model), ev: r.evalRes, hp: r.hyperparams, result: r }));
 }
 
+// What the reported performance figures are, in plain words: how the model was chosen, what the estimate rests on
+// (cross-validation, one held-out Testing set, bootstrap, a separate cohort), whether the model in use is the one
+// tested or a refit, how it compares with a simple baseline, and whether external validation has been done.
+// Rows of [label, plain text]; shared by the HTML report and the model card.
+function performanceEvidence({ ev, retrained, nModels, prep }) {
+    const rows = [];
+    const optionC = ev.protocol === 'option-c', optionB = ev.protocol === 'option-b';
+    rows.push(['How the model was chosen', nModels <= 1 ? 'A single prespecified model (no comparison between models).'
+        : ev.cv ? `By ${ev.cv.folds ? `${ev.cv.folds}-fold ` : ''}cross-validation inside the development data (${nModels} models compared). The cross-validated score is the selection score; the reported performance is a separate estimate.`
+            : optionC ? `${nModels} models compared; the comparison was repeated inside every bootstrap resample, so the corrected figures include the effect of choosing the best.`
+                : `EXPLORATORY: chosen as the best of ${nModels} models on the same Testing set it is reported on, so its test performance is optimistic (selection bias). Use cross-validated selection for a reportable estimate.`]);
+    const n = Array.isArray(ev.actuals) ? ev.actuals.length : (ev.testCount || ev.totalSamples || null);
+    let counts = '';
+    if (ev.isClassification && Array.isArray(ev.actuals) && ev.actuals.length) {
+        const c = {}; ev.actuals.forEach(v => { c[v] = (c[v] || 0) + 1; });
+        const name = k => String(prep && prep.targetIdxToClass && prep.targetIdxToClass[k] !== undefined ? prep.targetIdxToClass[k] : k);
+        counts = ` (${Object.keys(c).map(k => `${c[k]} "${name(k)}"`).join(', ')})`;
+        const fewest = Math.min(...Object.values(c));
+        if (fewest < 50) counts += `; with ${fewest} patient(s) in the smallest outcome group, AUC, calibration and their intervals are imprecise${fewest < 10 ? ' and only illustrative' : ''}`;
+    }
+    rows.push(['What the performance estimate rests on', optionC ? `Bootstrap internal validation on all ${n || ''} patients: the whole modelling process repeated on resampled cohorts and the optimism subtracted. Not an external validation.`
+        : optionB ? `A separate cohort, Dataset (ii), of ${n || '?'} patients${counts}, used once to evaluate the model fitted on Dataset (i).`
+            : `One held-out Testing set of ${n || '?'} records${counts}, evaluated once. A single random split is imprecise and is not evidence of reproducibility; bootstrap validation (Option C) or an independent cohort gives firmer evidence.`]);
+    if (ev.isClassification && Array.isArray(ev.actuals) && ev.actuals.length) {
+        const c = {}; ev.actuals.forEach(v => { c[v] = (c[v] || 0) + 1; });
+        const majority = Math.max(...Object.values(c)) / ev.actuals.length;
+        rows.push(['Simple baseline', `Always predicting the most common outcome would be ${(majority * 100).toFixed(1)}% accurate, with no ability to identify patients with the less common outcome; compare the model's accuracy with this, and rely on AUC, calibration and net benefit rather than accuracy.`]);
+    } else if (!ev.isClassification && typeof ev.r2 === 'number') {
+        rows.push(['Simple baseline', 'Predicting the average for everyone gives R² = 0; the model\'s R² is its improvement on that.']);
+    }
+    rows.push(['Model in use', retrained ? 'Refitted on all available patients after the evaluation (the same procedure and settings). The figures above describe that modelling procedure; the refitted model itself has not been tested on unseen patients.'
+        : optionC ? 'Fitted on all patients; the corrected figures estimate its performance in similar new patients.' : 'The same fitted model whose performance is reported.']);
+    rows.push(['External validation', AppState.externalValidation ? `A model was also validated on "${AppState.externalValidation.fileName || 'a labelled cohort'}" (Step 6; separate report). It counts as external only if none of those patients contributed to development.`
+        : 'Not done. Evaluate the locked model on an independent cohort (another period or centre) before considering any clinical use.']);
+    return rows;
+}
+
 function resultsTable(items, isClassification, optionC) {
     if (isClassification) {
         return `<table><thead><tr><th>Model</th>${items.some(it => it.ev.cv) ? '<th>Cross-validated score (selection)</th>' : ''}<th>${optionC ? 'Corrected accuracy' : 'Accuracy'}</th><th>ROC-AUC</th><th>Brier ↓</th><th>Balanced accuracy</th><th>Macro F1</th><th>Calibration slope</th></tr></thead><tbody>
@@ -85,6 +122,8 @@ function downloadHtmlReport(source) {
     const positiveLabel = top.ev.positiveClass !== null && top.ev.positiveClass !== undefined ? String(top.ev.positiveClass) : 'positive outcome';
     const binary = isClassification && top.ev.probPositive && top.ev.calibration;
     const sections = [];
+    const evidence = performanceEvidence({ ev: top.ev, retrained: Boolean(top.result && top.result.retrained), nModels: items.length, prep });
+    if (evidence) sections.push(`<h2>What these performance figures are</h2><table>${evidence.map(([k, v]) => `<tr><th style="width: 28%;">${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('')}</table>`);
     sections.push(`<h2>1. Methods</h2><p>${escapeHtml(methodsParagraph(d))}</p>
         <p class="meta">Predictors (${d.predictors.length}): ${d.predictors.map(escapeHtml).join(', ')}.${d.excludedPredictors && d.excludedPredictors.length ? ` Not used: ${d.excludedPredictors.map(escapeHtml).join(', ')}.` : ''}</p>`);
     sections.push(`<h2>2. Results${optionC ? ' (bootstrap internal validation, all patients)' : ' (Testing set)'}</h2>
@@ -172,4 +211,4 @@ ${sections.join('\n')}
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
-export { downloadHtmlReport, downloadValidationReport };
+export { downloadHtmlReport, downloadValidationReport, performanceEvidence };

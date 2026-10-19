@@ -139,6 +139,13 @@ try:
     chk('Time-dependent AUC with censoring weights (vs scikit-survival cumulative_dynamic_auc)',sd['auc'],auc_ref,1e-10)
     bs_ref=[brier_score(ytr,yte,np.array(sd['surv'][k]).reshape(-1,1),[t])[1][0] for k,t in enumerate(sd['taus'])]
     chk('Brier score with censoring weights (vs scikit-survival brier_score)',sd['brier'],bs_ref,1e-10)
+    # Heavy ties (integer times, events and censorings at the same times, tied risk scores) vs scikit-survival
+    from sksurv.metrics import concordance_index_censored
+    st = o['survTies']
+    ytr2 = Surv.from_arrays(np.array(st['trE'], bool), np.array(st['trT'], float)); yte2 = Surv.from_arrays(np.array(st['teE'], bool), np.array(st['teT'], float))
+    chk("Harrell's C-index with heavy ties (vs scikit-survival concordance_index_censored)", st['cindex'], concordance_index_censored(np.array(st['teE'], bool), np.array(st['teT'], float), np.array(st['risk']))[0], 1e-12)
+    chk('Time-dependent AUC with heavy ties (vs scikit-survival)', st['auc'], [cumulative_dynamic_auc(ytr2, yte2, np.array(st['risk']), [t])[0][0] for t in st['taus']], 1e-10)
+    chk('Censoring-weighted Brier score with heavy ties (vs scikit-survival)', st['brier'], [brier_score(ytr2, yte2, np.array(st['surv'][k]).reshape(-1, 1), [t])[1][0] for k, t in enumerate(st['taus'])], 1e-10)
     # Harrell's bootstrap optimism for a Cox model: per resample, refit with statsmodels PHReg (Efron ties), then
     # Harrell's C (NumPy), Uno's time-dependent AUC (scikit-survival) and the calibration slope (PHReg on the
     # original patients' linear predictor), each on the resample and on the original patients

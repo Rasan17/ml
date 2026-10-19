@@ -102,6 +102,17 @@ out.riley = [[24, 0.174, 0.288], [10, 0.3, 0.1], [30, 0.05, 0.04], [15, 0.5, 0.2
     const per = mi.datasets.map(stats);
     out.mice = { rows: miRows, pooled: [0, 1, 2, 3].map(j => per.reduce((x, p) => x + p[j], 0) / per.length) };
 }
+// Survival measures with heavy ties: integer follow-up times, several events and censorings at the same time
+{
+    const r3 = DE.createPRNG(31);
+    const mk = n => Array.from({ length: n }, () => { const x = Math.round((r3() * 2 - 1) * 4) / 4; const t = Math.min(6, Math.ceil(-Math.log(r3() || 1e-9) / Math.exp(x) * 2)); const c = Math.ceil(r3() * 7); return { x, t: Math.min(t, c), e: t <= c ? 1 : 0 }; });
+    const tr = mk(150), te = mk(120), taus = [2, 3, 4];
+    const cw = ME.censoringKM(tr.map(d => d.t), tr.map(d => d.e));
+    const tT = te.map(d => d.t), tE = te.map(d => d.e), risk = te.map(d => d.x);
+    const surv = taus.map(tau => te.map(d => Math.exp(-0.2 * tau * Math.exp(d.x))));
+    out.survTies = { trT: tr.map(d => d.t), trE: tr.map(d => d.e), teT: tT, teE: tE, risk, taus, surv,
+        cindex: ME.concordanceIndex(tT, tE, risk), auc: taus.map(tau => ME.timeDependentAUC(tT, tE, risk, tau, cw)), brier: taus.map((tau, k) => ME.ipcwBrier(tT, tE, surv[k], tau, cw)) };
+}
 // Harrell's bootstrap optimism for a Cox model (Option C for time-to-event outcomes): each resample refits the Cox
 // model and is scored by the app's own ModelEngine.coxResampleOptimism (C-index, time-dependent AUC, calibration slope)
 {

@@ -157,6 +157,26 @@ function makeRows(n, fn) { return Array.from({ length: n }, (_, i) => fn(i)); }
         return issues.map(i => i.kind).join(', ');
     });
 
+    await check('Survival: everyone censored, or a horizon beyond follow-up, gives "not estimable" (null), never a number', async () => {
+        const t = [1, 2, 3, 4, 5, 6], allCens = [0, 0, 0, 0, 0, 0], e = [1, 0, 1, 0, 1, 0], lp = [0.3, 0.1, 0.2, -0.4, 0.5, 0];
+        assert(ME.concordanceIndex(t, allCens, lp) === null, 'C-index with no events should be null');
+        const cw = ME.censoringKM(t, e);
+        assert(ME.timeDependentAUC(t, e, lp, 50, cw) === null, 'AUC beyond follow-up should be null');
+        assert(ME.ipcwBrier(t, e, t.map(() => 0.5), 50, cw) === null, 'Brier beyond follow-up should be null');
+        const m = ME.createCox().fit(t.map((_, i) => [lp[i]]), t, allCens);
+        assert(!m.converged || m.beta.every(b => Number.isFinite(b)), 'Cox fit with no events must not return non-finite coefficients');
+        return 'null / not estimable';
+    });
+
+    await check('Survival: all event times tied (one time point) still gives finite Cox estimates and a C-index of 0.5 for a constant score', async () => {
+        const n = 40, t = Array(n).fill(12), e = Array.from({ length: n }, (_, i) => (i % 3 ? 0 : 1)), x = Array.from({ length: n }, (_, i) => [(i % 7) - 3]);
+        const m = ME.createCox().fit(x, t, e);
+        assert(m.beta.every(Number.isFinite), 'non-finite coefficient');
+        const c = ME.concordanceIndex(t, e, t.map(() => 0));
+        assert(c === null || Math.abs(c - 0.5) < 1e-12, `C-index ${c}`);
+        return `beta ${m.beta[0].toFixed(3)}, C ${c}`;
+    });
+
     results.forEach(r => console.log(r));
     console.log(`\n${passed}/${passed + failed} edge-case checks passed`);
     process.exit(failed ? 1 : 0);

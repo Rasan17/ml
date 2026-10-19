@@ -5886,6 +5886,8 @@ function renderEvaluationDashboard() {
         if (isOptionC && evalRes && evalRes.recalibration) {
             notes.push(`📐 <strong>Recalibrated</strong> with ${evalRes.recalibration.method === 'platt' ? 'Platt scaling' : 'isotonic regression'}, fitted on ${escapeHtml(evalRes.recalibration.fittedOn)}. The recalibration was refitted inside ${typeof evalRes.recalibrationInResamples === 'number' ? evalRes.recalibrationInResamples : 'every'} bootstrap resample(s) on their own cross-validated predictions, so the optimism-corrected results include its effect.`);
         }
+        // Option A: one random split is a single, noisy draw
+        if (!isOptionB && !isOptionC && evalRes) notes.push('🎲 <strong>One split:</strong> these results come from a single division of the patients into Training and Testing sets. Another split could give noticeably different figures, so a good result here is not evidence of reproducibility. Bootstrap validation (Option C) uses every patient and is more stable; an independent cohort (Option B) gives the strongest evidence.');
         if (isOptionC && evalRes && evalRes.recalibrationSkipped) notes.push(`📐 ${escapeHtml(evalRes.recalibrationSkipped)}`);
         if (evalRes && evalRes.cv) {
             notes.push(`Best model chosen by ${evalRes.cv.folds}-fold cross-validation inside the Training set${evalRes.cv.grouped ? ' (each patient\'s records kept in one fold)' : ''}; missing-value filling (${escapeHtml(evalRes.cv.imputation || 'Step 3 methods')}), encoding and scaling were refitted inside every fold.`);
@@ -9717,8 +9719,12 @@ async function runSurvivalAnalysis(o) {
     const brierNull = ModelEngine.ipcwBrier(tTe, eTe, tTe.map(() => sNull), horizon, censKM);
     const scaledBrier = brier !== null && brierNull > 0 ? 1 - brier / brierNull : null;
     const boots = [], bootsTd = [];
+    // Patients with several records are resampled whole (the patient column of a by-patient split, or the
+    // patient column chosen for bootstrap validation), so the interval reflects patients, not records
+    const ciGroupCol = splitInfo && splitInfo.method === 'group' ? splitInfo.column : (o.groupCol || null);
+    const ciGroups = ciGroupCol ? (() => { const m = new Map(); enc.rows.forEach((r, i) => { const k = String(r[ciGroupCol] ?? ''); if (!m.has(k)) m.set(k, []); m.get(k).push(i); }); return [...m.values()]; })() : null;
     for (let b = 0; b < 500; b++) {
-        const idx = tTe.map(() => Math.floor(rng() * tTe.length));
+        const idx = ciGroups ? Array.from({ length: ciGroups.length }, () => ciGroups[Math.floor(rng() * ciGroups.length)]).flat() : tTe.map(() => Math.floor(rng() * tTe.length));
         const bt = idx.map(i => tTe[i]), be = idx.map(i => eTe[i]), bl = idx.map(i => lpTe[i]);
         const c = ModelEngine.concordanceIndex(bt, be, bl);
         if (c !== null) boots.push(c);
@@ -9784,7 +9790,7 @@ async function runSurvivalAnalysis(o) {
             slope, slopeCI: slopes.length >= 20 ? (() => { const a = slopes.slice().sort((x, y) => x - y); return [a[Math.floor(0.025 * (a.length - 1))], a[Math.floor(0.975 * (a.length - 1))]]; })() : null,
             seconds: Math.round((Date.now() - t0) / 1000) };
     }
-    SURV.result = { droppedBlank, splitInfo, splitText: o.describeSplit && splitInfo ? o.describeSplit(splitInfo) : 'random split, balanced by event', censKM, validation, optimism, externalExcluded, boxId: boxId || 'survival-step4-results', miInfo, completeCase: Boolean(o.completeCase), lastEvent, tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, obsAllCI, meanPred, obsAll, kmGroups, maxFollow,
+    SURV.result = { ciGroupCol, droppedBlank, splitInfo, splitText: o.describeSplit && splitInfo ? o.describeSplit(splitInfo) : 'random split, balanced by event', censKM, validation, optimism, externalExcluded, boxId: boxId || 'survival-step4-results', miInfo, completeCase: Boolean(o.completeCase), lastEvent, tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, obsAllCI, meanPred, obsAll, kmGroups, maxFollow,
         nTrain: Xtr.length, nTest: Xte.length, eventsTrain: events, eventsTest: eTe.reduce((a, b) => a + b, 0), excluded };
     renderSurvivalResults();
     if (status) status.textContent = '';
@@ -9842,7 +9848,7 @@ function renderSurvivalResults() {
             <p class="tune-muted">Each of the ${r.optimism.used} usable resamples${r.optimism.skipped ? ` (${r.optimism.skipped} skipped: too few events or no comparable pairs)` : ''} repeated the whole process (${r.optimism.quickPlain ? 'with the quick approximation: a plain median / most-frequent fill instead of MICE inside the resamples' : r.miInfo ? 'MICE' : 'single imputation'}, encoding and the Cox fit) on patients drawn with replacement${r.optimism.grouped ? ` (whole patients by "${escapeHtml(r.optimism.groupCol)}")` : ''}. The optimism is the average amount by which a model scores better on its own resample than on the original patients; it is subtracted from the apparent performance. A corrected calibration slope below 1 means the predictions are too extreme and would need shrinking (${r.optimism.seconds} s).${r.optimism.used < 50 ? ' <strong>Few usable resamples: the correction is imprecise.</strong>' : ''}</p>
             <div class="tune-title" style="margin-top: 12px;">📊 Apparent performance on all patients (before correction)</div>
             <p class="tune-muted">The panels below score the final model on the same patients it was fitted to, so they are optimistic; use the corrected values above when reporting.</p>` : `<div class="tune-title">📊 Performance on the ${r.validation === 'separate' ? 'validation cohort (Dataset ii)' : 'test patients'}</div>`}
-            <div class="cal-stats"><div><strong>Harrell's C-index</strong>: ${r.cIndex !== null ? r.cIndex.toFixed(3) : 'N/A'}${r.cCI && r.validation !== 'bootstrap' ? ` <span class="tune-sd">(95% CI ${r.cCI[0].toFixed(3)}–${r.cCI[1].toFixed(3)})</span>` : ''} &mdash; the probability that, of two comparable patients, the one with the event first had the higher predicted risk (0.5 = chance, 1 = perfect).</div>
+            <div class="cal-stats"><div><strong>Harrell's C-index</strong>: ${r.cIndex !== null ? r.cIndex.toFixed(3) : 'N/A'}${r.cCI && r.validation !== 'bootstrap' ? ` <span class="tune-sd">(95% CI ${r.cCI[0].toFixed(3)}–${r.cCI[1].toFixed(3)}${r.ciGroupCol ? `, patients resampled whole by "${escapeHtml(r.ciGroupCol)}"` : ''})</span>` : ''} &mdash; the probability that, of two comparable patients, the one with the event first had the higher predicted risk (0.5 = chance, 1 = perfect).</div>
             <div><strong>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.tdAuc === 'number' ? r.tdAuc.toFixed(3) : 'N/A'}${r.tdCI && r.validation !== 'bootstrap' ? ` <span class="tune-sd">(95% CI ${r.tdCI[0].toFixed(3)}–${r.tdCI[1].toFixed(3)})</span>` : ''} &mdash; of a patient who had the event by ${escapeHtml(String(r.horizon))} and one still event-free after it, how often the first had the higher predicted risk.</div>
             <div><strong>Brier score at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.brier === 'number' ? r.brier.toFixed(3) : 'not estimable (too little follow-up to weight the patients at this horizon; choose an earlier horizon)'} (lower is better; giving everyone the overall Kaplan-Meier risk scores ${typeof r.brierNull === 'number' ? r.brierNull.toFixed(3) : 'N/A'})${typeof r.scaledBrier === 'number' ? `; <strong>scaled Brier</strong> ${(r.scaledBrier * 100).toFixed(1)}% (share of that error the model removes; 0% = no better than the overall risk)` : ''}.</div>
             ${r.horizon > r.lastEvent ? `<div class="tune-warn">⚠️ The horizon (${escapeHtml(String(r.horizon))}) is beyond the last event in the training patients (${escapeHtml(String(r.lastEvent))}): the model cannot learn risk after that time, so predicted risks at this horizon are underestimated. Choose a horizon within the follow-up of the training data.</div>` : ''}
@@ -10375,6 +10381,43 @@ function reportItems(source) {
     return (AppState.allTestedResults || []).map(r => ({ name: displayModelName(r.modelId, r.model), ev: r.evalRes, hp: r.hyperparams, result: r }));
 }
 
+// What the reported performance figures are, in plain words: how the model was chosen, what the estimate rests on
+// (cross-validation, one held-out Testing set, bootstrap, a separate cohort), whether the model in use is the one
+// tested or a refit, how it compares with a simple baseline, and whether external validation has been done.
+// Rows of [label, plain text]; shared by the HTML report and the model card.
+function performanceEvidence({ ev, retrained, nModels, prep }) {
+    const rows = [];
+    const optionC = ev.protocol === 'option-c', optionB = ev.protocol === 'option-b';
+    rows.push(['How the model was chosen', nModels <= 1 ? 'A single prespecified model (no comparison between models).'
+        : ev.cv ? `By ${ev.cv.folds ? `${ev.cv.folds}-fold ` : ''}cross-validation inside the development data (${nModels} models compared). The cross-validated score is the selection score; the reported performance is a separate estimate.`
+            : optionC ? `${nModels} models compared; the comparison was repeated inside every bootstrap resample, so the corrected figures include the effect of choosing the best.`
+                : `EXPLORATORY: chosen as the best of ${nModels} models on the same Testing set it is reported on, so its test performance is optimistic (selection bias). Use cross-validated selection for a reportable estimate.`]);
+    const n = Array.isArray(ev.actuals) ? ev.actuals.length : (ev.testCount || ev.totalSamples || null);
+    let counts = '';
+    if (ev.isClassification && Array.isArray(ev.actuals) && ev.actuals.length) {
+        const c = {}; ev.actuals.forEach(v => { c[v] = (c[v] || 0) + 1; });
+        const name = k => String(prep && prep.targetIdxToClass && prep.targetIdxToClass[k] !== undefined ? prep.targetIdxToClass[k] : k);
+        counts = ` (${Object.keys(c).map(k => `${c[k]} "${name(k)}"`).join(', ')})`;
+        const fewest = Math.min(...Object.values(c));
+        if (fewest < 50) counts += `; with ${fewest} patient(s) in the smallest outcome group, AUC, calibration and their intervals are imprecise${fewest < 10 ? ' and only illustrative' : ''}`;
+    }
+    rows.push(['What the performance estimate rests on', optionC ? `Bootstrap internal validation on all ${n || ''} patients: the whole modelling process repeated on resampled cohorts and the optimism subtracted. Not an external validation.`
+        : optionB ? `A separate cohort, Dataset (ii), of ${n || '?'} patients${counts}, used once to evaluate the model fitted on Dataset (i).`
+            : `One held-out Testing set of ${n || '?'} records${counts}, evaluated once. A single random split is imprecise and is not evidence of reproducibility; bootstrap validation (Option C) or an independent cohort gives firmer evidence.`]);
+    if (ev.isClassification && Array.isArray(ev.actuals) && ev.actuals.length) {
+        const c = {}; ev.actuals.forEach(v => { c[v] = (c[v] || 0) + 1; });
+        const majority = Math.max(...Object.values(c)) / ev.actuals.length;
+        rows.push(['Simple baseline', `Always predicting the most common outcome would be ${(majority * 100).toFixed(1)}% accurate, with no ability to identify patients with the less common outcome; compare the model's accuracy with this, and rely on AUC, calibration and net benefit rather than accuracy.`]);
+    } else if (!ev.isClassification && typeof ev.r2 === 'number') {
+        rows.push(['Simple baseline', 'Predicting the average for everyone gives R² = 0; the model\'s R² is its improvement on that.']);
+    }
+    rows.push(['Model in use', retrained ? 'Refitted on all available patients after the evaluation (the same procedure and settings). The figures above describe that modelling procedure; the refitted model itself has not been tested on unseen patients.'
+        : optionC ? 'Fitted on all patients; the corrected figures estimate its performance in similar new patients.' : 'The same fitted model whose performance is reported.']);
+    rows.push(['External validation', AppState.externalValidation ? `A model was also validated on "${AppState.externalValidation.fileName || 'a labelled cohort'}" (Step 6; separate report). It counts as external only if none of those patients contributed to development.`
+        : 'Not done. Evaluate the locked model on an independent cohort (another period or centre) before considering any clinical use.']);
+    return rows;
+}
+
 function resultsTable(items, isClassification, optionC) {
     if (isClassification) {
         return `<table><thead><tr><th>Model</th>${items.some(it => it.ev.cv) ? '<th>Cross-validated score (selection)</th>' : ''}<th>${optionC ? 'Corrected accuracy' : 'Accuracy'}</th><th>ROC-AUC</th><th>Brier ↓</th><th>Balanced accuracy</th><th>Macro F1</th><th>Calibration slope</th></tr></thead><tbody>
@@ -10417,6 +10460,8 @@ function downloadHtmlReport(source) {
     const positiveLabel = top.ev.positiveClass !== null && top.ev.positiveClass !== undefined ? String(top.ev.positiveClass) : 'positive outcome';
     const binary = isClassification && top.ev.probPositive && top.ev.calibration;
     const sections = [];
+    const evidence = performanceEvidence({ ev: top.ev, retrained: Boolean(top.result && top.result.retrained), nModels: items.length, prep });
+    if (evidence) sections.push(`<h2>What these performance figures are</h2><table>${evidence.map(([k, v]) => `<tr><th style="width: 28%;">${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('')}</table>`);
     sections.push(`<h2>1. Methods</h2><p>${escapeHtml(methodsParagraph(d))}</p>
         <p class="meta">Predictors (${d.predictors.length}): ${d.predictors.map(escapeHtml).join(', ')}.${d.excludedPredictors && d.excludedPredictors.length ? ` Not used: ${d.excludedPredictors.map(escapeHtml).join(', ')}.` : ''}</p>`);
     sections.push(`<h2>2. Results${optionC ? ' (bootstrap internal validation, all patients)' : ' (Testing set)'}</h2>
@@ -11141,6 +11186,7 @@ function renderInterpretation(containerId, { ev, prep, name, design, dataset }) 
 // known limitations. Downloaded as a printable HTML file (strict security policy, every value escaped).
 
 
+
 const cardNum = (v, d = 3) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : 'not available');
 const cardPct = v => (typeof v === 'number' && isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'not available');
 
@@ -11209,6 +11255,8 @@ function modelCardHtml() {
         ['Decision threshold', binary ? cardPct(ev.decisionThreshold || 0.5) : 'not applicable'],
         ['Reproducibility seed', typeof ev.seed === 'number' ? String(ev.seed) : 'not recorded']
     ])}</table>
+<h2>What the performance figures are</h2>
+<table>${kv(performanceEvidence({ ev, retrained: Boolean(AppState.deployedSource !== 'imported' && (AppState.allTestedResults || []).find(r => r.model === model && r.retrained)), nModels: AppState.deployedSource === 'imported' ? 1 : Math.max(1, (AppState.allTestedResults || []).length), prep }))}</table>
 <h2>Performance</h2>
 <table>${kv(rows)}</table>
 <p class="muted">${escapeHtml(ev.protocol === 'option-c' ? 'Optimism-corrected estimates from bootstrap internal validation.' : 'Estimates on patients not used to fit the model.')} Confidence intervals are bootstrap intervals over the evaluation patients where shown.</p>

@@ -86,6 +86,12 @@ test('settings and trained model can be saved and loaded again', async ({ page }
     expect(report).toContain('Prediction model report');
     expect(report).toContain('Not a certified medical device');
     expect(report).toContain('<svg');
+    // What the figures are: how the model was chosen, what the estimate rests on, baseline, external validation
+    expect(report).toContain('What these performance figures are');
+    expect(report).toContain('cross-validation inside the development data');
+    expect(report).toContain('not evidence of reproducibility');
+    expect(report).toContain('Always predicting the most common outcome');
+    await expect(page.locator('#results-dashboard')).toContainText('One split');
     // trained model file, re-imported into a fresh page
     const [modelDl] = await Promise.all([page.waitForEvent('download'), page.click('#model-export-btn')]);
     const modelPath = await modelDl.path();

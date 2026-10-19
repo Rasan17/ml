@@ -148,6 +148,8 @@ function renderEvaluationDashboard() {
         if (isOptionC && evalRes && evalRes.recalibration) {
             notes.push(`📐 <strong>Recalibrated</strong> with ${evalRes.recalibration.method === 'platt' ? 'Platt scaling' : 'isotonic regression'}, fitted on ${escapeHtml(evalRes.recalibration.fittedOn)}. The recalibration was refitted inside ${typeof evalRes.recalibrationInResamples === 'number' ? evalRes.recalibrationInResamples : 'every'} bootstrap resample(s) on their own cross-validated predictions, so the optimism-corrected results include its effect.`);
         }
+        // Option A: one random split is a single, noisy draw
+        if (!isOptionB && !isOptionC && evalRes) notes.push('🎲 <strong>One split:</strong> these results come from a single division of the patients into Training and Testing sets. Another split could give noticeably different figures, so a good result here is not evidence of reproducibility. Bootstrap validation (Option C) uses every patient and is more stable; an independent cohort (Option B) gives the strongest evidence.');
         if (isOptionC && evalRes && evalRes.recalibrationSkipped) notes.push(`📐 ${escapeHtml(evalRes.recalibrationSkipped)}`);
         if (evalRes && evalRes.cv) {
             notes.push(`Best model chosen by ${evalRes.cv.folds}-fold cross-validation inside the Training set${evalRes.cv.grouped ? ' (each patient\'s records kept in one fold)' : ''}; missing-value filling (${escapeHtml(evalRes.cv.imputation || 'Step 3 methods')}), encoding and scaling were refitted inside every fold.`);
