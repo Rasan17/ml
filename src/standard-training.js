@@ -32,6 +32,8 @@ async function trainSurvivalStep4(spec) {
     try {
         await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, ...extra });
         if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const card = document.getElementById('model-card-btn');
+        if (card) { card.disabled = false; card.title = 'One-page summary of the Cox model: intended use, population, performance and limitations'; }
     } catch (err) {
         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-rose);">⚠️ ${escapeHtml(err.message || String(err))}</span>`;
     } finally {

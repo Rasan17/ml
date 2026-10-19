@@ -1,5 +1,7 @@
 // settings.js: part of the Universal Medical ML/NeuralNet Predictor application controller
 import { setMissingIndicators } from './variables.js';
+import { applySurvivalRoles } from './outcome-type.js';
+import { SURV } from './survival.js';
 import { APP_VERSION, AppState, RANKING_METRICS, escapeHtml } from './core.js';
 import { executeImputation, renderImputationTable } from './imputation.js';
 import { goToStep } from './navigation.js';
@@ -115,6 +117,8 @@ function collectSettings() {
         note: 'Analysis choices only; contains no patient data.',
         dataset: { fileName: AppState.fileName, headers: headers.filter(x => !(AppState.columnConfigs[x] && AppState.columnConfigs[x].derivedFrom)), rowCount: totalRows, signature: datasetSignature(headers) },
         variables,
+        // Step 2 outcome type: a time-to-event outcome is a time column, an event column, its event value and a horizon
+        outcome: AppState.outcomeType === 'survival' && AppState.survival ? { type: 'survival', ...AppState.survival } : { type: 'standard' },
         standard: {
             completeCase: Boolean(AppState.completeCase),
             missingIndicators: Boolean(AppState.missingIndicators),
@@ -135,7 +139,7 @@ function collectSettings() {
             reinstatedFeatures: Array.from((AppState.pipeline && AppState.pipeline.reinstatedFeatures) || [])
         },
         used: {
-            standard: Boolean(AppState.allTestedResults && AppState.allTestedResults.length),
+            standard: Boolean((AppState.allTestedResults && AppState.allTestedResults.length) || (AppState.outcomeType === 'survival' && SURV.result)),
             pipeline: Boolean(AppState.pipeline && AppState.pipeline.benchmarkResults && AppState.pipeline.benchmarkResults.length)
         }
     };
@@ -253,6 +257,16 @@ function applySettings(settings) {
     // Exactly one target
     const targets = headers.filter(h => AppState.columnConfigs[h].role === 'target');
     targets.slice(1).forEach(h => { AppState.columnConfigs[h].role = 'feature'; });
+    // Outcome type (Step 2): a time-to-event outcome only if its columns are in this file
+    const oc = settings.outcome || {};
+    if (oc.type === 'survival' && headers.includes(oc.timeCol) && headers.includes(oc.eventCol)) {
+        AppState.outcomeType = 'survival';
+        AppState.survival = { timeCol: oc.timeCol, eventCol: oc.eventCol, eventValue: String(oc.eventValue ?? ''), horizon: Number(oc.horizon) > 0 ? Number(oc.horizon) : null };
+    } else {
+        AppState.outcomeType = 'standard'; AppState.survival = null;
+    }
+    applySurvivalRoles();
+    document.body.dataset.outcome = AppState.outcomeType;
 
     // Standard workflow (Step 4)
     const std = settings.standard || {};

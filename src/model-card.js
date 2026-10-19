@@ -2,11 +2,13 @@
 // it was developed on, predictors, missing-data handling, validation design, performance with uncertainty, and
 // known limitations. Downloaded as a printable HTML file (strict security policy, every value escaped).
 import { APP_VERSION, AppState, RESEARCH_USE_NOTICE, displayModelName, escapeHtml } from './core.js';
+import { SURV } from './survival.js';
 
 const cardNum = (v, d = 3) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : 'not available');
 const cardPct = v => (typeof v === 'number' && isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'not available');
 
 function modelCardHtml() {
+    if (AppState.outcomeType === 'survival' && SURV.result) return survivalCardHtml(SURV.result);
     const ev = AppState.evalResults || {}, prep = AppState.prepMeta, model = AppState.trainedModel;
     const name = AppState.deployedSource === 'imported' && AppState.importedModelInfo ? AppState.importedModelInfo.name
         : AppState.deployedSource === '7step' && AppState.deployedPipelineModel ? AppState.deployedPipelineModel.name
@@ -79,8 +81,45 @@ function modelCardHtml() {
 </body></html>`;
 }
 
+// Model card for the Cox model of a time-to-event outcome
+function survivalCardHtml(r) {
+    const kv = list => list.map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('');
+    const o = r.optimism;
+    const design = r.validation === 'bootstrap' ? `Bootstrap internal validation (Option C, ${o.B} resamples, Harrell's optimism correction; all patients used for development)`
+        : r.validation === 'separate' ? 'Validation on a separate cohort (Dataset ii)' : `Held-out testing set (${Math.round(r.ratio * 100)}/${Math.round((1 - r.ratio) * 100)} split stratified by event, seed ${r.seed})`;
+    const missing = r.miInfo ? `Multiple imputation by chained equations (${r.miInfo.m} datasets) fitted on the training patients without the time or event; hazard ratios pooled by Rubin's rules, predictions averaged`
+        : r.completeCase ? 'Complete-case analysis (patients with a blank predictor excluded)' : 'Single imputation with the Step 3 methods, fitted on the training patients';
+    const perf = [["Harrell's C-index", `${cardNum(r.cIndex)}${r.cCI && r.validation !== 'bootstrap' ? ` (95% CI ${cardNum(r.cCI[0])}–${cardNum(r.cCI[1])})` : ''}${o ? ` apparent; optimism-corrected ${cardNum(o.cCorrected)}` : ''}`],
+        [`Time-dependent AUC at ${r.horizon}`, `${cardNum(r.tdAuc)}${o ? ` apparent; optimism-corrected ${cardNum(o.tdCorrected)}` : ''}`],
+        [`Brier score at ${r.horizon} (censoring-weighted)`, cardNum(r.brier)],
+        [`Overall risk by ${r.horizon}: predicted / observed (Kaplan-Meier)`, `${cardPct(r.meanPred)} / ${cardPct(r.obsAll)}`]];
+    if (o) perf.push(['Optimism-corrected calibration slope (ideal 1)', cardNum(o.slope, 2)]);
+    const limits = ['Research and education use only: not validated for decisions about individual patients.',
+        r.validation === 'separate' ? 'Validated on one separate cohort; further validation in other settings is advisable.' : 'Internal validation only: external validation (another time period or centre) is needed before any clinical use.',
+        'Assumes proportional hazards (constant hazard ratios over follow-up); check that the Kaplan-Meier curves by risk group do not cross.',
+        `Predicted risks beyond the last event in the development data (${r.lastEvent}) are not supported by the data.`,
+        r.miInfo ? 'Multiple imputation assumes values are missing at random.' : 'Single imputation understates the uncertainty from missing values.'];
+    return `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model card: Cox model for ${escapeHtml(r.ec)}</title>
+<style>body{font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#0f172a;max-width:860px;margin:24px auto;padding:0 16px}h1{font-size:22px;margin-bottom:2px}h2{font-size:15px;margin:22px 0 6px;color:#0e7490;border-bottom:1px solid #e2e8f0}table{border-collapse:collapse;width:100%}th,td{text-align:left;vertical-align:top;padding:4px 8px;border-bottom:1px solid #e2e8f0}th{width:38%;font-weight:600}.note{border:2px solid #b45309;padding:8px 12px;font-weight:600}.muted{color:#475569;font-size:12.5px}</style></head><body>
+<h1>Model card: Cox proportional-hazards model</h1>
+<p class="muted">Generated ${escapeHtml(new Date().toISOString().slice(0, 10))} by Universal Medical ML/NeuralNet Predictor v${escapeHtml(APP_VERSION)}</p>
+<p class="note">${escapeHtml(RESEARCH_USE_NOTICE)}</p>
+<h2>Intended use</h2>
+<table>${kv([['Predicts', `The probability that "${r.ec}" = "${r.ev}" has not happened by a given time (follow-up time "${r.tc}")`], ['Prediction horizon', String(r.horizon)], ['Intended users and use', 'Researchers and clinicians exploring prediction research; not for individual patient care']])}</table>
+<h2>Development data and model</h2>
+<table>${kv([['Dataset', AppState.fileName || 'not recorded'], ['Patients (events) used to fit', `${r.nTrain} (${r.eventsTrain})`], ['Predictors', `${r.preds.length}: ${r.preds.join(', ')}`], ['Missing data', missing], ['Model', `Cox proportional-hazards (Efron ties)${r.penalised ? ', ridge penalty 0.1 (unpenalised fit did not converge)' : ''}`], ['Validation design', design], ['Reproducibility seed', String(r.seed)]])}</table>
+<h2>Performance</h2>
+<table>${kv(perf)}</table>
+<p class="muted">${escapeHtml(r.validation === 'bootstrap' ? 'Apparent values are on the development patients; use the optimism-corrected values when reporting.' : `Estimates on ${r.nTest} patients (${r.eventsTest} events) not used to fit the model.`)}</p>
+<h2>Known limitations and cautions</h2>
+<ul>${limits.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+<p class="muted">Model-card structure after Mitchell M et al., "Model cards for model reporting" (FAT* 2019). Report the full study following TRIPOD+AI.</p>
+</body></html>`;
+}
+
 function downloadModelCard() {
-    if (!AppState.trainedModel || !AppState.prepMeta) { alert('Train or import a model first.'); return; }
+    if ((!AppState.trainedModel || !AppState.prepMeta) && !(AppState.outcomeType === 'survival' && SURV.result)) { alert('Train or import a model first.'); return; }
     const url = URL.createObjectURL(new Blob([modelCardHtml()], { type: 'text/html' }));
     const a = document.createElement('a');
     a.href = url;

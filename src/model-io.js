@@ -75,6 +75,7 @@ function modelContainsKnn(ser) {
 }
 
 async function exportTrainedModel() {
+    if (AppState.outcomeType === 'survival') { alert('Saving a Cox (time-to-event) model as a model file is not available yet. The Survival Analysis Report (Step 4) records the hazard ratios, the design and the performance; the settings file (header) lets you refit the same model.'); return; }
     const model = AppState.trainedModel, prep = AppState.prepMeta;
     if (!model || !prep) { alert('Train or deploy a model first.'); return; }
     const btn = document.getElementById('model-export-btn');

@@ -195,6 +195,23 @@ test('time-to-event sample opens Step 2 with the outcome chosen; Option C bootst
     const optTable = box.locator('table', { hasText: 'Optimism' });
     expect(await optTable.locator('tbody tr').count()).toBe(3);
     console.log('Option C Cox:', (await optTable.innerText()).replace(/\s+/g, ' '));
+    // Model card and settings for the Cox model
+    const [cardDl] = await Promise.all([page.waitForEvent('download'), page.click('#model-card-btn')]);
+    const card = fs.readFileSync(await cardDl.path(), 'utf8');
+    expect(card).toContain('Cox proportional-hazards model');
+    expect(card).toContain('optimism-corrected');
+    const [settingsDl] = await Promise.all([page.waitForEvent('download'), page.click('#settings-save-btn')]);
+    const settingsPath = await settingsDl.path();
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    expect(settings.outcome).toMatchObject({ type: 'survival', timeCol: 'Months_To_Revision_Or_Censoring', horizon: 24 });
+    await page.goto('/index.html');
+    await page.setInputFiles('#csv-file-input', path.join(__dirname, '..', '..', 'medical_shunt_revision_survival.csv'));
+    await page.click('button.step-tab[data-step="2"]');
+    await expect(page.locator('input[name="outcome-type"][value="standard"]')).toBeChecked();
+    await page.setInputFiles('#settings-file-input', settingsPath);
+    await page.click('button.step-tab[data-step="2"]');
+    await expect(page.locator('input[name="outcome-type"][value="survival"]')).toBeChecked();
+    await expect(page.locator('#ot-horizon')).toHaveValue('24');
     expect(errors).toEqual([]);
 });
 
