@@ -1982,3 +1982,9 @@ body[data-outcome="survival"] #ranking-metric-select,
 body[data-outcome="survival"] label[for="ranking-metric-select"],
 body[data-outcome="survival"] .threshold-row:has(#decision-threshold),
 body[data-outcome="survival"] .threshold-row:has(#recalibration-select) { display: none !important; }
+body[data-outcome="survival"] #predict-form-grid,
+body[data-outcome="survival"] #single-predict-provenance-bar,
+body[data-outcome="survival"] #batch-predict-provenance-bar,
+body[data-outcome="survival"] #run-single-predict-btn,
+body[data-outcome="survival"] #single-result-banner,
+body[data-outcome="survival"] #sample-batch-btn { display: none !important; }

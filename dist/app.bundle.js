@@ -1579,7 +1579,8 @@ function setupEventListeners() {
     // Sample Data Loaders
     document.getElementById('sample-survival-btn')?.addEventListener('click', async () => {
         await loadSampleDataset('medical_shunt_revision_survival.csv', 'Shunt Revision Time-to-Event Cohort (simulated, 320 patients)');
-        if (AppState.parsedData) goToStep('survival');
+        // Time-to-event outcome: chosen in Step 2 (the time and event columns are recognised automatically)
+        if (AppState.parsedData) { AppState.outcomeType = 'survival'; AppState.survival = null; goToStep(2); }
     });
     document.getElementById('sample-breast-btn')?.addEventListener('click', () => loadSampleDataset('breast_cancer_wisconsin.csv', 'Breast Cancer Wisconsin Diagnostic (public UCI data, 569 patients)'));
     if (DOM.sampleCardioBtn) {
@@ -1923,6 +1924,7 @@ function setupEventListeners() {
 
 
 
+
 function syncTrainTestSplit(trainVal) {
     let train = Math.min(95, Math.max(50, Math.round(trainVal)));
     let test = 100 - train;
@@ -2120,11 +2122,7 @@ window.launch7StepPipeline = async function(event) {
 
 function goToStep(stepNum) {
     // Enforce prerequisites
-    if (stepNum === 'survival' && !AppState.parsedData) {
-        alert("Please upload a CSV file or load a sample dataset first.");
-        return;
-    }
-    if (stepNum !== 'pipeline' && stepNum !== 'survival') {
+    if (stepNum !== 'pipeline') {
         const num = parseInt(stepNum, 10);
         if (num > 1 && !AppState.parsedData && !(num > 4 && AppState.deployedSource === 'imported' && AppState.trainedModel)) {
             alert("Please upload a CSV file or load a sample dataset first.");
@@ -2136,7 +2134,7 @@ function goToStep(stepNum) {
             alert("Please complete the Data Imputation step first.");
             return;
         }
-        if (num > 4 && !AppState.trainedModel) {
+        if (num > 4 && !AppState.trainedModel && !(survivalSpec() && SURV.result)) {
             alert("Please train a machine learning model first in Step 4.");
             return;
         }
@@ -2174,8 +2172,7 @@ function goToStep(stepNum) {
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
     if (stepNum === 3 || stepNum === '3') { renderImputationTable(); updateImputationEstimate(); }
     if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); refreshModelSampleGuide(); }
-    if (stepNum === 5 || stepNum === '5') renderSinglePredictionForm();
-    if (stepNum === 'survival') renderSurvivalSetup();
+    if (stepNum === 5 || stepNum === '5') { if (survivalSpec()) renderSurvivalSinglePrediction('survival-step5'); else { const sb = document.getElementById('survival-step5'); if (sb) sb.innerHTML = ''; renderSinglePredictionForm(); } }
     if (stepNum === 'pipeline') {
         initPipelineUI();
         goToPipelineSubstep(AppState.pipeline && AppState.pipeline.substep ? AppState.pipeline.substep : 1);
@@ -2198,6 +2195,7 @@ function handleFileUpload(file) {
 
 // ---- src/ingest.js ----
 // ingest.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+
 
 
 
@@ -2281,6 +2279,7 @@ function resetDerivedState() {
     AppState.allTestedResults = null;
     AppState.separateTestData = null;
     AppState.batchPredictions = null;
+    SURV.result = null; // a Cox model fitted on the previous dataset
     AppState.deployedSource = null;
     AppState.deployedPipelineModel = null;
     AppState.baselinePrepMeta = null;
@@ -4801,23 +4800,23 @@ function renderTuningReport(report, containerId = 'tuning-report-container') {
 
 
 // Step 4 for a time-to-event outcome (chosen in Step 2): a Cox model with the Step 2 predictors and the Step 3
-// missing-data handling (single imputation methods or MICE), validated on a held-out testing set (Option A)
+// missing-data handling (single imputation methods, complete cases or MICE), validated by the design chosen here:
+// a held-out testing set (Option A), a separate cohort (Option B) or bootstrap internal validation (Option C)
 async function trainSurvivalStep4(spec) {
     const valMode = document.querySelector('input[name="validation-mode"]:checked')?.value || AppState.validationMode || 'split';
+    const validation = valMode === 'bootstrap' ? 'bootstrap' : valMode === 'separate' ? 'separate' : 'split';
     const box = document.getElementById('survival-step4-results');
-    if (valMode !== 'split') {
-        DOM.trainStatus.innerHTML = `<span style="color: var(--accent-amber);">⚠️ For time-to-event outcomes, Step 4 currently supports Option A (held-out testing set). Bootstrap internal validation and a separate validation cohort for Cox models are being added; choose Option A for now.</span>`;
-        return;
-    }
     const preds = Object.keys(AppState.columnConfigs).filter(c => AppState.columnConfigs[c].role === 'feature');
     const trainPct = parseFloat(document.getElementById('train-pct-input')?.value) || 80;
     const ratio = Math.min(0.95, Math.max(0.50, trainPct / 100));
-    const custom = document.querySelector('input[name="split-seed-mode"]:checked')?.value === 'custom';
-    const seed = custom ? (parseSeed(document.getElementById('split-seed-input')?.value) ?? 42) : 42;
+    const seed = splitSeedForCV();
     const miM = AppState.completeCase ? 0 : readMultipleImputation();
+    const extra = validation === 'bootstrap'
+        ? { B: parseInt(document.getElementById('bootstrap-reps')?.value, 10) || 100, groupCol: document.getElementById('bootstrap-group-col')?.value || null, quickPlain: miceQuickApproximation() }
+        : validation === 'separate' ? { externalRows: AppState.separateTestRawRows || [] } : {};
     DOM.trainModelBtn.disabled = true;
     try {
-        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase) });
+        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, ...extra });
         if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-rose);">⚠️ ${escapeHtml(err.message || String(err))}</span>`;
@@ -6497,6 +6496,8 @@ function runSinglePrediction() {
 
 
 
+
+
 // =========================================================================
 // STEP 6: BATCH PREDICTION FACILITY
 // =========================================================================
@@ -6541,6 +6542,7 @@ function processBatchCSV(csvText, name) {
 }
 
 async function executeBatchPrediction() {
+    if (survivalSpec()) { executeSurvivalBatch(); return; }
     if (!AppState.trainedModel || !AppState.prepMeta) {
         alert("Please train a model in Step 4 first.");
         return;
@@ -6634,6 +6636,24 @@ async function executeBatchPrediction() {
     // The file also contains the outcome: validate the model on these patients
     if (headers.includes(prep.targetCol)) await validateOnLabelledCohort(rows, AppState.batchFileName);
     else { const vb = document.getElementById('external-validation-container'); if (vb) vb.innerHTML = ''; }
+    renderBatchPreview(results);
+}
+
+// Time-to-event outcome: predicted event-free probability at the horizon for each row, and validation of the Cox
+// model when the file also has the follow-up time and event columns
+function executeSurvivalBatch() {
+    if (!SURV.result) { alert('Please fit the Cox model in Step 4 first.'); return; }
+    if (!AppState.batchData) { alert('Please upload a batch CSV file first.'); return; }
+    const { headers, rows } = AppState.batchData;
+    if (!rows.length) { alert('The batch file contains no data rows.'); return; }
+    const { results, validation } = survivalBatch(rows, headers);
+    AppState.batchPredictions = results;
+    const vb = document.getElementById('external-validation-container');
+    if (vb) vb.innerHTML = validation ? survivalValidationHtml(validation, AppState.batchFileName) : '';
+    renderBatchPreview(results);
+}
+
+function renderBatchPreview(results) {
     DOM.batchResultsCard.style.display = 'flex';
     DOM.downloadBatchCsvBtn.disabled = false;
 
@@ -9515,76 +9535,18 @@ function renderOutcomeTypePanel(onChange) {
 }
 
 // ---- src/survival.js ----
-// survival.js: time-to-event analysis with a Cox proportional-hazards model (Efron ties).
-// Split first (stratified by event), imputation and encoding fitted on the training patients only; hazard
-// ratios; Harrell's C-index, time-dependent AUC and Brier score (censoring-weighted) on the test patients; calibration at a chosen horizon
+// survival.js: Step 4 for a time-to-event outcome (chosen in Step 2): a Cox proportional-hazards model (Efron ties).
+// Imputation (single or MICE) and encoding are fitted on the training patients only; validated on a held-out
+// testing set (Option A), a separate cohort (Option B) or by bootstrap optimism correction (Option C). Hazard
+// ratios; Harrell's C-index, time-dependent AUC and Brier score (censoring-weighted); calibration at the horizon
 // against Kaplan-Meier observed risk; Kaplan-Meier curves by predicted-risk group; single-patient prediction.
 /* global DataEngine, ModelEngine */
 
 
 
+
+
 const SURV = { result: null };
-
-function numericColumns(rows, headers) {
-    return headers.filter(h => {
-        const vals = rows.map(r => r[h]).filter(v => !DataEngine.isMissing(v));
-        return vals.length > 0 && vals.every(v => !isNaN(Number(v))) && vals.some(v => Number(v) > 0);
-    });
-}
-function twoValueColumns(rows, headers) {
-    return headers.filter(h => new Set(rows.map(r => r[h]).filter(v => !DataEngine.isMissing(v)).map(v => String(v).trim())).size === 2);
-}
-
-function renderSurvivalSetup() {
-    const box = document.getElementById('survival-setup');
-    if (!box || !AppState.parsedData) return;
-    const { headers, rows } = AppState.parsedData;
-    const timeCols = numericColumns(rows, headers);
-    const eventCols = twoValueColumns(rows, headers);
-    const guessTime = timeCols.find(h => /time|month|day|year|follow|surv|duration/i.test(h)) || timeCols[0] || '';
-    const guessEvent = eventCols.find(h => /event|death|died|revision|status|outcome|fail|recur/i.test(h)) || eventCols[0] || '';
-    const opts = (list, sel) => list.map(h => `<option value="${escapeHtml(h)}"${h === sel ? ' selected' : ''}>${escapeHtml(h)}</option>`).join('');
-    box.innerHTML = `
-        <div class="surv-grid">
-            <label class="form-group"><span class="form-label">Follow-up time column</span>
-                <select id="surv-time-col" class="form-select">${opts(timeCols, guessTime)}</select></label>
-            <label class="form-group"><span class="form-label">Event column (did the event happen?)</span>
-                <select id="surv-event-col" class="form-select">${opts(eventCols, guessEvent)}</select></label>
-            <label class="form-group"><span class="form-label">Value meaning "event occurred"</span>
-                <select id="surv-event-value" class="form-select"></select></label>
-            <label class="form-group"><span class="form-label">Training / testing split</span>
-                <select id="surv-split" class="form-select"><option value="0.7">70 / 30</option><option value="0.75">75 / 25</option><option value="0.8" selected>80 / 20</option></select></label>
-            <label class="form-group"><span class="form-label">Split seed</span>
-                <input type="number" id="surv-seed" class="form-input" value="42"></label>
-            <label class="form-group"><span class="form-label">Prediction horizon (same units as time)</span>
-                <input type="number" id="surv-horizon" class="form-input" min="0" step="any"></label>
-        </div>
-        <div class="form-label" style="margin-top: 10px;">Predictors</div>
-        <div id="surv-predictors" class="surv-predictors"></div>
-        <p class="tune-muted">The time column is the time from the start of follow-up to the event, or to the last follow-up for patients without the event (censored). Missing predictor values are filled with the methods chosen in Step 3, fitted on the training patients only.</p>
-        <button type="button" id="surv-run-btn" class="btn btn-primary">⏱️ Fit Cox Model &amp; Evaluate on Test Patients</button>
-        <div id="surv-status" class="tune-muted" aria-live="polite" style="margin-top: 8px;"></div>`;
-    const refresh = () => {
-        const ec = document.getElementById('surv-event-col').value;
-        const tc = document.getElementById('surv-time-col').value;
-        const vals = [...new Set(rows.map(r => r[ec]).filter(v => !DataEngine.isMissing(v)).map(v => String(v).trim()))].sort();
-        const evGuess = vals.find(v => /^(yes|1|true|dead|died|event|revised|revision)$/i.test(v)) || vals[vals.length - 1];
-        document.getElementById('surv-event-value').innerHTML = vals.map(v => `<option${v === evGuess ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('');
-        const times = rows.map(r => Number(r[tc])).filter(v => isFinite(v) && v > 0).sort((a, b) => a - b);
-        const h = document.getElementById('surv-horizon');
-        if (times.length && !h.dataset.user) h.value = Number(times[Math.floor(times.length / 2)].toPrecision(3));
-        const cfgs = AppState.columnConfigs || {};
-        document.getElementById('surv-predictors').innerHTML = headers.filter(c => c !== tc && c !== ec && cfgs[c] && !/ \(was missing\)$/.test(c)).map(c => {
-            const on = cfgs[c].role === 'feature';
-            return `<label class="surv-pred"><input type="checkbox" class="surv-pred-check" value="${escapeHtml(c)}"${on ? ' checked' : ''}> ${escapeHtml(c)} <span class="tune-sd">(${escapeHtml(cfgs[c].type)})</span></label>`;
-        }).join('');
-    };
-    document.getElementById('surv-time-col').addEventListener('change', refresh);
-    document.getElementById('surv-event-col').addEventListener('change', refresh);
-    document.getElementById('surv-horizon').addEventListener('input', e => { e.target.dataset.user = '1'; });
-    document.getElementById('surv-run-btn').addEventListener('click', () => { runSurvival().catch(e => { document.getElementById('surv-status').textContent = `⚠️ ${e.message || e}`; }); });
-    refresh();
-}
 
 // Columns of the encoded matrix used by the Cox model: one reference category per categorical predictor
 function coxDesign(prep) {
@@ -9601,18 +9563,6 @@ function coxDesign(prep) {
         }
     });
     return cols;
-}
-
-async function runSurvival() {
-    return runSurvivalAnalysis({
-        tc: document.getElementById('surv-time-col').value, ec: document.getElementById('surv-event-col').value,
-        ev: document.getElementById('surv-event-value').value,
-        preds: [...document.querySelectorAll('.surv-pred-check')].filter(c => c.checked).map(c => c.value),
-        horizon: parseFloat(document.getElementById('surv-horizon').value),
-        ratio: parseFloat(document.getElementById('surv-split').value) || 0.8,
-        seed: parseInt(document.getElementById('surv-seed').value, 10) || 42,
-        status: document.getElementById('surv-status'), boxId: 'survival-results', miM: 0
-    });
 }
 
 // Cox models fitted on each multiply imputed training dataset, used together: hazard ratios pooled by Rubin's
@@ -9635,13 +9585,58 @@ function pooledCox(models) {
 }
 
 /**
- * Time-to-event analysis (Cox model) shared by Step 4 and the survival tab. o: { tc, ec, ev, preds, horizon,
+ * Time-to-event analysis (Cox model) for Step 4. o: { tc, ec, ev, preds, horizon,
  * ratio, seed, status, boxId, miM }: time and event columns, event value, predictors, horizon, training share,
  * split seed, status element, results container, and the number of multiple imputations (0 = single imputation
  * with the Step 3 methods).
  */
+// Fits the whole process on the given patients: missing-value filling (single imputation with the Step 3 methods,
+// or MICE with one Cox model per completed dataset), encoding, and the Cox model (penalised if it does not converge).
+// Returns the model and a function that encodes other patients the same way.
+async function fitSurvivalProcess(rows, cfg, tc, evLabel, miM, seed, quickPlain) {
+    let prep, cols, cox, penalised = false, miInfo = null, Xtr, tTr, eTr;
+    const fitCox = (X, t, e) => { let m = ModelEngine.createCox().fit(X, t, e); if (!m.converged) { m = ModelEngine.createCox({ penalty: 0.1 }).fit(X, t, e); penalised = true; } return m; };
+    const pick = x => cols.map(c => x[c.idx]);
+    if (miM && !quickPlain) {
+        // MICE on these patients only (the time and event are never used); one Cox model per completed dataset
+        const mi = await prepareMultipleImputation(rows, cfg, miM, seed);
+        prep = mi.prep;
+        cols = coxDesign(prep);
+        tTr = rows.map(r => Number(r[tc])); eTr = rows.map(evLabel);
+        if (eTr.reduce((a, b) => a + b, 0) < 5) return { tooFewEvents: eTr.reduce((a, b) => a + b, 0) };
+        cox = pooledCox(mi.sets.map(st => fitCox(st.X.map(pick), tTr, eTr)));
+        Xtr = mi.sets[0].X.map(pick);
+        miInfo = { m: miM, imputedColumns: mi.imputedColumns, trace: prep.multipleImputation && prep.multipleImputation.trace, traceScale: prep.multipleImputation && prep.multipleImputation.traceScale };
+    } else {
+        // quickPlain: the plain fill (median / most frequent) used inside resamples when "quick approximation" is on
+        const fillCfg = quickPlain ? plainFillConfigs(cfg) : cfg;
+        const imp = DataEngine.imputeDataset(rows, fillCfg, AppState.columnAnalysis);
+        prep = DataEngine.prepareFeaturesAndTarget(imp.imputedRows, fillCfg);
+        prep.imputation = { configs: JSON.parse(JSON.stringify(fillCfg)), plan: imp.plan };
+        cols = coxDesign(prep);
+        Xtr = prep.X.map(pick);
+        tTr = imp.imputedRows.map(r => Number(r[tc])); eTr = imp.imputedRows.map(evLabel);
+        if (eTr.reduce((a, b) => a + b, 0) < 5) return { tooFewEvents: eTr.reduce((a, b) => a + b, 0) };
+        cox = fitCox(Xtr, tTr, eTr);
+    }
+    // Encodes other patients exactly as the training patients (blank values filled by the same fitted imputation)
+    const encode = other => {
+        const te = miInfo ? DataEngine.prepareTestingDataset(other, prep)
+            : DataEngine.prepareTestingDataset(DataEngine.imputeDataset(other, prep.imputation.configs, AppState.columnAnalysis, prep.imputation.plan).imputedRows, prep);
+        const X = te.X.map(x => { const d = pick(x); if (x.__mi) Object.defineProperty(d, '__mi', { value: x.__mi.map(pick), enumerable: false }); return d; });
+        return { X, rows: te.validRows };
+    };
+    return { prep, cols, cox, penalised, miInfo, Xtr, tTr, eTr, encode };
+}
+
+/**
+ * Time-to-event analysis (Cox model) for Step 4. o: { tc, ec, ev, preds, horizon,
+ * ratio, seed, status, boxId, miM, completeCase, validation, B, groupCol, quickPlain, externalRows }.
+ * validation: 'split' (held-out testing set, Option A), 'separate' (fit on all patients, test on externalRows,
+ * Option B) or 'bootstrap' (fit on all patients; Harrell's optimism correction over B resamples, Option C).
+ */
 async function runSurvivalAnalysis(o) {
-    const { tc, ec, ev, preds, horizon, ratio, seed, status, boxId, miM = 0 } = o;
+    const { tc, ec, ev, preds, horizon, ratio, seed, status, boxId, miM = 0, validation = 'split' } = o;
     if (!tc || !ec) throw new Error('Choose the time and event columns.');
     if (!preds.length) throw new Error('Choose at least one predictor.');
     if (!(horizon > 0)) throw new Error('Enter a prediction horizon greater than 0.');
@@ -9649,43 +9644,34 @@ async function runSurvivalAnalysis(o) {
     await ModelEngine.yieldToBrowser();
 
     // Patients need a follow-up time and an event status; complete-case analysis (Step 3) also drops blank predictors
-    const rows = AppState.parsedData.rows.filter(r => !DataEngine.isMissing(r[tc]) && Number(r[tc]) > 0 && !DataEngine.isMissing(r[ec])
+    const usable = list => list.filter(r => !DataEngine.isMissing(r[tc]) && Number(r[tc]) > 0 && !DataEngine.isMissing(r[ec])
         && (!o.completeCase || preds.every(c => !DataEngine.isMissing(r[c]))));
+    const rows = usable(AppState.parsedData.rows);
     const excluded = AppState.parsedData.rows.length - rows.length;
     const cfg = {};
     preds.forEach(c => { cfg[c] = { ...(AppState.columnConfigs[c] || { type: 'continuous', imputationStrategy: 'median' }), role: 'feature' }; });
     cfg[ec] = { role: 'target', type: 'nominal' };
     const evLabel = r => (String(r[ec]).trim() === ev ? 1 : 0);
-    const split = DataEngine.trainTestSplit(rows, rows.map(r => String(evLabel(r))), ratio, true, seed);
-    let prep, te, cols, Xtr, Xte, tTr, eTr, cox, penalised = false, miInfo = null;
-    // Cox design columns of an encoded patient (and of each of its imputed versions)
-    const design = x => { const d = cols.map(c => x[c.idx]); if (x.__mi) Object.defineProperty(d, '__mi', { value: x.__mi.map(v => cols.map(c => v[c.idx])), enumerable: false }); return d; };
-    const fitCox = (X, t, e) => { let m = ModelEngine.createCox().fit(X, t, e); if (!m.converged) { m = ModelEngine.createCox({ penalty: 0.1 }).fit(X, t, e); penalised = true; } return m; };
-    if (miM) {
-        // Multiple imputation (Step 3): MICE on the training patients (time and event never used); one Cox model per dataset
-        const mi = await prepareMultipleImputation(split.trainX, cfg, miM, seed);
-        prep = mi.prep;
-        cols = coxDesign(prep);
-        tTr = split.trainX.map(r => Number(r[tc])); eTr = split.trainX.map(evLabel);
-        cox = pooledCox(mi.sets.map(st => fitCox(st.X.map(x => cols.map(c => x[c.idx])), tTr, eTr)));
-        Xtr = mi.sets[0].X.map(x => cols.map(c => x[c.idx]));
-        te = DataEngine.prepareTestingDataset(split.testX, prep);
-        miInfo = { m: miM, imputedColumns: mi.imputedColumns, trace: prep.multipleImputation && prep.multipleImputation.trace, traceScale: prep.multipleImputation && prep.multipleImputation.traceScale };
+    let trainRows = rows, testRows, externalExcluded = 0;
+    if (validation === 'split') {
+        const split = DataEngine.trainTestSplit(rows, rows.map(r => String(evLabel(r))), ratio, true, seed);
+        trainRows = split.trainX; testRows = split.testX;
+    } else if (validation === 'separate') {
+        const ext = o.externalRows || [];
+        if (!ext.length) throw new Error('Load the validation cohort (Dataset ii) for Option B first.');
+        if (!(tc in ext[0]) || !(ec in ext[0])) throw new Error(`The validation cohort needs the columns "${tc}" and "${ec}".`);
+        testRows = usable(ext); externalExcluded = ext.length - testRows.length;
+        if (!testRows.length) throw new Error('No patient in the validation cohort has a usable follow-up time and event status.');
     } else {
-        const trImp = DataEngine.imputeDataset(split.trainX, cfg, AppState.columnAnalysis);
-        const teImp = DataEngine.imputeDataset(split.testX, cfg, AppState.columnAnalysis, trImp.plan);
-        prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, cfg);
-        prep.imputation = { configs: JSON.parse(JSON.stringify(cfg)), plan: trImp.plan };
-        te = DataEngine.prepareTestingDataset(teImp.imputedRows, prep);
-        cols = coxDesign(prep);
-        Xtr = prep.X.map(x => cols.map(c => x[c.idx]));
-        tTr = trImp.imputedRows.map(r => Number(r[tc])); eTr = trImp.imputedRows.map(evLabel);
+        testRows = rows; // apparent performance, corrected for optimism below
     }
-    Xte = te.X.map(design);
-    const tTe = te.validRows.map(r => Number(r[tc])), eTe = te.validRows.map(evLabel);
+    const fit = await fitSurvivalProcess(trainRows, cfg, tc, evLabel, miM, seed, false);
+    if (fit.tooFewEvents !== undefined) throw new Error(`Only ${fit.tooFewEvents} events in the training patients; at least 5 are needed.`);
+    const { prep, cols, cox, penalised, miInfo, Xtr, tTr, eTr } = fit;
+    const enc = fit.encode(testRows);
+    const Xte = enc.X;
+    const tTe = enc.rows.map(r => Number(r[tc])), eTe = enc.rows.map(evLabel);
     const events = eTr.reduce((a, b) => a + b, 0);
-    if (events < 5) throw new Error(`Only ${events} events in the training patients; at least 5 are needed.`);
-    if (!miM) cox = fitCox(Xtr, tTr, eTr);
     const lpTe = Xte.map(x => cox.linearPredictor(x));
     const cIndex = ModelEngine.concordanceIndex(tTe, eTe, lpTe);
     // bootstrap CI for the C-index (test patients resampled)
@@ -9731,7 +9717,44 @@ async function runSurvivalAnalysis(o) {
     const kmGroups = tert.map(g => ModelEngine.kaplanMeier(g.map(i => tTe[i]), g.map(i => eTe[i])));
     const maxFollow = Math.max(...tTr, ...tTe);
     const lastEvent = Math.max(0, ...tTr.filter((_, i) => eTr[i] === 1));
-    SURV.result = { boxId: boxId || 'survival-results', miInfo, completeCase: Boolean(o.completeCase), lastEvent, tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, obsAllCI, meanPred, obsAll, kmGroups, maxFollow,
+    // Option C: Harrell's bootstrap optimism correction. Each resample repeats the whole process (imputation, encoding,
+    // Cox fit); the model is scored on its resample and on the original patients, and the mean difference (optimism)
+    // is subtracted from the apparent performance. The calibration slope is that of the resample models' linear
+    // predictor on the original patients (ideal 1; below 1 means predictions too extreme, i.e. overfitting).
+    let optimism = null;
+    if (validation === 'bootstrap') {
+        const B = o.B || 100;
+        const keys = o.groupCol ? rows.map(r => r[o.groupCol]) : null;
+        const idxs = keys ? bootstrapResamplesGrouped(keys, B, seed) : bootstrapResamples(rows.length, B, seed);
+        const dc = [], dtd = [], slopes = [], cOrigs = [];
+        let skipped = 0;
+        const t0 = Date.now();
+        for (let b = 0; b < idxs.length; b++) {
+            if (status) status.textContent = `Bootstrap internal validation: resample ${b + 1} of ${idxs.length}${b > 2 ? ` (about ${Math.ceil((Date.now() - t0) / b * (idxs.length - b) / 1000)} s left)` : ''}…`;
+            await ModelEngine.yieldToBrowser();
+            const bRows = idxs[b].map(i => rows[i]);
+            const f = await fitSurvivalProcess(bRows, cfg, tc, evLabel, miM, seed + b + 1, Boolean(o.quickPlain));
+            if (f.tooFewEvents !== undefined) { skipped++; continue; }
+            const eb = f.encode(bRows), eo = f.encode(rows);
+            const tB = eb.rows.map(r => Number(r[tc])), eB = eb.rows.map(evLabel), lpB = eb.X.map(x => f.cox.linearPredictor(x));
+            const tO = eo.rows.map(r => Number(r[tc])), eO = eo.rows.map(evLabel), lpO = eo.X.map(x => f.cox.linearPredictor(x));
+            const cB = ModelEngine.concordanceIndex(tB, eB, lpB), cO = ModelEngine.concordanceIndex(tO, eO, lpO);
+            if (cB === null || cO === null) { skipped++; continue; }
+            dc.push(cB - cO); cOrigs.push(cO);
+            const aB = ModelEngine.timeDependentAUC(tB, eB, lpB, horizon, ModelEngine.censoringKM(tB, eB)), aO = ModelEngine.timeDependentAUC(tO, eO, lpO, horizon, censKM);
+            if (aB !== null && aO !== null) dtd.push(aB - aO);
+            const sm = ModelEngine.createCox().fit(lpO.map(v => [v]), tO, eO);
+            if (sm.converged) slopes.push(sm.summary(['lp'])[0].coef);
+        }
+        const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+        const oc = mean(dc), otd = mean(dtd), slope = mean(slopes);
+        optimism = { B: idxs.length, used: dc.length, skipped, grouped: Boolean(keys), groupCol: o.groupCol || null, quickPlain: Boolean(o.quickPlain && miM),
+            cOptimism: oc, cCorrected: oc !== null && cIndex !== null ? cIndex - oc : null,
+            tdOptimism: otd, tdCorrected: otd !== null && typeof tdAuc === 'number' ? tdAuc - otd : null,
+            slope, slopeCI: slopes.length >= 20 ? (() => { const a = slopes.slice().sort((x, y) => x - y); return [a[Math.floor(0.025 * (a.length - 1))], a[Math.floor(0.975 * (a.length - 1))]]; })() : null,
+            seconds: Math.round((Date.now() - t0) / 1000) };
+    }
+    SURV.result = { censKM, validation, optimism, externalExcluded, boxId: boxId || 'survival-step4-results', miInfo, completeCase: Boolean(o.completeCase), lastEvent, tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, obsAllCI, meanPred, obsAll, kmGroups, maxFollow,
         nTrain: Xtr.length, nTest: Xte.length, eventsTrain: events, eventsTest: eTe.reduce((a, b) => a + b, 0), excluded };
     renderSurvivalResults();
     if (status) status.textContent = '';
@@ -9746,7 +9769,7 @@ function stepPoints(km) {
 
 function renderSurvivalResults() {
     const r = SURV.result;
-    const box = document.getElementById(r ? r.boxId : 'survival-results');
+    const box = document.getElementById(r ? r.boxId : 'survival-step4-results');
     if (!r || !box) return;
     const f2 = v => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
     const summary = r.cox.summary(r.cols.map(c => c.name));
@@ -9761,17 +9784,28 @@ function renderSurvivalResults() {
     const tertNames = ['Low predicted risk', 'Medium predicted risk', 'High predicted risk'];
     const tertCols = ['var(--accent-emerald)', 'var(--accent-amber)', 'var(--accent-rose)'];
     const epp = r.eventsTrain / Math.max(1, r.cols.length);
+    const who = r.validation === 'bootstrap' ? 'all patients' : r.validation === 'separate' ? 'validation-cohort patients' : 'test patients';
     box.innerHTML = `
         <div class="cal-panel">
             <div class="tune-title">⏱️ Cox proportional-hazards model: ${escapeHtml(r.ec)} = "${escapeHtml(r.ev)}" over ${escapeHtml(r.tc)}</div>
-            <p class="tune-muted">${r.nTrain} training patients (${r.eventsTrain} events) and ${r.nTest} test patients (${r.eventsTest} events), split ${Math.round(r.ratio * 100)}/${Math.round((1 - r.ratio) * 100)} (stratified by event, seed ${r.seed})${r.excluded ? `; ${r.excluded} row(s) without a usable time or event were excluded` : ''}.${r.penalised ? ' <strong>The unpenalised model did not converge, so a small ridge penalty (0.1) was applied.</strong>' : ''}${epp < 10 ? ` <strong>Caution:</strong> only ${epp.toFixed(1)} events per model parameter; the estimates are unstable.` : ''}
+            <p class="tune-muted">${r.validation === 'bootstrap' ? `Fitted on all ${r.nTrain} patients (${r.eventsTrain} events); validated by bootstrap internal validation (Option C, ${r.optimism.B} resamples)`
+                : r.validation === 'separate' ? `Fitted on all ${r.nTrain} patients of Dataset (i) (${r.eventsTrain} events); validated on ${r.nTest} patients of the separate cohort, Dataset (ii) (${r.eventsTest} events)${r.externalExcluded ? `, after excluding ${r.externalExcluded} of its row(s) without a usable time or event` : ''}`
+                : `${r.nTrain} training patients (${r.eventsTrain} events) and ${r.nTest} test patients (${r.eventsTest} events), split ${Math.round(r.ratio * 100)}/${Math.round((1 - r.ratio) * 100)} (stratified by event, seed ${r.seed})`}${r.excluded ? `; ${r.excluded} row(s) without a usable time or event were excluded` : ''}.${r.penalised ? ' <strong>The unpenalised model did not converge, so a small ridge penalty (0.1) was applied.</strong>' : ''}${epp < 10 ? ` <strong>Caution:</strong> only ${epp.toFixed(1)} events per model parameter; the estimates are unstable.` : ''}
             Missing predictor values: ${r.miInfo ? `multiple imputation (MICE, ${r.miInfo.m} datasets, fitted on the training patients without the time or event); one Cox model per dataset, hazard ratios pooled by Rubin's rules and predictions averaged` : r.completeCase ? 'complete-case analysis (patients with a blank predictor excluded)' : 'single imputation with the Step 3 methods, fitted on the training patients'}.</p>
             <div class="cmp-guide-title" style="font-size: 13px;">Hazard ratios (training patients)</div>
             <table class="data-table thr-table"><thead><tr><th>Predictor</th><th>Hazard ratio (95% CI)</th><th>Scale</th><th>p-value</th></tr></thead><tbody>${hrRows}</tbody></table>
             <p class="tune-muted">A hazard ratio above 1 means the event tends to happen sooner (higher instantaneous risk); below 1, later. Each is adjusted for the other predictors; categorical predictors are compared with their most common category. The Cox model assumes the hazard ratios stay constant over follow-up (proportional hazards); check this clinically, e.g. whether the Kaplan-Meier curves below cross. Associations, not causation.</p>
         </div>
         <div class="cal-panel">
-            <div class="tune-title">📊 Performance on the test patients</div>
+            ${r.optimism ? `<div class="tune-title">🔁 Bootstrap internal validation (optimism-corrected)</div>
+            <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (all patients)</th><th>Optimism</th><th>Corrected</th></tr></thead><tbody>
+                <tr><td>Harrell's C-index</td><td>${r.cIndex !== null ? r.cIndex.toFixed(3) : 'N/A'}</td><td>${r.optimism.cOptimism !== null ? r.optimism.cOptimism.toFixed(3) : 'N/A'}</td><td><strong>${r.optimism.cCorrected !== null ? r.optimism.cCorrected.toFixed(3) : 'N/A'}</strong></td></tr>
+                <tr><td>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</td><td>${typeof r.tdAuc === 'number' ? r.tdAuc.toFixed(3) : 'N/A'}</td><td>${r.optimism.tdOptimism !== null ? r.optimism.tdOptimism.toFixed(3) : 'N/A'}</td><td><strong>${r.optimism.tdCorrected !== null ? r.optimism.tdCorrected.toFixed(3) : 'N/A'}</strong></td></tr>
+                <tr><td>Calibration slope (ideal 1)</td><td>1 (by construction)</td><td>${r.optimism.slope !== null ? (1 - r.optimism.slope).toFixed(3) : 'N/A'}</td><td><strong>${r.optimism.slope !== null ? r.optimism.slope.toFixed(3) : 'N/A'}</strong>${r.optimism.slopeCI ? ` <span class="tune-sd">(middle 95% of resamples ${r.optimism.slopeCI[0].toFixed(2)}–${r.optimism.slopeCI[1].toFixed(2)})</span>` : ''}</td></tr>
+            </tbody></table>
+            <p class="tune-muted">Each of the ${r.optimism.used} usable resamples${r.optimism.skipped ? ` (${r.optimism.skipped} skipped: too few events or no comparable pairs)` : ''} repeated the whole process (${r.optimism.quickPlain ? 'with the quick approximation: a plain median / most-frequent fill instead of MICE inside the resamples' : r.miInfo ? 'MICE' : 'single imputation'}, encoding and the Cox fit) on patients drawn with replacement${r.optimism.grouped ? ` (whole patients by "${escapeHtml(r.optimism.groupCol)}")` : ''}. The optimism is the average amount by which a model scores better on its own resample than on the original patients; it is subtracted from the apparent performance. A corrected calibration slope below 1 means the predictions are too extreme and would need shrinking (${r.optimism.seconds} s).${r.optimism.used < 50 ? ' <strong>Few usable resamples: the correction is imprecise.</strong>' : ''}</p>
+            <div class="tune-title" style="margin-top: 12px;">📊 Apparent performance on all patients (before correction)</div>
+            <p class="tune-muted">The panels below score the final model on the same patients it was fitted to, so they are optimistic; use the corrected values above when reporting.</p>` : `<div class="tune-title">📊 Performance on the ${r.validation === 'separate' ? 'validation cohort (Dataset ii)' : 'test patients'}</div>`}
             <div class="cal-stats"><div><strong>Harrell's C-index</strong>: ${r.cIndex !== null ? r.cIndex.toFixed(3) : 'N/A'}${r.cCI ? ` <span class="tune-sd">(95% CI ${r.cCI[0].toFixed(3)}–${r.cCI[1].toFixed(3)})</span>` : ''} &mdash; the probability that, of two comparable patients, the one with the event first had the higher predicted risk (0.5 = chance, 1 = perfect).</div>
             <div><strong>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.tdAuc === 'number' ? r.tdAuc.toFixed(3) : 'N/A'}${r.tdCI ? ` <span class="tune-sd">(95% CI ${r.tdCI[0].toFixed(3)}–${r.tdCI[1].toFixed(3)})</span>` : ''} &mdash; of a patient who had the event by ${escapeHtml(String(r.horizon))} and one still event-free after it, how often the first had the higher predicted risk.</div>
             <div><strong>Brier score at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.brier === 'number' ? r.brier.toFixed(3) : 'not estimable (too little follow-up to weight the patients at this horizon; choose an earlier horizon)'} (lower is better; giving everyone the overall Kaplan-Meier risk scores ${typeof r.brierNull === 'number' ? r.brierNull.toFixed(3) : 'N/A'})${typeof r.scaledBrier === 'number' ? `; <strong>scaled Brier</strong> ${(r.scaledBrier * 100).toFixed(1)}% (share of that error the model removes; 0% = no better than the overall risk)` : ''}.</div>
@@ -9781,16 +9815,26 @@ function renderSurvivalResults() {
             <div class="cal-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
                 <div>${lineChartSvg({ series: [{ name: 'Risk group', colour: 'var(--accent-cyan)', noHover: true, points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }, { name: 'Risk group', colour: 'var(--accent-cyan)', scatter: true, points: r.calib.map(c => ({ x: c.predicted, y: c.observed })) }],
                     xLabel: `Predicted risk by ${r.horizon}`, yLabel: 'Observed risk (Kaplan-Meier)', xMax: calMax, yMax: calMax, diagonal: true, aria: 'Survival calibration at the horizon' })}
-                    <p class="tune-muted">Calibration at ${escapeHtml(String(r.horizon))}: test patients are grouped by predicted risk; each point compares the group's average predicted risk with its Kaplan-Meier observed risk. Points near the diagonal mean the predicted risks can be taken at face value.</p>
+                    <p class="tune-muted">Calibration at ${escapeHtml(String(r.horizon))}: ${who} are grouped by predicted risk; each point compares the group's average predicted risk with its Kaplan-Meier observed risk. Points near the diagonal mean the predicted risks can be taken at face value.</p>
                     <table class="data-table thr-table"><thead><tr><th>Risk group</th><th>Patients</th><th>Mean predicted</th><th>Observed (95% CI)</th></tr></thead><tbody>${r.calib.map((c, i) => `<tr><td>${i + 1} of ${r.calib.length}</td><td>${c.n}</td><td>${pctTxt(c.predicted)}</td><td>${pctTxt(c.observed)}${c.observedCI ? ` <span class="tune-sd">(${pctTxt(c.observedCI[0])}–${pctTxt(c.observedCI[1])})</span>` : ''}</td></tr>`).join('')}</tbody></table>
                     <p class="tune-muted">Observed risks come with 95% confidence intervals (Greenwood's formula on the log(−log) scale), so a group whose interval includes its predicted risk is consistent with good calibration.</p></div>
                 <div>${lineChartSvg({ series: r.kmGroups.map((km, g) => ({ name: tertNames[g], colour: tertCols[g], points: stepPoints(km) })), xLabel: `${r.tc}`, yLabel: 'Event-free (Kaplan-Meier)', xMax: r.maxFollow, yMax: 1, aria: 'Kaplan-Meier curves by predicted risk group' })}
                     ${chartLegend(tertNames.map((n, g) => ({ colour: tertCols[g], label: n })))}
-                    <p class="tune-muted">Test patients split into thirds by predicted risk. Well-separated curves show the model distinguishes patients with early and late events.</p></div>
+                    <p class="tune-muted">${who.charAt(0).toUpperCase() + who.slice(1)} split into thirds by predicted risk. Well-separated curves show the model distinguishes patients with early and late events.</p></div>
             </div>
-            ${r.nTest < 100 || r.eventsTest < 50 ? '<div class="tune-warn">⚠️ Few test patients or events: these performance estimates are imprecise.</div>' : ''}
+            ${r.nTest < 100 || r.eventsTest < 50 ? `<div class="tune-warn">⚠️ Few ${who} or events: these performance estimates are imprecise.</div>` : ''}
             <button type="button" class="btn btn-secondary btn-sm" id="surv-report-btn">📄 Download Survival Analysis Report (.JSON)</button>
         </div>
+        <p class="tune-muted">Predicted event-free probabilities for one patient: Step 5. For a file of patients (and validation on it if it contains the follow-up time and event): Step 6.</p>`;
+    document.getElementById('surv-report-btn').addEventListener('click', downloadSurvivalReport);
+}
+
+// Step 5 for a time-to-event outcome: predicted event-free probability for one patient
+function renderSurvivalSinglePrediction(boxId) {
+    const box = document.getElementById(boxId), r = SURV.result;
+    if (!box) return;
+    if (!r) { box.innerHTML = '<div class="cal-panel"><p class="tune-muted">Fit the Cox model in Step 4 first.</p></div>'; return; }
+    box.innerHTML = `
         <div class="cal-panel">
             <div class="tune-title">🔮 Predicted event-free probability for one patient</div>
             <div class="predict-form-grid" id="surv-predict-form">${r.prep.featureCols.map((col, i) => {
@@ -9803,8 +9847,54 @@ function renderSurvivalResults() {
             <div id="surv-predict-out" aria-live="polite"></div>
             <p class="tune-muted">For research and education only; not for decisions about an individual patient's care.</p>
         </div>`;
-    document.getElementById('surv-report-btn').addEventListener('click', downloadSurvivalReport);
     document.getElementById('surv-predict-btn').addEventListener('click', predictOne);
+}
+
+// Cox design columns of an encoded patient (and of each of its multiply imputed versions)
+function designOf(x, cols) {
+    const d = cols.map(c => x[c.idx]);
+    if (x.__mi) Object.defineProperty(d, '__mi', { value: x.__mi.map(v => cols.map(c => v[c.idx])), enumerable: false });
+    return d;
+}
+
+// Step 6 for a time-to-event outcome: predictions for a file of patients and, if the file also has the follow-up
+// time and event columns, validation on those patients (C-index, time-dependent AUC, Brier score, overall calibration)
+function survivalBatch(rows, headers) {
+    const r = SURV.result, H = r.horizon;
+    const lps = [], survs = [];
+    const results = rows.map(row => {
+        const issues = [], ranges = [];
+        const xd = designOf(DataEngine.transformSingleRow(row, r.prep, issues, ranges), r.cols);
+        const lp = r.cox.linearPredictor(xd), sv = r.cox.survivalAt(xd, H);
+        lps.push(lp); survs.push(sv);
+        return { ...row, [`Predicted_event_free_at_${H}`]: `${(sv * 100).toFixed(1)}%`, [`Predicted_risk_by_${H}`]: `${((1 - sv) * 100).toFixed(1)}%`, Linear_Predictor: lp.toFixed(4),
+            Imputed_Inputs: issues.map(i => `${i.column}:${i.kind}`).join('; '), Outside_Training_Range: ranges.map(o => `${o.column}=${o.value} (training ${o.min}-${o.max})`).join('; '),
+            Model: `Cox proportional-hazards${r.miInfo ? ` (pooled over ${r.miInfo.m} imputations)` : ''}` };
+    });
+    let validation = null;
+    if (headers.includes(r.tc) && headers.includes(r.ec)) {
+        const ok = rows.map((row, i) => i).filter(i => !DataEngine.isMissing(rows[i][r.tc]) && Number(rows[i][r.tc]) > 0 && !DataEngine.isMissing(rows[i][r.ec]));
+        const t = ok.map(i => Number(rows[i][r.tc])), e = ok.map(i => (String(rows[i][r.ec]).trim() === r.ev ? 1 : 0));
+        const lp = ok.map(i => lps[i]), sv = ok.map(i => survs[i]);
+        if (ok.length >= 10 && e.some(v => v)) {
+            const km = ModelEngine.kaplanMeier(t, e);
+            const brier = ModelEngine.ipcwBrier(t, e, sv, H, r.censKM);
+            const brierNull = ModelEngine.ipcwBrier(t, e, t.map(() => ModelEngine.kmAt(km, H)), H, r.censKM);
+            validation = { n: ok.length, events: e.reduce((a, b) => a + b, 0), excluded: rows.length - ok.length, cIndex: ModelEngine.concordanceIndex(t, e, lp),
+                tdAuc: ModelEngine.timeDependentAUC(t, e, lp, H, r.censKM), brier, brierNull, meanPred: sv.reduce((a, b) => a + (1 - b), 0) / sv.length, observed: 1 - ModelEngine.kmAt(km, H) };
+        }
+    }
+    return { results, validation };
+}
+
+function survivalValidationHtml(v, fileName) {
+    const r = SURV.result, f = x => (typeof x === 'number' ? x.toFixed(3) : 'N/A'), pc = x => `${(x * 100).toFixed(1)}%`;
+    return `<div class="cal-panel"><div class="tune-title">✅ Validation of the Cox model on "${escapeHtml(fileName || 'the uploaded file')}"</div>
+        <p class="tune-muted">${v.n} patients with a usable follow-up time and event status (${v.events} events)${v.excluded ? `; ${v.excluded} row(s) excluded` : ''}. Horizon ${escapeHtml(String(r.horizon))}.</p>
+        <div class="cal-stats"><div><strong>Harrell's C-index</strong>: ${f(v.cIndex)}</div><div><strong>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</strong>: ${f(v.tdAuc)}</div>
+        <div><strong>Brier score</strong>: ${typeof v.brier === 'number' ? f(v.brier) : 'not estimable at this horizon'} (overall Kaplan-Meier risk for everyone: ${f(v.brierNull)})</div>
+        <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pc(v.meanPred)} vs observed ${pc(v.observed)} (Kaplan-Meier)</div></div>
+        ${v.n < 100 || v.events < 50 ? '<div class="tune-warn">⚠️ Fewer than 100 patients or 50 events: these estimates are imprecise.</div>' : ''}</div>`;
 }
 
 function predictOne() {
@@ -9812,8 +9902,7 @@ function predictOne() {
     const input = {};
     document.querySelectorAll('.surv-in').forEach(el => { input[el.dataset.col] = el.value; });
     const x = DataEngine.transformSingleRow(input, r.prep, []);
-    const xd = r.cols.map(c => x[c.idx]);
-    if (x.__mi) Object.defineProperty(xd, '__mi', { value: x.__mi.map(v => r.cols.map(c => v[c.idx])), enumerable: false }); // multiply imputed patient
+    const xd = designOf(x, r.cols); // carries each multiply imputed version
     const times = [0.25, 0.5, 0.75, 1].map(f => Number((r.horizon * f * 2 / 2).toPrecision(3)));
     times[3] = r.horizon;
     const rows = times.map(t => `<tr><td>${t}</td><td>${(r.cox.survivalAt(xd, t) * 100).toFixed(1)}%</td></tr>`).join('');

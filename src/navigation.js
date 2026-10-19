@@ -1,5 +1,6 @@
 // navigation.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-import { renderSurvivalSetup } from './survival.js';
+import { SURV, renderSurvivalSinglePrediction } from './survival.js';
+import { survivalSpec } from './outcome-type.js';
 import { updateImputationEstimate } from './multiple-imputation.js';
 import { renderSampleSizePanel } from './panels.js';
 import { AppState, escapeHtml } from './core.js';
@@ -210,11 +211,7 @@ window.launch7StepPipeline = async function(event) {
 
 function goToStep(stepNum) {
     // Enforce prerequisites
-    if (stepNum === 'survival' && !AppState.parsedData) {
-        alert("Please upload a CSV file or load a sample dataset first.");
-        return;
-    }
-    if (stepNum !== 'pipeline' && stepNum !== 'survival') {
+    if (stepNum !== 'pipeline') {
         const num = parseInt(stepNum, 10);
         if (num > 1 && !AppState.parsedData && !(num > 4 && AppState.deployedSource === 'imported' && AppState.trainedModel)) {
             alert("Please upload a CSV file or load a sample dataset first.");
@@ -226,7 +223,7 @@ function goToStep(stepNum) {
             alert("Please complete the Data Imputation step first.");
             return;
         }
-        if (num > 4 && !AppState.trainedModel) {
+        if (num > 4 && !AppState.trainedModel && !(survivalSpec() && SURV.result)) {
             alert("Please train a machine learning model first in Step 4.");
             return;
         }
@@ -264,8 +261,7 @@ function goToStep(stepNum) {
     if (stepNum === 2 || stepNum === '2') renderVariableConfigGrid();
     if (stepNum === 3 || stepNum === '3') { renderImputationTable(); updateImputationEstimate(); }
     if (stepNum === 4 || stepNum === '4') { refreshOptionBSummaries(); renderSampleSizePanel(); updateImputationEstimate(); refreshModelSampleGuide(); }
-    if (stepNum === 5 || stepNum === '5') renderSinglePredictionForm();
-    if (stepNum === 'survival') renderSurvivalSetup();
+    if (stepNum === 5 || stepNum === '5') { if (survivalSpec()) renderSurvivalSinglePrediction('survival-step5'); else { const sb = document.getElementById('survival-step5'); if (sb) sb.innerHTML = ''; renderSinglePredictionForm(); } }
     if (stepNum === 'pipeline') {
         initPipelineUI();
         goToPipelineSubstep(AppState.pipeline && AppState.pipeline.substep ? AppState.pipeline.substep : 1);

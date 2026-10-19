@@ -3,6 +3,8 @@ import { AppState, displayModelName, prepTypicality, escapeHtml, probabilityLabe
 import { thresholdedOutput } from './cv-tuning.js';
 import { DOM } from './shell.js';
 import { validateOnLabelledCohort } from './external-validation.js';
+import { survivalSpec } from './outcome-type.js';
+import { SURV, survivalBatch, survivalValidationHtml } from './survival.js';
 
 
 // =========================================================================
@@ -49,6 +51,7 @@ function processBatchCSV(csvText, name) {
 }
 
 async function executeBatchPrediction() {
+    if (survivalSpec()) { executeSurvivalBatch(); return; }
     if (!AppState.trainedModel || !AppState.prepMeta) {
         alert("Please train a model in Step 4 first.");
         return;
@@ -142,6 +145,24 @@ async function executeBatchPrediction() {
     // The file also contains the outcome: validate the model on these patients
     if (headers.includes(prep.targetCol)) await validateOnLabelledCohort(rows, AppState.batchFileName);
     else { const vb = document.getElementById('external-validation-container'); if (vb) vb.innerHTML = ''; }
+    renderBatchPreview(results);
+}
+
+// Time-to-event outcome: predicted event-free probability at the horizon for each row, and validation of the Cox
+// model when the file also has the follow-up time and event columns
+function executeSurvivalBatch() {
+    if (!SURV.result) { alert('Please fit the Cox model in Step 4 first.'); return; }
+    if (!AppState.batchData) { alert('Please upload a batch CSV file first.'); return; }
+    const { headers, rows } = AppState.batchData;
+    if (!rows.length) { alert('The batch file contains no data rows.'); return; }
+    const { results, validation } = survivalBatch(rows, headers);
+    AppState.batchPredictions = results;
+    const vb = document.getElementById('external-validation-container');
+    if (vb) vb.innerHTML = validation ? survivalValidationHtml(validation, AppState.batchFileName) : '';
+    renderBatchPreview(results);
+}
+
+function renderBatchPreview(results) {
     DOM.batchResultsCard.style.display = 'flex';
     DOM.downloadBatchCsvBtn.disabled = false;
 

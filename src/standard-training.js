@@ -14,23 +14,23 @@ import { survivalSpec } from './outcome-type.js';
 import { runSurvivalAnalysis } from './survival.js';
 
 // Step 4 for a time-to-event outcome (chosen in Step 2): a Cox model with the Step 2 predictors and the Step 3
-// missing-data handling (single imputation methods or MICE), validated on a held-out testing set (Option A)
+// missing-data handling (single imputation methods, complete cases or MICE), validated by the design chosen here:
+// a held-out testing set (Option A), a separate cohort (Option B) or bootstrap internal validation (Option C)
 async function trainSurvivalStep4(spec) {
     const valMode = document.querySelector('input[name="validation-mode"]:checked')?.value || AppState.validationMode || 'split';
+    const validation = valMode === 'bootstrap' ? 'bootstrap' : valMode === 'separate' ? 'separate' : 'split';
     const box = document.getElementById('survival-step4-results');
-    if (valMode !== 'split') {
-        DOM.trainStatus.innerHTML = `<span style="color: var(--accent-amber);">⚠️ For time-to-event outcomes, Step 4 currently supports Option A (held-out testing set). Bootstrap internal validation and a separate validation cohort for Cox models are being added; choose Option A for now.</span>`;
-        return;
-    }
     const preds = Object.keys(AppState.columnConfigs).filter(c => AppState.columnConfigs[c].role === 'feature');
     const trainPct = parseFloat(document.getElementById('train-pct-input')?.value) || 80;
     const ratio = Math.min(0.95, Math.max(0.50, trainPct / 100));
-    const custom = document.querySelector('input[name="split-seed-mode"]:checked')?.value === 'custom';
-    const seed = custom ? (parseSeed(document.getElementById('split-seed-input')?.value) ?? 42) : 42;
+    const seed = splitSeedForCV();
     const miM = AppState.completeCase ? 0 : readMultipleImputation();
+    const extra = validation === 'bootstrap'
+        ? { B: parseInt(document.getElementById('bootstrap-reps')?.value, 10) || 100, groupCol: document.getElementById('bootstrap-group-col')?.value || null, quickPlain: miceQuickApproximation() }
+        : validation === 'separate' ? { externalRows: AppState.separateTestRawRows || [] } : {};
     DOM.trainModelBtn.disabled = true;
     try {
-        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase) });
+        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, ...extra });
         if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
         DOM.trainStatus.innerHTML = `<span style="color: var(--accent-rose);">⚠️ ${escapeHtml(err.message || String(err))}</span>`;

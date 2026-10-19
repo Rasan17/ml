@@ -174,15 +174,27 @@ test('7-step pipeline runs to the benchmark', async ({ page }) => {
     expect(errors).toEqual([]);
 });
 
-test('survival analysis tab fits a Cox model', async ({ page }) => {
+test('time-to-event sample opens Step 2 with the outcome chosen; Option C bootstrap corrects the Cox model', async ({ page }) => {
     const errors = watch(page);
     await page.goto('/index.html');
     await page.click('#sample-survival-btn');
-    await expect(page.locator('#step-survival-content')).toBeVisible();
-    await page.fill('#surv-horizon', '24');
-    await page.click('#surv-run-btn');
-    await expect(page.locator('#survival-results')).toContainText("Harrell's C-index", { timeout: 60000 });
-    expect(await page.locator('#survival-results table').first().locator('tbody tr').count()).toBeGreaterThan(3);
+    await expect(page.locator('#step-2-content')).toBeVisible();
+    await expect(page.locator('input[name="outcome-type"][value="survival"]')).toBeChecked();
+    await expect(page.locator('#ot-time-col')).toHaveValue('Months_To_Revision_Or_Censoring');
+    await page.fill('#ot-horizon', '24');
+    await page.dispatchEvent('#ot-horizon', 'change');
+    await page.click('button.step-tab[data-step="3"]');
+    await page.click('#apply-imputation-btn');
+    await page.click('button.step-tab[data-step="4"]');
+    await page.check('input[name="validation-mode"][value="bootstrap"]', { force: true });
+    await page.selectOption('#bootstrap-reps', '50');
+    await page.click('#train-model-btn');
+    const box = page.locator('#survival-step4-results');
+    await expect(box).toContainText('Bootstrap internal validation (optimism-corrected)', { timeout: 120000 });
+    await expect(box).toContainText('Calibration slope');
+    const optTable = box.locator('table', { hasText: 'Optimism' });
+    expect(await optTable.locator('tbody tr').count()).toBe(3);
+    console.log('Option C Cox:', (await optTable.innerText()).replace(/\s+/g, ' '));
     expect(errors).toEqual([]);
 });
 
@@ -206,6 +218,21 @@ test('time-to-event outcome chosen in Step 2 is fitted by Step 4 (Cox model, sin
         await expect(page.locator('#survival-step4-results')).toContainText(mode === 'single' ? 'single imputation' : 'MICE, 5 datasets', { timeout: 120000 });
         await expect(page.locator('#survival-step4-results')).toContainText("Harrell's C-index");
     }
+    // Option B: fit on all patients, validate on a separate cohort (here the same file uploaded as Dataset ii)
+    await page.check('input[name="validation-mode"][value="separate"]', { force: true });
+    await page.setInputFiles('#test-csv-file-input', path.join(__dirname, '..', '..', 'medical_shunt_revision_survival.csv'));
+    await page.click('#train-model-btn');
+    await expect(page.locator('#survival-step4-results')).toContainText('validation cohort (Dataset ii)', { timeout: 120000 });
+    // Step 5: one patient; Step 6: a file of patients, validated because it has the time and event columns
+    await page.click('button.step-tab[data-step="5"]');
+    await expect(page.locator('#predict-form-grid')).toBeHidden();
+    await page.click('#surv-predict-btn');
+    await expect(page.locator('#surv-predict-out')).toContainText('Predicted probability of no event');
+    await page.click('button.step-tab[data-step="6"]');
+    await page.setInputFiles('#batch-file-input', path.join(__dirname, '..', '..', 'medical_shunt_revision_survival.csv'));
+    await page.click('#run-batch-predict-btn');
+    await expect(page.locator('#batch-table-container')).toContainText('Predicted_event_free_at_24');
+    await expect(page.locator('#external-validation-container')).toContainText("Validation of the Cox model");
     expect(errors).toEqual([]);
 });
 

@@ -1,4 +1,5 @@
 // ingest.js: part of the Universal Medical ML/NeuralNet Predictor application controller
+import { SURV } from './survival.js';
 import { AppState, escapeHtml } from './core.js';
 import { populateSplitColumnSelects } from './cv-tuning.js';
 import { goToPipelineSubstep, initPipelineUI } from './pipeline.js';
@@ -82,6 +83,7 @@ function resetDerivedState() {
     AppState.allTestedResults = null;
     AppState.separateTestData = null;
     AppState.batchPredictions = null;
+    SURV.result = null; // a Cox model fitted on the previous dataset
     AppState.deployedSource = null;
     AppState.deployedPipelineModel = null;
     AppState.baselinePrepMeta = null;
