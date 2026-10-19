@@ -1990,3 +1990,8 @@ body[data-outcome="survival"] #batch-predict-provenance-bar,
 body[data-outcome="survival"] #run-single-predict-btn,
 body[data-outcome="survival"] #single-result-banner,
 body[data-outcome="survival"] #sample-batch-btn { display: none !important; }
+
+/* Reduced motion: no pulsing or shaking indicators (the information is also given in text) */
+@media (prefers-reduced-motion: reduce) {
+    .pulse-dot, .monitor-status-badge, .shake-alert, [class*="shimmer"] { animation: none !important; }
+}

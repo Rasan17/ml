@@ -987,7 +987,7 @@ async function runTuningCore(mId, baseHp, fd, isClassification, numClasses, o) {
             const v = ev ? ev[metricKey] : null;
             if (typeof v === 'number' && isFinite(v)) scores.push(v);
             if (ev) Object.keys(all).forEach(key => { if (typeof ev[key] === 'number' && isFinite(ev[key])) all[key].push(ev[key]); });
-            if (ev && Array.isArray(ev.probPositive) && Array.isArray(ev.actuals)) { oof.p.push(...ev.probPositive); oof.y.push(...ev.actuals.map(v => (v === 1 ? 1 : 0))); }
+            if (ev && Array.isArray(ev.probPositive) && Array.isArray(ev.actuals)) { oof.p.push(...ev.probPositive); oof.y.push(...ev.actuals.map(a => (a === 1 ? 1 : 0))); }
             fitsDone++;
             await ModelEngine.yieldToBrowser(); // background-tab safe (plain timers are throttled in hidden tabs)
         }
@@ -1456,6 +1456,16 @@ function setupEventListeners() {
         tab.addEventListener('click', () => {
             const step = tab.dataset.step;
             goToStep(step);
+        });
+    });
+    // Keyboard: Left/Right (and Home/End) move between the step tabs; Enter or Space opens one
+    DOM.stepTabs.forEach(tab => {
+        tab.addEventListener('keydown', e => {
+            const tabs = [...DOM.stepTabs].filter(t => t.offsetParent !== null);
+            const at = tabs.indexOf(tab);
+            const to = e.key === 'ArrowRight' ? tabs[(at + 1) % tabs.length] : e.key === 'ArrowLeft' ? tabs[(at - 1 + tabs.length) % tabs.length]
+                : e.key === 'Home' ? tabs[0] : e.key === 'End' ? tabs[tabs.length - 1] : null;
+            if (to && at >= 0) { e.preventDefault(); to.focus(); }
         });
     });
 
@@ -3897,9 +3907,11 @@ function miceRhat(chains, burn = 2) {
 function renderMiceDiagnostics(containerId, mi) {
     const box = document.getElementById(containerId);
     if (!box) return;
-    if (!mi || !Array.isArray(mi.trace) || !mi.trace.length) { box.innerHTML = ''; return; }
+    const emptyNote = mi && Array.isArray(mi.allMissing) && mi.allMissing.length
+        ? `<div class="cal-panel"><div class="tune-warn">⚠️ No observed values among the training patients for: ${mi.allMissing.map(c => `"${escapeHtml(String(c))}"`).join(', ')}. Multiple imputation cannot impute a predictor that is never recorded, so it was filled with a constant and carries no information. Exclude it in Step 2.</div></div>` : '';
+    if (!mi || !Array.isArray(mi.trace) || !mi.trace.length) { box.innerHTML = emptyNote; return; }
     const cols = Object.keys(mi.trace[0] || {}).slice(0, 6);
-    if (!cols.length) { box.innerHTML = ''; return; }
+    if (!cols.length) { box.innerHTML = emptyNote; return; }
     const drifting = [], rhats = [];
     const charts = cols.map(c => {
         const series = mi.trace.map((t, l) => ({ name: `Imputation ${l + 1}`, colour: CURVE_COLOURS[l % CURVE_COLOURS.length], points: (Array.isArray(t && t[c]) ? t[c] : []).map((v, it) => ({ x: it + 1, y: Number(v) })).filter(pt => isFinite(pt.y)) }));
@@ -3911,7 +3923,7 @@ function renderMiceDiagnostics(containerId, mi) {
         const lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.15 || sd * 0.1 || 1;
         return `<div><div class="tune-muted" style="font-weight: 600;">${escapeHtml(c)}</div>${lineChartSvg({ series, xLabel: 'Round', yLabel: 'Mean imputed', xMin: 0, xMax: (mi.trace[0][c] || []).length || 10, yMin: lo - pad, yMax: hi + pad, aria: `MICE convergence for ${c}` })}</div>`;
     });
-    box.innerHTML = `
+    box.innerHTML = emptyNote + `
         <div class="cal-panel">
             <div class="tune-title">🧩 Did the multiple imputation converge? (MICE diagnostics)</div>
             <p class="tune-muted">For each numerical predictor with missing values, the mean of its imputed values after each of the ${(mi.trace[0][cols[0]] || []).length} rounds, one line per imputation (${mi.trace.length}). Converged imputations level off after the first few rounds and mix around the same level; lines that keep rising or falling at the end suggest the chains needed more rounds.${Object.keys(mi.trace[0]).length > cols.length ? ` First ${cols.length} predictors shown.` : ''}</p>
@@ -4331,7 +4343,10 @@ async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onPr
     });
     prep.X = sets[0].X;
     prep.y = sets[0].y;
-    prep.multipleImputation = { m, imputedColumns: mi.imputedColumns, rows: rawRows.length, trace: mi.trace || null, traceScale: mi.traceScale || null };
+    // Predictors with no observed value at all: MICE cannot impute them and fills a constant, so they carry no
+    // information (reported in the MICE diagnostics)
+    const allMissing = Object.keys(columnConfigs).filter(c => columnConfigs[c].role === 'feature' && plainRows.length && plainRows.every(r => DataEngine.isMissing(r[c])));
+    prep.multipleImputation = { m, imputedColumns: mi.imputedColumns, allMissing, rows: rawRows.length, trace: mi.trace || null, traceScale: mi.traceScale || null };
     return { prep, sets, imputedColumns: mi.imputedColumns };
 }
 
@@ -4835,7 +4850,7 @@ async function trainSurvivalStep4(spec) {
         : validation === 'separate' ? { externalRows: AppState.separateTestRawRows || [] } : {};
     DOM.trainModelBtn.disabled = true;
     try {
-        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, splitFn: (rows, labels, ratio, seed) => splitRowsForWorkflow(rows, labels, ratio, true, seed), describeSplit, ...extra });
+        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, splitFn: (rows, labels, r, s) => splitRowsForWorkflow(rows, labels, r, true, s), describeSplit, ...extra });
         if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
         // Steps 5 and 6 now predict with the Cox model
         if (DOM.toStep5Btn) DOM.toStep5Btn.disabled = false;
@@ -4876,6 +4891,18 @@ async function startModelTraining() {
         // New patients' blank predictors are filled with the same fitted imputation as the training data
         prep.imputation = { configs: JSON.parse(JSON.stringify(AppState.columnConfigs)), plan: AppState.imputedData.plan };
         AppState.prepMeta = prep;
+        // Very few events per predictor parameter: confirmed before training, not only reported afterwards
+        if (prep.isClassification && Array.isArray(prep.y) && prep.y.length && prep.X && prep.X[0]) {
+            const counts = {};
+            prep.y.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+            const minority = Math.min(...Object.values(counts));
+            const nPar = Math.max(1, prep.X[0].length - Object.values(prep.featureMetadata || {}).filter(m => m.type === 'nominal' && m.length > 1).length);
+            if (minority / nPar < 5 && !confirm(`Very few events for the number of predictors\n\nThe smaller outcome group has ${minority} patient(s) for ${nPar} predictor parameter(s): ${(minority / nPar).toFixed(1)} per parameter, well below the 10–20 usually recommended (and see the Riley criteria in Step 4). Any model is likely to overfit, and its results will be unstable and optimistic.\n\nConsider fewer predictors (Step 2) or more patients. Continue as an exploratory analysis?`)) {
+                DOM.trainStatus.innerHTML = '<span style="color: var(--accent-amber);">Stopped: too few events for the number of predictors. Reduce the predictors in Step 2 or add patients.</span>';
+                DOM.trainModelBtn.disabled = false;
+                return;
+            }
+        }
 
         // Determine active validation protocol (A: split, B: separate test file, C: bootstrap internal validation)
         const valMode = document.querySelector('input[name="validation-mode"]:checked')?.value || AppState.validationMode || 'split';
@@ -9141,7 +9168,7 @@ function downloadStandardAnalysisReport() {
 
 // ---- src/model-io.js ----
 // model-io.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-/* global DataEngine, ModelEngine */
+/* global tf, DataEngine, ModelEngine */
 
 
 
@@ -9249,9 +9276,11 @@ async function exportTrainedModel() {
             patientDataContents: containsPatientData ? manifest.map(m => m.replace(/^• /, '')) : [],
             decisionThreshold: AppState.evalResults ? AppState.evalResults.decisionThreshold ?? null : null,
             evaluation: evaluationSummary(AppState.evalResults),
+            environment: computingEnvironment(),
             preprocessing: cleanPrep,
             parameters: ser
         };
+        { const inputs = selfCheckInputs(prep); bundle.selfCheck = { inputs, outputs: selfCheckOutputs(model, prep, inputs) }; }
         const blob = new Blob([JSON.stringify(bundle)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -9320,6 +9349,37 @@ function sanitizeEvaluation(e, depth = 0) {
 }
 
 // The imported model must predict a typical patient (all predictors at their fitted defaults) with valid output
+// The computing environment a model was trained and saved in (no patient data): app version, TensorFlow.js
+// version and backend (GPU arithmetic differs slightly between devices), browser
+function computingEnvironment() {
+    const env = { app: APP_VERSION };
+    try { if (typeof tf !== 'undefined') { env.tfjs = tf.version && tf.version.tfjs; env.backend = tf.getBackend && tf.getBackend(); } } catch (e) { /* TF.js unavailable */ }
+    try { env.browser = navigator.userAgent; } catch (e) { /* not available */ }
+    return env;
+}
+
+// Reproducibility self-check: three synthetic patients built from the training summaries (a typical patient,
+// and every numerical predictor one SD above or below its mean, categories at their most common value; no
+// real patient's values) and the model's outputs for them. Re-run on import: the same file must give the
+// same predictions.
+function selfCheckInputs(prep) {
+    return [0, 1, -1].map(k => {
+        const row = {};
+        prep.featureCols.forEach(c => {
+            const m = prep.featureMetadata[c] || {};
+            row[c] = m.type === 'continuous' && typeof m.mean === 'number' ? Number((m.mean + k * (m.std || 0)).toPrecision(8)) : '';
+        });
+        return row;
+    });
+}
+function outputVector(out) {
+    if (out && typeof out === 'object') return [out.pred, ...Object.keys(out.probabilities || {}).sort().map(k => out.probabilities[k])].map(Number);
+    return [Number(out)];
+}
+function selfCheckOutputs(model, prep, inputs) {
+    return inputs.map(r => outputVector(model.predictSingle(DataEngine.transformSingleRow(r, prep))));
+}
+
 function checkImportedModel(model, prep) {
     if (!model || typeof model.predictSingle !== 'function') throw new Error('The file does not contain a usable model.');
     const row = {};
@@ -9333,6 +9393,7 @@ function checkImportedModel(model, prep) {
 
 async function importTrainedModel(file) {
     try {
+        if (file.size > 300 * 1024 * 1024) throw new Error('The file is larger than 300 MB, too large for a model file from this app.');
         const bundle = JSON.parse(await file.text());
         if (!bundle || bundle.format !== MODEL_FILE_FORMAT) throw new Error('This is not a trained-model file exported from this app.');
         if (bundle.formatVersion !== undefined && bundle.formatVersion > MODEL_FILE_VERSION) throw new Error('This model file was made by a newer version of the app; please use the latest version.');
@@ -9341,6 +9402,21 @@ async function importTrainedModel(file) {
         const model = await ModelEngine.deserializeModel(bundle.parameters);
         // Nothing is installed until the model has predicted a typical patient without error
         checkImportedModel(model, prep);
+        // Reproducibility self-check: the recorded predictions for three synthetic patients must be reproduced
+        let selfCheckNote = '';
+        const sc = bundle.selfCheck;
+        if (sc && Array.isArray(sc.inputs) && Array.isArray(sc.outputs) && sc.inputs.length === sc.outputs.length && sc.inputs.length <= 10) {
+            const now = selfCheckOutputs(model, prep, sc.inputs.map(r => (r && typeof r === 'object' ? Object.fromEntries(prep.featureCols.map(c => [c, r[c] ?? ''])) : {})));
+            const diff = Math.max(0, ...now.flatMap((v, i) => v.map((x, j) => Math.abs(x - Number((sc.outputs[i] || [])[j])))));
+            const env = bundle.environment || {};
+            if (!(diff <= 1e-6)) {
+                const gpu = (env.backend && env.backend !== 'cpu') || (typeof tf !== 'undefined' && tf.getBackend && tf.getBackend() !== 'cpu');
+                if (!(diff <= 1e-3 && gpu)) {
+                    if (!confirm(`Reproducibility check: this model's predictions differ from those recorded when it was saved (largest difference ${isFinite(diff) ? diff.toPrecision(2) : 'not comparable'}).\n\nThe file may have been altered, or saved by a different version of the app (saved with ${env.app || 'an unknown version'}, this is ${APP_VERSION}). Use it anyway?`)) return;
+                    selfCheckNote = 'predictions differ from those recorded at saving';
+                } else selfCheckNote = `reproduced to within ${diff.toPrecision(2)} (GPU arithmetic)`;
+            } else selfCheckNote = 'reproduced exactly';
+        }
         AppState.trainedModel = model;
         AppState.prepMeta = prep;
         const evalIn = sanitizeEvaluation(bundle.evaluation);
@@ -9348,7 +9424,8 @@ async function importTrainedModel(file) {
         AppState.evalResults = { ...evalIn, decisionThreshold: thr ?? null, isClassification: prep.isClassification };
         AppState.deployedSource = 'imported';
         AppState.deployedModelId = bundle.model && bundle.model.id;
-        AppState.importedModelInfo = { name: (bundle.model && bundle.model.name) || 'Imported model', exportedAt: bundle.exportedAt, dataset: bundle.trainingDataset && bundle.trainingDataset.name, version: bundle.software && bundle.software.version };
+        AppState.importedSelfCheck = selfCheckNote;
+        AppState.importedModelInfo = { environment: bundle.environment && typeof bundle.environment === 'object' ? { app: String(bundle.environment.app || ''), tfjs: String(bundle.environment.tfjs || ''), backend: String(bundle.environment.backend || '') } : null, name: (bundle.model && bundle.model.name) || 'Imported model', exportedAt: bundle.exportedAt, dataset: bundle.trainingDataset && bundle.trainingDataset.name, version: bundle.software && bundle.software.version };
         if (DOM.toStep5Btn) DOM.toStep5Btn.disabled = false;
         if (DOM.toStep6Btn) DOM.toStep6Btn.disabled = false;
         updateModelExportButton();
@@ -10149,13 +10226,12 @@ function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, col
         candidateCols ? predictorParameters(withOutcome, candidateCols, columnConfigs).total : 0);
     const isClass = tcfg.type === 'nominal' || tcfg.type === 'ordinal';
     const fmt = v => Math.round(v).toLocaleString('en-GB');
-    let E = nTrain, share = 1, unit = 'patients', binary = false;
+    let E = nTrain, share = 1, binary = false;
     if (isClass) {
         const groups = Object.values(units.counts).sort((a, b) => a - b);
         if (groups.length < 2) { box.innerHTML = ''; return; }
         share = groups[0] / n;
         E = Math.round(groups[0] * trainFraction);
-        unit = 'in the smaller outcome group';
         binary = groups.length === 2;
     }
     const riley = binary ? rileyMaxParameters('binary', nTrain, share) : (!isClass ? rileyMaxParameters('continuous', nTrain, null) : null);
@@ -11274,11 +11350,22 @@ function confirmNoLeakageForTarget(rows, featureCols, configs, targetCol) {
 // model-card.js: a one-page "model card" for the active model (Mitchell et al., 2019): intended use, the population
 // it was developed on, predictors, missing-data handling, validation design, performance with uncertainty, and
 // known limitations. Downloaded as a printable HTML file (strict security policy, every value escaped).
+/* global tf */
 
 
 
 const cardNum = (v, d = 3) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : 'not available');
 const cardPct = v => (typeof v === 'number' && isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'not available');
+
+// Software and arithmetic the model was trained with (the imported file's record, or this session's)
+function environmentText() {
+    const info = AppState.deployedSource === 'imported' && AppState.importedModelInfo ? AppState.importedModelInfo.environment : null;
+    let env = info;
+    if (!env) { env = { app: APP_VERSION }; try { if (typeof tf !== 'undefined') { env.tfjs = tf.version && tf.version.tfjs; env.backend = tf.getBackend && tf.getBackend(); } } catch (e) { /* unavailable */ } }
+    const parts = [`app ${env.app || 'unknown'}`, env.tfjs ? `TensorFlow.js ${env.tfjs}` : null, env.backend ? `${env.backend} backend${env.backend !== 'cpu' ? ' (GPU arithmetic can differ slightly between devices)' : ''}` : null].filter(Boolean);
+    const check = AppState.deployedSource === 'imported' && AppState.importedSelfCheck ? `; reproducibility check on import: ${AppState.importedSelfCheck}` : '';
+    return parts.join(', ') + check;
+}
 
 function modelCardHtml() {
     if (AppState.outcomeType === 'survival' && SURV.result) return survivalCardHtml(SURV.result);
@@ -11318,7 +11405,8 @@ function modelCardHtml() {
         ev.protocol === 'option-b' ? 'Validated on one separate cohort; further validation in other settings is advisable.' : 'Internal validation only: external validation (another time period or centre) is needed before any clinical use.',
         'Predictions for patients unlike the development population (values out of range, unusual combinations) are less reliable; the app flags them.',
         mi ? 'Multiple imputation assumes values are missing at random.' : 'Single imputation understates the uncertainty from missing values.',
-        model && model.usedFallback ? 'The neural network could not be trained and a linear model was used instead.' : null
+        model && model.usedFallback ? 'The neural network could not be trained and a linear model was used instead.' : null,
+        model && !model.usedFallback && model.fallbackNote ? String(model.fallbackNote) : null // e.g. an ensemble whose base neural network fell back
     ].filter(Boolean);
     const items = (list) => list.map(x => `<li>${escapeHtml(x)}</li>`).join('');
     const kv = list => list.map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('');
@@ -11343,7 +11431,8 @@ function modelCardHtml() {
         ['Model', name],
         ['Validation design', design],
         ['Decision threshold', binary ? cardPct(ev.decisionThreshold || 0.5) : 'not applicable'],
-        ['Reproducibility seed', typeof ev.seed === 'number' ? String(ev.seed) : 'not recorded']
+        ['Reproducibility seed', typeof ev.seed === 'number' ? String(ev.seed) : 'not recorded'],
+        ['Computing environment', environmentText()]
     ])}</table>
 <h2>What the performance figures are</h2>
 <table>${kv(performanceEvidence({ ev, retrained: Boolean(AppState.deployedSource !== 'imported' && (AppState.allTestedResults || []).find(r => r.model === model && r.retrained)), nModels: AppState.deployedSource === 'imported' ? 1 : Math.max(1, (AppState.allTestedResults || []).length), prep }))}</table>

@@ -1,0 +1,89 @@
+{
+  "inph_split": {
+    "train": 336,
+    "test": 84,
+    "dims": 19
+  },
+  "inph_glm": {
+    "rocAuc": 0.8031,
+    "brier": 0.1633,
+    "macroF1": 0.6936,
+    "accuracy": 0.7381,
+    "calSlope": 1.133,
+    "calIntercept": 0.256
+  },
+  "inph_rf": {
+    "rocAuc": 0.7679,
+    "brier": 0.1741,
+    "macroF1": 0.6305,
+    "accuracy": 0.7143,
+    "calSlope": 0.892,
+    "calIntercept": -0.036
+  },
+  "inph_gbm": {
+    "rocAuc": 0.7493,
+    "brier": 0.1812,
+    "macroF1": 0.65,
+    "accuracy": 0.7143,
+    "calSlope": 1.003,
+    "calIntercept": 0.201
+  },
+  "inph_knn": {
+    "rocAuc": 0.7447,
+    "brier": 0.1759,
+    "macroF1": 0.6494,
+    "accuracy": 0.75,
+    "calSlope": 1.117,
+    "calIntercept": -0.067
+  },
+  "inph_nb": {
+    "rocAuc": 0.7918,
+    "brier": 0.2007,
+    "macroF1": 0.6785,
+    "accuracy": 0.7143,
+    "calSlope": 0.464,
+    "calIntercept": 0.743
+  },
+  "inph_mice": {
+    "imputedColumns": [
+      "Baseline_ICP_mmHg",
+      "Callosal_Angle_Deg",
+      "Cognitive_MMSE_Pre",
+      "PVI_ml",
+      "Rout_mmHg_min_ml",
+      "Symptom_Duration_Months"
+    ],
+    "routMean": 14.0834
+  },
+  "inph_riley": {
+    "n": 878,
+    "criteria": [
+      878,
+      408,
+      329
+    ]
+  },
+  "survival_cox": {
+    "converged": false,
+    "beta": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "cIndex": 0.5,
+    "tdAuc24": 0.5
+  },
+  "recovery_glm": {
+    "r2": 0.8823,
+    "rmse": 0.5594,
+    "mae": 0.4678
+  }
+}

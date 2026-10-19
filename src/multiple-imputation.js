@@ -127,7 +127,10 @@ async function prepareMultipleImputation(rawRows, columnConfigs, m, seed, { onPr
     });
     prep.X = sets[0].X;
     prep.y = sets[0].y;
-    prep.multipleImputation = { m, imputedColumns: mi.imputedColumns, rows: rawRows.length, trace: mi.trace || null, traceScale: mi.traceScale || null };
+    // Predictors with no observed value at all: MICE cannot impute them and fills a constant, so they carry no
+    // information (reported in the MICE diagnostics)
+    const allMissing = Object.keys(columnConfigs).filter(c => columnConfigs[c].role === 'feature' && plainRows.length && plainRows.every(r => DataEngine.isMissing(r[c])));
+    prep.multipleImputation = { m, imputedColumns: mi.imputedColumns, allMissing, rows: rawRows.length, trace: mi.trace || null, traceScale: mi.traceScale || null };
     return { prep, sets, imputedColumns: mi.imputedColumns };
 }
 

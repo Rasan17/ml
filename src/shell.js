@@ -213,6 +213,16 @@ function setupEventListeners() {
             goToStep(step);
         });
     });
+    // Keyboard: Left/Right (and Home/End) move between the step tabs; Enter or Space opens one
+    DOM.stepTabs.forEach(tab => {
+        tab.addEventListener('keydown', e => {
+            const tabs = [...DOM.stepTabs].filter(t => t.offsetParent !== null);
+            const at = tabs.indexOf(tab);
+            const to = e.key === 'ArrowRight' ? tabs[(at + 1) % tabs.length] : e.key === 'ArrowLeft' ? tabs[(at - 1 + tabs.length) % tabs.length]
+                : e.key === 'Home' ? tabs[0] : e.key === 'End' ? tabs[tabs.length - 1] : null;
+            if (to && at >= 0) { e.preventDefault(); to.focus(); }
+        });
+    });
 
     // 7-Step Pipeline Sub-stepper Nav
     if (DOM.pipelineSubPills) {

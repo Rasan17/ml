@@ -35,7 +35,7 @@ async function trainSurvivalStep4(spec) {
         : validation === 'separate' ? { externalRows: AppState.separateTestRawRows || [] } : {};
     DOM.trainModelBtn.disabled = true;
     try {
-        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, splitFn: (rows, labels, ratio, seed) => splitRowsForWorkflow(rows, labels, ratio, true, seed), describeSplit, ...extra });
+        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, splitFn: (rows, labels, r, s) => splitRowsForWorkflow(rows, labels, r, true, s), describeSplit, ...extra });
         if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
         // Steps 5 and 6 now predict with the Cox model
         if (DOM.toStep5Btn) DOM.toStep5Btn.disabled = false;
@@ -76,6 +76,18 @@ async function startModelTraining() {
         // New patients' blank predictors are filled with the same fitted imputation as the training data
         prep.imputation = { configs: JSON.parse(JSON.stringify(AppState.columnConfigs)), plan: AppState.imputedData.plan };
         AppState.prepMeta = prep;
+        // Very few events per predictor parameter: confirmed before training, not only reported afterwards
+        if (prep.isClassification && Array.isArray(prep.y) && prep.y.length && prep.X && prep.X[0]) {
+            const counts = {};
+            prep.y.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+            const minority = Math.min(...Object.values(counts));
+            const nPar = Math.max(1, prep.X[0].length - Object.values(prep.featureMetadata || {}).filter(m => m.type === 'nominal' && m.length > 1).length);
+            if (minority / nPar < 5 && !confirm(`Very few events for the number of predictors\n\nThe smaller outcome group has ${minority} patient(s) for ${nPar} predictor parameter(s): ${(minority / nPar).toFixed(1)} per parameter, well below the 10–20 usually recommended (and see the Riley criteria in Step 4). Any model is likely to overfit, and its results will be unstable and optimistic.\n\nConsider fewer predictors (Step 2) or more patients. Continue as an exploratory analysis?`)) {
+                DOM.trainStatus.innerHTML = '<span style="color: var(--accent-amber);">Stopped: too few events for the number of predictors. Reduce the predictors in Step 2 or add patients.</span>';
+                DOM.trainModelBtn.disabled = false;
+                return;
+            }
+        }
 
         // Determine active validation protocol (A: split, B: separate test file, C: bootstrap internal validation)
         const valMode = document.querySelector('input[name="validation-mode"]:checked')?.value || AppState.validationMode || 'split';

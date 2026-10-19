@@ -786,6 +786,15 @@
             }
         },
 
+        /**
+         * Standardised value of a continuous predictor, used by training (prepareFeaturesAndTarget) and by every
+         * prediction (transformSingleRow), so both encode identically (missing -> 0, the training mean)
+         */
+        scaleContinuous(num, meta) {
+            const scaled = (num - meta.mean) / meta.std;
+            return isNaN(scaled) ? 0 : Number(scaled.toFixed(5));
+        },
+
         prepareFeaturesAndTarget(rows, columnConfigs) {
             this.assertNoOutcomeAsPredictor(columnConfigs);
             const featureCols = [];
@@ -983,8 +992,7 @@
                     } else {
                         // Continuous: standardized (missing -> training mean, i.e. 0 after scaling)
                         const num = this.isMissing(val) ? NaN : Number(val);
-                        const scaled = (num - meta.mean) / meta.std;
-                        xRow[meta.startIndex] = isNaN(scaled) ? 0 : Number(scaled.toFixed(5));
+                        xRow[meta.startIndex] = this.scaleContinuous(num, meta);
                     }
                 });
 
@@ -1112,8 +1120,7 @@
                         noteOnce(col, missing ? 'missing' : 'non-numeric', rawVal);
                         xRow[meta.startIndex] = 0; // training mean (0 after standardisation)
                     } else {
-                        const scaled = (num - meta.mean) / meta.std;
-                        xRow[meta.startIndex] = isNaN(scaled) ? 0 : Number(scaled.toFixed(5));
+                        xRow[meta.startIndex] = this.scaleContinuous(num, meta);
                         if (ranges && !prefilled.has(col) && typeof meta.min === 'number' && typeof meta.max === 'number' && (num < meta.min || num > meta.max)) {
                             ranges.push({ column: col, value: num, min: meta.min, max: meta.max });
                         }
@@ -1530,7 +1537,8 @@
         /**
          * Ridge regression by the normal equations (no penalty on the intercept); coefficients p x q. X is a flat
          * design matrix (row i at i * p), rows lists the rows to use (repeats allowed) and resp(i) gives row i's
-         * response vector.
+         * response vector. With lam > 0 on every non-intercept term and at least one row, the matrix is positive
+         * definite, so the tiny-pivot guard below cannot be reached in practice; it only prevents a division by zero.
          */
         _ridgeSolve(X, p, rows, resp, lam) {
             const q = resp(rows[0]).length;
@@ -2363,7 +2371,7 @@
 
                         results.push({
                             feature: col,
-                            scale: columnConfigs[col]?.type === 'ordinal' ? 'Ordinal (ranks)' : 'Continuous',
+                            scale: columnConfigs[col]?.type === 'ordinal' ? 'Ordinal (ranks treated as equally spaced numbers)' : 'Continuous',
                             testName: K === 2 ? "Two-Sample t-test (as ANOVA F = t²)" : "One-Way ANOVA (F-test)",
                             statisticLabel: 'F-stat',
                             statisticValue: fmtStat(a.fStat),
@@ -2453,7 +2461,7 @@
 
                         results.push({
                             feature: col,
-                            scale: columnConfigs[col]?.type === 'ordinal' ? 'Ordinal (ranks)' : 'Continuous',
+                            scale: columnConfigs[col]?.type === 'ordinal' ? 'Ordinal (ranks treated as equally spaced numbers)' : 'Continuous',
                             testName: "Pearson Linear Correlation (t-test)",
                             statisticLabel: `r (t = ${Number.isFinite(tStat) ? tStat.toFixed(2) : '∞'})`,
                             statisticValue: Number(rCoeff.toFixed(3)),

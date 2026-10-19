@@ -1,12 +1,23 @@
 // model-card.js: a one-page "model card" for the active model (Mitchell et al., 2019): intended use, the population
 // it was developed on, predictors, missing-data handling, validation design, performance with uncertainty, and
 // known limitations. Downloaded as a printable HTML file (strict security policy, every value escaped).
+/* global tf */
 import { APP_VERSION, AppState, RESEARCH_USE_NOTICE, displayModelName, escapeHtml } from './core.js';
 import { SURV } from './survival.js';
 import { performanceEvidence } from './html-report.js';
 
 const cardNum = (v, d = 3) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : 'not available');
 const cardPct = v => (typeof v === 'number' && isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'not available');
+
+// Software and arithmetic the model was trained with (the imported file's record, or this session's)
+function environmentText() {
+    const info = AppState.deployedSource === 'imported' && AppState.importedModelInfo ? AppState.importedModelInfo.environment : null;
+    let env = info;
+    if (!env) { env = { app: APP_VERSION }; try { if (typeof tf !== 'undefined') { env.tfjs = tf.version && tf.version.tfjs; env.backend = tf.getBackend && tf.getBackend(); } } catch (e) { /* unavailable */ } }
+    const parts = [`app ${env.app || 'unknown'}`, env.tfjs ? `TensorFlow.js ${env.tfjs}` : null, env.backend ? `${env.backend} backend${env.backend !== 'cpu' ? ' (GPU arithmetic can differ slightly between devices)' : ''}` : null].filter(Boolean);
+    const check = AppState.deployedSource === 'imported' && AppState.importedSelfCheck ? `; reproducibility check on import: ${AppState.importedSelfCheck}` : '';
+    return parts.join(', ') + check;
+}
 
 function modelCardHtml() {
     if (AppState.outcomeType === 'survival' && SURV.result) return survivalCardHtml(SURV.result);
@@ -46,7 +57,8 @@ function modelCardHtml() {
         ev.protocol === 'option-b' ? 'Validated on one separate cohort; further validation in other settings is advisable.' : 'Internal validation only: external validation (another time period or centre) is needed before any clinical use.',
         'Predictions for patients unlike the development population (values out of range, unusual combinations) are less reliable; the app flags them.',
         mi ? 'Multiple imputation assumes values are missing at random.' : 'Single imputation understates the uncertainty from missing values.',
-        model && model.usedFallback ? 'The neural network could not be trained and a linear model was used instead.' : null
+        model && model.usedFallback ? 'The neural network could not be trained and a linear model was used instead.' : null,
+        model && !model.usedFallback && model.fallbackNote ? String(model.fallbackNote) : null // e.g. an ensemble whose base neural network fell back
     ].filter(Boolean);
     const items = (list) => list.map(x => `<li>${escapeHtml(x)}</li>`).join('');
     const kv = list => list.map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('');
@@ -71,7 +83,8 @@ function modelCardHtml() {
         ['Model', name],
         ['Validation design', design],
         ['Decision threshold', binary ? cardPct(ev.decisionThreshold || 0.5) : 'not applicable'],
-        ['Reproducibility seed', typeof ev.seed === 'number' ? String(ev.seed) : 'not recorded']
+        ['Reproducibility seed', typeof ev.seed === 'number' ? String(ev.seed) : 'not recorded'],
+        ['Computing environment', environmentText()]
     ])}</table>
 <h2>What the performance figures are</h2>
 <table>${kv(performanceEvidence({ ev, retrained: Boolean(AppState.deployedSource !== 'imported' && (AppState.allTestedResults || []).find(r => r.model === model && r.retrained)), nModels: AppState.deployedSource === 'imported' ? 1 : Math.max(1, (AppState.allTestedResults || []).length), prep }))}</table>

@@ -589,9 +589,11 @@ function miceRhat(chains, burn = 2) {
 function renderMiceDiagnostics(containerId, mi) {
     const box = document.getElementById(containerId);
     if (!box) return;
-    if (!mi || !Array.isArray(mi.trace) || !mi.trace.length) { box.innerHTML = ''; return; }
+    const emptyNote = mi && Array.isArray(mi.allMissing) && mi.allMissing.length
+        ? `<div class="cal-panel"><div class="tune-warn">⚠️ No observed values among the training patients for: ${mi.allMissing.map(c => `"${escapeHtml(String(c))}"`).join(', ')}. Multiple imputation cannot impute a predictor that is never recorded, so it was filled with a constant and carries no information. Exclude it in Step 2.</div></div>` : '';
+    if (!mi || !Array.isArray(mi.trace) || !mi.trace.length) { box.innerHTML = emptyNote; return; }
     const cols = Object.keys(mi.trace[0] || {}).slice(0, 6);
-    if (!cols.length) { box.innerHTML = ''; return; }
+    if (!cols.length) { box.innerHTML = emptyNote; return; }
     const drifting = [], rhats = [];
     const charts = cols.map(c => {
         const series = mi.trace.map((t, l) => ({ name: `Imputation ${l + 1}`, colour: CURVE_COLOURS[l % CURVE_COLOURS.length], points: (Array.isArray(t && t[c]) ? t[c] : []).map((v, it) => ({ x: it + 1, y: Number(v) })).filter(pt => isFinite(pt.y)) }));
@@ -603,7 +605,7 @@ function renderMiceDiagnostics(containerId, mi) {
         const lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.15 || sd * 0.1 || 1;
         return `<div><div class="tune-muted" style="font-weight: 600;">${escapeHtml(c)}</div>${lineChartSvg({ series, xLabel: 'Round', yLabel: 'Mean imputed', xMin: 0, xMax: (mi.trace[0][c] || []).length || 10, yMin: lo - pad, yMax: hi + pad, aria: `MICE convergence for ${c}` })}</div>`;
     });
-    box.innerHTML = `
+    box.innerHTML = emptyNote + `
         <div class="cal-panel">
             <div class="tune-title">🧩 Did the multiple imputation converge? (MICE diagnostics)</div>
             <p class="tune-muted">For each numerical predictor with missing values, the mean of its imputed values after each of the ${(mi.trace[0][cols[0]] || []).length} rounds, one line per imputation (${mi.trace.length}). Converged imputations level off after the first few rounds and mix around the same level; lines that keep rising or falling at the end suggest the chains needed more rounds.${Object.keys(mi.trace[0]).length > cols.length ? ` First ${cols.length} predictors shown.` : ''}</p>

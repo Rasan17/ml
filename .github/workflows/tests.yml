@@ -33,7 +33,7 @@ jobs:
       - name: Module imports resolve (no missing cross-module imports)
         run: node tests/module_check.js
 
-      - name: No undefined names in src/ (ESLint no-undef)
+      - name: Lint src/ (undefined or unused names, loose equality, unreachable code, shadowing)
         run: npx --yes eslint@9.39.5 -c eslint.config.mjs src
 
       - name: Edge cases (data engine and models)
@@ -44,6 +44,9 @@ jobs:
 
       - name: End-to-end workflow checks
         run: node tests/end_to_end.js
+
+      - name: Golden values (frozen results on the demo cohorts, 4 decimal places)
+        run: node tests/golden_check.js
 
       - name: Reference checks against SciPy / scikit-learn / statsmodels
         run: |

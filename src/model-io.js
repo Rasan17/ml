@@ -1,5 +1,5 @@
 // model-io.js: part of the Universal Medical ML/NeuralNet Predictor application controller
-/* global DataEngine, ModelEngine */
+/* global tf, DataEngine, ModelEngine */
 import { APP_VERSION, AppState, RESEARCH_USE_NOTICE, displayModelName, prepTypicality, rankingMetricLabel } from './core.js';
 import { describeSplit } from './cv-tuning.js';
 import { goToStep } from './navigation.js';
@@ -107,9 +107,11 @@ async function exportTrainedModel() {
             patientDataContents: containsPatientData ? manifest.map(m => m.replace(/^• /, '')) : [],
             decisionThreshold: AppState.evalResults ? AppState.evalResults.decisionThreshold ?? null : null,
             evaluation: evaluationSummary(AppState.evalResults),
+            environment: computingEnvironment(),
             preprocessing: cleanPrep,
             parameters: ser
         };
+        { const inputs = selfCheckInputs(prep); bundle.selfCheck = { inputs, outputs: selfCheckOutputs(model, prep, inputs) }; }
         const blob = new Blob([JSON.stringify(bundle)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -178,6 +180,37 @@ function sanitizeEvaluation(e, depth = 0) {
 }
 
 // The imported model must predict a typical patient (all predictors at their fitted defaults) with valid output
+// The computing environment a model was trained and saved in (no patient data): app version, TensorFlow.js
+// version and backend (GPU arithmetic differs slightly between devices), browser
+function computingEnvironment() {
+    const env = { app: APP_VERSION };
+    try { if (typeof tf !== 'undefined') { env.tfjs = tf.version && tf.version.tfjs; env.backend = tf.getBackend && tf.getBackend(); } } catch (e) { /* TF.js unavailable */ }
+    try { env.browser = navigator.userAgent; } catch (e) { /* not available */ }
+    return env;
+}
+
+// Reproducibility self-check: three synthetic patients built from the training summaries (a typical patient,
+// and every numerical predictor one SD above or below its mean, categories at their most common value; no
+// real patient's values) and the model's outputs for them. Re-run on import: the same file must give the
+// same predictions.
+function selfCheckInputs(prep) {
+    return [0, 1, -1].map(k => {
+        const row = {};
+        prep.featureCols.forEach(c => {
+            const m = prep.featureMetadata[c] || {};
+            row[c] = m.type === 'continuous' && typeof m.mean === 'number' ? Number((m.mean + k * (m.std || 0)).toPrecision(8)) : '';
+        });
+        return row;
+    });
+}
+function outputVector(out) {
+    if (out && typeof out === 'object') return [out.pred, ...Object.keys(out.probabilities || {}).sort().map(k => out.probabilities[k])].map(Number);
+    return [Number(out)];
+}
+function selfCheckOutputs(model, prep, inputs) {
+    return inputs.map(r => outputVector(model.predictSingle(DataEngine.transformSingleRow(r, prep))));
+}
+
 function checkImportedModel(model, prep) {
     if (!model || typeof model.predictSingle !== 'function') throw new Error('The file does not contain a usable model.');
     const row = {};
@@ -191,6 +224,7 @@ function checkImportedModel(model, prep) {
 
 async function importTrainedModel(file) {
     try {
+        if (file.size > 300 * 1024 * 1024) throw new Error('The file is larger than 300 MB, too large for a model file from this app.');
         const bundle = JSON.parse(await file.text());
         if (!bundle || bundle.format !== MODEL_FILE_FORMAT) throw new Error('This is not a trained-model file exported from this app.');
         if (bundle.formatVersion !== undefined && bundle.formatVersion > MODEL_FILE_VERSION) throw new Error('This model file was made by a newer version of the app; please use the latest version.');
@@ -199,6 +233,21 @@ async function importTrainedModel(file) {
         const model = await ModelEngine.deserializeModel(bundle.parameters);
         // Nothing is installed until the model has predicted a typical patient without error
         checkImportedModel(model, prep);
+        // Reproducibility self-check: the recorded predictions for three synthetic patients must be reproduced
+        let selfCheckNote = '';
+        const sc = bundle.selfCheck;
+        if (sc && Array.isArray(sc.inputs) && Array.isArray(sc.outputs) && sc.inputs.length === sc.outputs.length && sc.inputs.length <= 10) {
+            const now = selfCheckOutputs(model, prep, sc.inputs.map(r => (r && typeof r === 'object' ? Object.fromEntries(prep.featureCols.map(c => [c, r[c] ?? ''])) : {})));
+            const diff = Math.max(0, ...now.flatMap((v, i) => v.map((x, j) => Math.abs(x - Number((sc.outputs[i] || [])[j])))));
+            const env = bundle.environment || {};
+            if (!(diff <= 1e-6)) {
+                const gpu = (env.backend && env.backend !== 'cpu') || (typeof tf !== 'undefined' && tf.getBackend && tf.getBackend() !== 'cpu');
+                if (!(diff <= 1e-3 && gpu)) {
+                    if (!confirm(`Reproducibility check: this model's predictions differ from those recorded when it was saved (largest difference ${isFinite(diff) ? diff.toPrecision(2) : 'not comparable'}).\n\nThe file may have been altered, or saved by a different version of the app (saved with ${env.app || 'an unknown version'}, this is ${APP_VERSION}). Use it anyway?`)) return;
+                    selfCheckNote = 'predictions differ from those recorded at saving';
+                } else selfCheckNote = `reproduced to within ${diff.toPrecision(2)} (GPU arithmetic)`;
+            } else selfCheckNote = 'reproduced exactly';
+        }
         AppState.trainedModel = model;
         AppState.prepMeta = prep;
         const evalIn = sanitizeEvaluation(bundle.evaluation);
@@ -206,7 +255,8 @@ async function importTrainedModel(file) {
         AppState.evalResults = { ...evalIn, decisionThreshold: thr ?? null, isClassification: prep.isClassification };
         AppState.deployedSource = 'imported';
         AppState.deployedModelId = bundle.model && bundle.model.id;
-        AppState.importedModelInfo = { name: (bundle.model && bundle.model.name) || 'Imported model', exportedAt: bundle.exportedAt, dataset: bundle.trainingDataset && bundle.trainingDataset.name, version: bundle.software && bundle.software.version };
+        AppState.importedSelfCheck = selfCheckNote;
+        AppState.importedModelInfo = { environment: bundle.environment && typeof bundle.environment === 'object' ? { app: String(bundle.environment.app || ''), tfjs: String(bundle.environment.tfjs || ''), backend: String(bundle.environment.backend || '') } : null, name: (bundle.model && bundle.model.name) || 'Imported model', exportedAt: bundle.exportedAt, dataset: bundle.trainingDataset && bundle.trainingDataset.name, version: bundle.software && bundle.software.version };
         if (DOM.toStep5Btn) DOM.toStep5Btn.disabled = false;
         if (DOM.toStep6Btn) DOM.toStep6Btn.disabled = false;
         updateModelExportButton();

@@ -225,7 +225,7 @@ async function runTuningCore(mId, baseHp, fd, isClassification, numClasses, o) {
             const v = ev ? ev[metricKey] : null;
             if (typeof v === 'number' && isFinite(v)) scores.push(v);
             if (ev) Object.keys(all).forEach(key => { if (typeof ev[key] === 'number' && isFinite(ev[key])) all[key].push(ev[key]); });
-            if (ev && Array.isArray(ev.probPositive) && Array.isArray(ev.actuals)) { oof.p.push(...ev.probPositive); oof.y.push(...ev.actuals.map(v => (v === 1 ? 1 : 0))); }
+            if (ev && Array.isArray(ev.probPositive) && Array.isArray(ev.actuals)) { oof.p.push(...ev.probPositive); oof.y.push(...ev.actuals.map(a => (a === 1 ? 1 : 0))); }
             fitsDone++;
             await ModelEngine.yieldToBrowser(); // background-tab safe (plain timers are throttled in hidden tabs)
         }

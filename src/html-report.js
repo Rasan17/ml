@@ -2,7 +2,7 @@
 // PDF) with the methods, the results of every model with confidence intervals, and the key plots
 // (ROC and precision-recall curves, calibration, decision curve, confusion matrix), generated from the
 // analysis actually run. Complements the JSON reports, which hold the full machine-readable detail.
-import { AppState, APP_VERSION, MODEL_INFO, RESEARCH_USE_NOTICE, escapeHtml, displayModelName } from './core.js';
+import { AppState, APP_VERSION, RESEARCH_USE_NOTICE, escapeHtml, displayModelName } from './core.js';
 import { buildChecklist, methodsParagraph } from './tripod.js';
 import { calibrationBody, discriminationSection, renderOptimismPanel, residualSection } from './panels.js';
 import { validationSummary } from './external-validation.js';

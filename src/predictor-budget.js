@@ -153,13 +153,12 @@ function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, col
         candidateCols ? predictorParameters(withOutcome, candidateCols, columnConfigs).total : 0);
     const isClass = tcfg.type === 'nominal' || tcfg.type === 'ordinal';
     const fmt = v => Math.round(v).toLocaleString('en-GB');
-    let E = nTrain, share = 1, unit = 'patients', binary = false;
+    let E = nTrain, share = 1, binary = false;
     if (isClass) {
         const groups = Object.values(units.counts).sort((a, b) => a - b);
         if (groups.length < 2) { box.innerHTML = ''; return; }
         share = groups[0] / n;
         E = Math.round(groups[0] * trainFraction);
-        unit = 'in the smaller outcome group';
         binary = groups.length === 2;
     }
     const riley = binary ? rileyMaxParameters('binary', nTrain, share) : (!isClass ? rileyMaxParameters('continuous', nTrain, null) : null);
