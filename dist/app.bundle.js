@@ -3471,8 +3471,11 @@ function discriminationSection(items, positiveLabel) {
     const prs = usable.map((it, i) => { const r = ModelEngine.prCurve(y, it.ev.probPositive); return { name: it.name, colour: CURVE_COLOURS[i % CURVE_COLOURS.length], ap: r.averagePrecision, points: [{ x: 0, y: r.points.length ? r.points[0].precision : 1 }, ...r.points.map(p => ({ x: p.recall, y: p.precision }))] }; });
     const prev = y.reduce((a, b) => a + b, 0) / y.length;
     const top = usable[0];
+    let clusteredUsed = 0;
     const rows = usable.map((it, i) => {
-        const d = i === 0 ? null : ModelEngine.delongTest(y, top.ev.probPositive, it.ev.probPositive);
+        // Several records per patient: Obuchowski's clustered version (records of a patient are not independent)
+        const d = i === 0 ? null : ModelEngine.delongTest(y, top.ev.probPositive, it.ev.probPositive, top.ev.patientGroups || null);
+        if (d && d.clustered) clusteredUsed = d.clusters;
         const auc = typeof it.ev.rocAuc === 'number' ? it.ev.rocAuc.toFixed(3) : 'N/A';
         const ci = it.ev.ci && it.ev.ci.rocAuc ? ` (${it.ev.ci.rocAuc[0].toFixed(3)}–${it.ev.ci.rocAuc[1].toFixed(3)})` : '';
         const pTxt = i === 0 ? 'reference (top-ranked)' : (d && d.p !== null ? `${d.p < 0.001 ? '< 0.001' : d.p.toFixed(3)}${d.p < 0.05 ? ' ✱' : ''}` : 'n/a');
@@ -3484,7 +3487,8 @@ function discriminationSection(items, positiveLabel) {
             <div>${lineChartSvg({ series: roc, xLabel: '1 − specificity (false-positive rate)', yLabel: 'Sensitivity', diagonal: true, aria: 'ROC curves' })}</div>
             <div>${lineChartSvg({ series: [...prs, { name: 'Prevalence (no skill)', colour: 'var(--text-muted)', dashed: true, width: 1, points: [{ x: 0, y: prev }, { x: 1, y: prev }] }], xLabel: 'Recall (sensitivity)', yLabel: 'Precision (PPV)', aria: 'Precision-recall curves' })}</div>
         </div>
-        <table class="data-table thr-table"><thead><tr><th>Model</th><th>ROC-AUC (95% CI)</th><th>Average precision</th><th>AUC difference vs top model: DeLong p</th></tr></thead><tbody>${rows}</tbody></table>
+        <table class="data-table thr-table"><thead><tr><th>Model</th><th>ROC-AUC (95% CI)</th><th>Average precision</th><th>AUC difference vs top model: ${clusteredUsed ? 'clustered DeLong (Obuchowski)' : 'DeLong'} p</th></tr></thead><tbody>${rows}</tbody></table>
+        ${clusteredUsed ? `<p class="tune-muted">Patients have several records here, so the comparison treats each patient's records together (Obuchowski's clustered method, ${clusteredUsed} patients); treating records as independent would make p-values too small.</p>` : ''}
         <p class="tune-muted"><strong>ROC curve</strong>: the closer to the top-left corner, the better (the diagonal is chance). <strong>Precision-recall curve</strong>: more informative when the outcome is uncommon; the dashed line is the prevalence (${(prev * 100).toFixed(0)}%), which is what a useless model would achieve. The <strong>DeLong test</strong> asks whether a model's AUC differs from the top-ranked model's on these same patients; p ≥ 0.05 means the difference could easily be chance (✱marks p &lt; 0.05). With small test sets most differences are not significant.</p>`;
 }
 
@@ -4053,8 +4057,10 @@ function renderOptimismPanel(containerId, results) {
 // ---- src/subgroups.js ----
 // subgroups.js: performance of a trained model within subgroups of the Testing set (e.g. by sex, age band
 // or site), as TRIPOD+AI asks for an assessment of fairness: discrimination, calibration-in-the-large and
-// error rates at the decision threshold, group by group.
+// error rates at the decision threshold, group by group, with percentile bootstrap 95% intervals (whole patients
+// resampled when a patient column is set) and each group's AUC difference from all other patients.
 /* global DataEngine, ModelEngine */
+
 
 const subgroupState = {};
 const SUBGROUP_MAX_LEVELS = 8;           // larger categorical columns: the 7 commonest categories and "Other"
@@ -4183,36 +4189,61 @@ function runSubgroupAnalysis(containerId) {
         const order = Object.keys(groups).sort((a, b) => rank(a) - rank(b) || groups[b].length - groups[a].length);
         const all = groupMetrics(test.y, outputs, st.isClassification, binary, threshold);
         const res = order.map(g => ({ g, m: groupMetrics(groups[g].map(i => test.y[i]), groups[g].map(i => outputs[i]), st.isClassification, binary, threshold) }));
+        // Uncertainty: percentile bootstrap intervals within each group, and the AUC difference from all other
+        // patients (each side resampled separately); patients with several records are resampled whole
+        const pf = splitGroupFunction();
+        const clusters = pf ? kept.map(i => pf(st.labelRows[i])) : null;
+        const metricOf = key => idx => (idx.length ? groupMetrics(idx.map(i => test.y[i]), idx.map(i => outputs[i]), st.isClassification, binary, threshold)[key] : null);
+        const ciKeys = binary ? ['auc', 'oe'] : st.isClassification ? ['accuracy'] : ['rmse', 'r2'];
+        const everyone = test.y.map((_, i) => i);
+        const B = test.y.length > 3000 ? 200 : 500;
+        res.forEach((r, k) => {
+            const idx = groups[r.g];
+            r.ci = {};
+            ciKeys.forEach(key => { r.ci[key] = ModelEngine.bootstrapInterval(idx.length, sub => metricOf(key)(sub.map(j => idx[j])), { B, seed: 2024 + k, clusters: clusters ? idx.map(i => clusters[i]) : null }); });
+            if (binary && order.length > 1) {
+                const inG = new Set(idx), rest = everyone.filter(i => !inG.has(i));
+                const restAuc = metricOf('auc')(rest);
+                r.aucDiff = typeof r.m.auc === 'number' && typeof restAuc === 'number' ? r.m.auc - restAuc : null;
+                r.aucDiffCI = ModelEngine.bootstrapDifference(idx, rest, metricOf('auc'), { B, seed: 4048 + k, clusters });
+            }
+        });
+        const allCI = {};
+        ciKeys.forEach(key => { allCI[key] = ModelEngine.bootstrapInterval(everyone.length, metricOf(key), { B, seed: 2023, clusters }); });
         const pct = v => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—');
         const num = (v, d = 3) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : '—');
         const small = m => m.n < SUBGROUP_MIN_N || (binary && (m.events < SUBGROUP_MIN_EVENTS || m.n - m.events < SUBGROUP_MIN_EVENTS));
-        const flag = m => {
-            if (small(m) || !binary) return false;
-            return (typeof m.auc === 'number' && typeof all.auc === 'number' && Math.abs(m.auc - all.auc) > 0.1) || (typeof m.oe === 'number' && (m.oe < 0.8 || m.oe > 1.25));
+        // Highlighted when the evidence says the group differs: the interval for its AUC difference from the other
+        // patients excludes 0, or the interval for its observed:expected ratio excludes 1
+        const flag = r => {
+            if (small(r.m) || !binary) return false;
+            return (r.aucDiffCI && (r.aucDiffCI[0] > 0 || r.aucDiffCI[1] < 0)) || (r.ci && r.ci.oe && (r.ci.oe[0] > 1 || r.ci.oe[1] < 1));
         };
+        const withCI = (v, ci, d = 3) => `${num(v, d)}${ci ? ` <span class="tune-sd">(${num(ci[0], d)}–${num(ci[1], d)})</span>` : ''}`;
+        const sgn = v => (typeof v === 'number' ? `${v > 0 ? '+' : ''}${v.toFixed(3)}` : '—');
         let head, row;
         if (binary) {
-            head = '<th>Group</th><th>Patients</th><th>Events</th><th>Observed rate</th><th>Mean predicted</th><th title="Observed ÷ expected: 1 = calibrated on average; above 1 = risk underestimated">O:E</th><th>AUC</th><th>Brier ↓</th><th>Sensitivity</th><th>Specificity</th><th title="Net benefit at the decision threshold">Net benefit</th>';
-            row = (g, m) => `<td>${escapeHtml(g)}</td><td>${m.n}</td><td>${m.events}</td><td>${pct(m.observed)}</td><td>${pct(m.meanPred)}</td><td>${num(m.oe, 2)}</td><td>${num(m.auc)}</td><td>${num(m.brier)}</td><td>${pct(m.sens)}</td><td>${pct(m.spec)}</td><td>${num(m.netBenefit)}</td>`;
+            head = '<th>Group</th><th>Patients</th><th>Events</th><th>Observed rate</th><th>Mean predicted</th><th title="Observed ÷ expected: 1 = calibrated on average; above 1 = risk underestimated">O:E (95% CI)</th><th>AUC (95% CI)</th><th title="This group\'s AUC minus the AUC in all other patients">AUC vs other patients (95% CI)</th><th>Brier ↓</th><th>Sensitivity</th><th>Specificity</th><th title="Net benefit at the decision threshold">Net benefit</th>';
+            row = (g, m, r) => `<td>${escapeHtml(g)}</td><td>${m.n}</td><td>${m.events}</td><td>${pct(m.observed)}</td><td>${pct(m.meanPred)}</td><td>${withCI(m.oe, r.ci && r.ci.oe, 2)}</td><td>${withCI(m.auc, r.ci && r.ci.auc)}</td><td>${r.aucDiff !== undefined ? `${sgn(r.aucDiff)}${r.aucDiffCI ? ` <span class="tune-sd">(${sgn(r.aucDiffCI[0])} to ${sgn(r.aucDiffCI[1])})</span>` : ''}` : '—'}</td><td>${num(m.brier)}</td><td>${pct(m.sens)}</td><td>${pct(m.spec)}</td><td>${num(m.netBenefit)}</td>`;
         } else if (st.isClassification) {
             head = '<th>Group</th><th>Patients</th><th>Accuracy</th>';
-            row = (g, m) => `<td>${escapeHtml(g)}</td><td>${m.n}</td><td>${pct(m.accuracy)}</td>`;
+            row = (g, m, r) => `<td>${escapeHtml(g)}</td><td>${m.n}</td><td>${pct(m.accuracy)}${r.ci && r.ci.accuracy ? ` <span class="tune-sd">(${pct(r.ci.accuracy[0])}–${pct(r.ci.accuracy[1])})</span>` : ''}</td>`;
         } else {
             head = '<th>Group</th><th>Patients</th><th>Mean observed</th><th>Mean predicted</th><th>RMSE ↓</th><th>R²</th>';
-            row = (g, m) => `<td>${escapeHtml(g)}</td><td>${m.n}</td><td>${num(m.meanObs, 2)}</td><td>${num(m.meanPred, 2)}</td><td>${num(m.rmse, 2)}</td><td>${num(m.r2)}</td>`;
+            row = (g, m, r) => `<td>${escapeHtml(g)}</td><td>${m.n}</td><td>${num(m.meanObs, 2)}</td><td>${num(m.meanPred, 2)}</td><td>${withCI(m.rmse, r.ci && r.ci.rmse, 2)}</td><td>${withCI(m.r2, r.ci && r.ci.r2)}</td>`;
         }
-        const anyFlag = res.some(r => flag(r.m)), anySmall = res.some(r => small(r.m));
+        const anyFlag = res.some(r => flag(r)), anySmall = res.some(r => small(r.m));
         out.innerHTML = `
             ${it.inSample ? '<div class="tune-warn">⚠︎ This model was retrained on all patients, including these Testing patients, so its figures here are optimistic. Compare the groups with each other rather than reading the values at face value; for an honest check, train without retraining (Option A) or use an external cohort (Option B).</div>' : ''}
             <div class="table-container" tabindex="0" role="region" aria-label="Subgroup results table">
                 <table class="data-table thr-table">
                 <thead><tr>${head}</tr></thead>
                 <tbody>
-                    <tr style="font-weight: 600;">${row('All Testing patients', all)}</tr>
-                    ${res.map(r => `<tr${flag(r.m) ? ' class="subgroup-flag"' : small(r.m) ? ' class="subgroup-small"' : ''}>${row(r.g, r.m)}</tr>`).join('')}
+                    <tr style="font-weight: 600;">${row('All Testing patients', all, { ci: allCI })}</tr>
+                    ${res.map(r => `<tr${flag(r) ? ' class="subgroup-flag"' : small(r.m) ? ' class="subgroup-small"' : ''}>${row(r.g, r.m, r)}</tr>`).join('')}
                 </tbody>
             </table></div>
-            <p class="tune-muted">${binary ? `Sensitivity, specificity and net benefit use the decision threshold of ${(threshold * 100).toFixed(0)}%. ` : ''}${anyFlag ? '⚠︎ Highlighted groups differ noticeably from the whole Testing set (AUC by more than 0.10, or O:E outside 0.8–1.25). ' : ''}${anySmall ? `Greyed groups have fewer than ${SUBGROUP_MIN_N} patients${binary ? ` or fewer than ${SUBGROUP_MIN_EVENTS} patients with or without the outcome` : ''}: their figures are too uncertain to judge. ` : ''}Differences between subgroups can arise by chance, especially in small Testing sets; treat them as a prompt to look further (for example in an external cohort), not as proof of unfairness.</p>`;
+            <p class="tune-muted">${binary ? `Sensitivity, specificity and net benefit use the decision threshold of ${(threshold * 100).toFixed(0)}%. ` : ''}Intervals are percentile bootstrap 95% intervals${clusters ? ' (whole patients resampled)' : ''}; with few patients in a group they are wide, and a group whose interval overlaps the others' is consistent with performing equally well. ${anyFlag ? '⚠︎ Highlighted groups differ from the other patients beyond chance at the 5% level (AUC difference interval excluding 0, or O:E interval excluding 1); with several subgroups, one such result can still occur by chance. ' : ''}${anySmall ? `Greyed groups have fewer than ${SUBGROUP_MIN_N} patients${binary ? ` or fewer than ${SUBGROUP_MIN_EVENTS} patients with or without the outcome` : ''}: their figures are too uncertain to judge. ` : ''}Differences between subgroups can arise by chance, especially in small Testing sets; treat them as a prompt to look further (for example in an external cohort), not as proof of unfairness.</p>`;
     } catch (e) {
         out.innerHTML = `<p class="tune-muted">Subgroup analysis failed: ${escapeHtml(e.message || String(e))}</p>`;
     }
@@ -4573,6 +4604,9 @@ function updateSplitMethodVisibility() {
 // groups (optional): the patient of each test row (patient-level split), for a patient-level bootstrap
 async function bootstrapFor(ev, seed, groups = null) {
     if (!ev) return null;
+    // The patient of each test record, kept for the clustered AUC comparison. Not enumerable, so it is never
+    // written into reports or model files
+    if (Array.isArray(groups) && groups.length === (ev.actuals || []).length) Object.defineProperty(ev, 'patientGroups', { value: groups, enumerable: false, configurable: true, writable: true });
     await ModelEngine.yieldToBrowser();
     const n = (ev.actuals || []).length;
     const B = n > 5000 ? 200 : n > 1000 ? 500 : 1000;

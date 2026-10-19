@@ -147,6 +147,15 @@ out.riley = [[24, 0.174, 0.288], [10, 0.3, 0.1], [30, 0.05, 0.04], [15, 0.5, 0.2
         aj: [1, 2, 3, 4].map(t => [ME.cifAt(ME.aalenJohansen(st.teT, st.teE), t), 1 - ME.kmAt(ME.kaplanMeier(st.teT, st.teE), t)])
     };
 }
+// Clustered comparison of two AUCs (Obuchowski 1997): several records per patient
+{
+    const r5 = DE.createPRNG(91);
+    const g = () => { const u = r5() || 1e-9, v = r5(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+    const y = [], a = [], b = [], cl = [];
+    for (let p = 0; p < 50; p++) { const u = g(), k = 1 + Math.floor(r5() * 4); for (let j = 0; j < k; j++) { const yy = r5() < 1 / (1 + Math.exp(-u)) ? 1 : 0; y.push(yy); a.push(Math.round((yy + g()) * 4) / 4); b.push(Math.round((0.7 * yy + g() + 0.3 * u) * 4) / 4); cl.push('P' + p); } }
+    const d = ME.delongTest(y, a, b, cl);
+    out.obu = { y, a, b, cl, aucA: d.aucA, aucB: d.aucB, se: d.se, p: d.p, seA: d.seA };
+}
 // Harrell's bootstrap optimism for a Cox model (Option C for time-to-event outcomes): each resample refits the Cox
 // model and is scored by the app's own ModelEngine.coxResampleOptimism (C-index, time-dependent AUC, calibration slope)
 {

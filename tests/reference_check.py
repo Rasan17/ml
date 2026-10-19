@@ -225,6 +225,26 @@ try:
     chk("Cox bootstrap calibration slope on the original patients, per resample", co['slope'], rsl, 1e-6)
 except ImportError:
     print('scikit-survival not installed: time-dependent AUC and Brier checks skipped (pip install scikit-survival)')
+# Clustered AUC comparison (Obuchowski 1997), independent NumPy implementation of the published formulas
+ob = o['obu']; y_ = np.array(ob['y']); sc = [np.array(ob['a']), np.array(ob['b'])]; cl_ = np.array(ob['cl'])
+P_, Nn = np.where(y_ == 1)[0], np.where(y_ == 0)[0]; M_, N_ = len(P_), len(Nn); ks = np.unique(cl_); I_ = len(ks)
+def comps(s):
+    psi = (s[P_][:, None] > s[Nn][None, :]) + 0.5 * (s[P_][:, None] == s[Nn][None, :])
+    A = psi.mean(); V10 = psi.mean(1); V01 = psi.mean(0)
+    X = np.array([V10[cl_[P_] == k].sum() for k in ks]); Y = np.array([V01[cl_[Nn] == k].sum() for k in ks])
+    return A, X, Y
+mk = np.array([(cl_[P_] == k).sum() for k in ks]); nk = np.array([(cl_[Nn] == k).sum() for k in ks])
+(Aa, Xa, Ya), (Ab, Xb, Yb) = comps(sc[0]), comps(sc[1])
+def cv(Ar, Xr, Yr, As, Xs, Ys):
+    f = I_ / (I_ - 1)
+    s10 = f / M_ * np.sum((Xr - mk * Ar) * (Xs - mk * As)) / M_
+    s01 = f / N_ * np.sum((Yr - nk * Ar) * (Ys - nk * As)) / N_
+    s11 = f * np.sum((Xr - mk * Ar) * (Ys - nk * As) + (Xs - mk * As) * (Yr - nk * Ar)) / (M_ * N_)
+    return s10 + s01 + s11
+vd = cv(Aa, Xa, Ya, Aa, Xa, Ya) + cv(Ab, Xb, Yb, Ab, Xb, Yb) - 2 * cv(Aa, Xa, Ya, Ab, Xb, Yb)
+se_ = np.sqrt(vd); p_ = 2 * stats.norm.sf(abs((Aa - Ab) / se_))
+chk('Clustered AUC comparison, Obuchowski 1997: AUCs and standard errors', [ob['aucA'], ob['aucB'], ob['seA'], ob['se']], [Aa, Ab, np.sqrt(cv(Aa, Xa, Ya, Aa, Xa, Ya)), se_], 1e-10)
+chk('Clustered AUC comparison, Obuchowski 1997: p-value', ob['p'], p_, 1e-6)  # the app's normal CDF is accurate to ~1e-7
 # Riley minimum sample size (binary outcome) vs the pmsampsize package, every criterion and the final size
 try:
     import io, contextlib

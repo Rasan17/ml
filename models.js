@@ -2535,7 +2535,14 @@
          * DeLong test for the difference between two correlated ROC AUCs measured on the same patients
          * (DeLong, DeLong & Clarke-Pearson 1988). Returns both AUCs, the difference, its SE, z and two-sided p.
          */
-        delongTest(y, pA, pB) {
+        /**
+         * Comparison of two correlated AUCs on the same patients. Without clusters: DeLong et al. (1988). With
+         * clusters (several records per patient: an array of patient keys, one per record), Obuchowski (1997):
+         * the structural components are summed within each patient, so records of the same patient are not
+         * treated as independent (otherwise the standard error is too small and p-values too small).
+         */
+        delongTest(y, pA, pB, clusters = null) {
+            if (Array.isArray(clusters) && clusters.length === y.length && new Set(clusters.map(String)).size < y.length) return this.delongTestClustered(y, pA, pB, clusters);
             const pos = [], neg = [];
             y.forEach((v, i) => (v === 1 ? pos : neg).push(i));
             const m = pos.length, n = neg.length;
@@ -2558,6 +2565,74 @@
             if (!(varDiff > 0)) return { aucA: A.auc, aucB: B.auc, diff, se: 0, z: null, p: diff === 0 ? 1 : null };
             const se = Math.sqrt(varDiff), z = diff / se;
             return { aucA: A.auc, aucB: B.auc, diff, se, z, p: 2 * (1 - normalCdf(Math.abs(z))) };
+        },
+
+        delongTestClustered(y, pA, pB, clusters) {
+            const pos = [], neg = [];
+            y.forEach((v, i) => (v === 1 ? pos : neg).push(i));
+            const M = pos.length, N = neg.length;
+            const keys = [...new Set(clusters.map(String))], I = keys.length;
+            if (M < 2 || N < 2 || I < 3) return null;
+            const kIdx = new Map(keys.map((k, i) => [k, i]));
+            const psi = (a, b) => (a > b ? 1 : a === b ? 0.5 : 0);
+            const m = new Array(I).fill(0), n = new Array(I).fill(0);
+            pos.forEach(i => m[kIdx.get(String(clusters[i]))]++);
+            neg.forEach(j => n[kIdx.get(String(clusters[j]))]++);
+            const comps = [pA, pB].map(sc => {
+                const X = new Array(I).fill(0), Y = new Array(I).fill(0);
+                let tot = 0;
+                pos.forEach(i => { let v = 0; neg.forEach(j => { v += psi(sc[i], sc[j]); }); X[kIdx.get(String(clusters[i]))] += v / N; tot += v; });
+                neg.forEach(j => { let v = 0; pos.forEach(i => { v += psi(sc[i], sc[j]); }); Y[kIdx.get(String(clusters[j]))] += v / M; });
+                return { X, Y, auc: tot / (M * N) };
+            });
+            // Obuchowski (1997): S10, S01 and S11 from the cluster sums, for each pair of models (r, s)
+            const cov = (r, s) => {
+                let s10 = 0, s01 = 0, s11 = 0;
+                for (let k = 0; k < I; k++) {
+                    const xr = r.X[k] - m[k] * r.auc, xs = s.X[k] - m[k] * s.auc, yr = r.Y[k] - n[k] * r.auc, ys = s.Y[k] - n[k] * s.auc;
+                    s10 += xr * xs; s01 += yr * ys; s11 += xr * ys + xs * yr;
+                }
+                const f = I / (I - 1);
+                return f * s10 / (M * M) + f * s01 / (N * N) + f * s11 / (M * N);
+            };
+            const [A, B] = comps;
+            const varDiff = cov(A, A) + cov(B, B) - 2 * cov(A, B);
+            const diff = A.auc - B.auc;
+            if (!(varDiff > 0)) return { aucA: A.auc, aucB: B.auc, diff, se: 0, z: null, p: diff === 0 ? 1 : null, clustered: true, clusters: I };
+            const se = Math.sqrt(varDiff), z = diff / se;
+            return { aucA: A.auc, aucB: B.auc, diff, se, z, p: 2 * (1 - normalCdf(Math.abs(z))), clustered: true, clusters: I, seA: Math.sqrt(cov(A, A)) };
+        },
+
+        /**
+         * Percentile bootstrap 95% interval of a statistic over one set of records: stat(indices) -> number or
+         * null. clusters (optional, one key per record) resamples whole patients. Returns [low, high] or null when
+         * fewer than 100 resamples give a value.
+         */
+        bootstrapInterval(n, stat, { B = 1000, seed = 2024, clusters = null } = {}) {
+            const rng = createPRNG(seed);
+            const groups = Array.isArray(clusters) && clusters.length === n ? [...clusters.reduce((mp, k, i) => { const g = String(k ?? ''); if (!mp.has(g)) mp.set(g, []); mp.get(g).push(i); return mp; }, new Map()).values()] : null;
+            const draw = () => (groups ? [].concat(...Array.from({ length: groups.length }, () => groups[Math.floor(rng() * groups.length)])) : Array.from({ length: n }, () => Math.floor(rng() * n)));
+            const vals = [];
+            for (let b = 0; b < B; b++) { const v = stat(draw()); if (typeof v === 'number' && isFinite(v)) vals.push(v); }
+            if (vals.length < 100) return null;
+            vals.sort((a, b) => a - b);
+            return [vals[Math.floor(0.025 * (vals.length - 1))], vals[Math.ceil(0.975 * (vals.length - 1))]];
+        },
+
+        /**
+         * Percentile bootstrap 95% interval of a difference between two separate groups of records (e.g. one
+         * subgroup and all other patients): each group is resampled on its own. stat(indices) is evaluated on each.
+         */
+        bootstrapDifference(idxA, idxB, stat, { B = 1000, seed = 2024, clusters = null } = {}) {
+            const rng = createPRNG(seed);
+            const grouped = idx => (Array.isArray(clusters) ? [...idx.reduce((mp, i) => { const g = String(clusters[i] ?? ''); if (!mp.has(g)) mp.set(g, []); mp.get(g).push(i); return mp; }, new Map()).values()] : idx.map(i => [i]));
+            const gA = grouped(idxA), gB = grouped(idxB);
+            const draw = g => [].concat(...Array.from({ length: g.length }, () => g[Math.floor(rng() * g.length)]));
+            const vals = [];
+            for (let b = 0; b < B; b++) { const a = stat(draw(gA)), c = stat(draw(gB)); if (typeof a === 'number' && typeof c === 'number' && isFinite(a) && isFinite(c)) vals.push(a - c); }
+            if (vals.length < 100) return null;
+            vals.sort((a, b) => a - b);
+            return [vals[Math.floor(0.025 * (vals.length - 1))], vals[Math.ceil(0.975 * (vals.length - 1))]];
         },
 
         /** Decision curve analysis: net benefit of the model, "treat all" and "treat none" across thresholds */

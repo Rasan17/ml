@@ -149,8 +149,11 @@ function discriminationSection(items, positiveLabel) {
     const prs = usable.map((it, i) => { const r = ModelEngine.prCurve(y, it.ev.probPositive); return { name: it.name, colour: CURVE_COLOURS[i % CURVE_COLOURS.length], ap: r.averagePrecision, points: [{ x: 0, y: r.points.length ? r.points[0].precision : 1 }, ...r.points.map(p => ({ x: p.recall, y: p.precision }))] }; });
     const prev = y.reduce((a, b) => a + b, 0) / y.length;
     const top = usable[0];
+    let clusteredUsed = 0;
     const rows = usable.map((it, i) => {
-        const d = i === 0 ? null : ModelEngine.delongTest(y, top.ev.probPositive, it.ev.probPositive);
+        // Several records per patient: Obuchowski's clustered version (records of a patient are not independent)
+        const d = i === 0 ? null : ModelEngine.delongTest(y, top.ev.probPositive, it.ev.probPositive, top.ev.patientGroups || null);
+        if (d && d.clustered) clusteredUsed = d.clusters;
         const auc = typeof it.ev.rocAuc === 'number' ? it.ev.rocAuc.toFixed(3) : 'N/A';
         const ci = it.ev.ci && it.ev.ci.rocAuc ? ` (${it.ev.ci.rocAuc[0].toFixed(3)}–${it.ev.ci.rocAuc[1].toFixed(3)})` : '';
         const pTxt = i === 0 ? 'reference (top-ranked)' : (d && d.p !== null ? `${d.p < 0.001 ? '< 0.001' : d.p.toFixed(3)}${d.p < 0.05 ? ' ✱' : ''}` : 'n/a');
@@ -162,7 +165,8 @@ function discriminationSection(items, positiveLabel) {
             <div>${lineChartSvg({ series: roc, xLabel: '1 − specificity (false-positive rate)', yLabel: 'Sensitivity', diagonal: true, aria: 'ROC curves' })}</div>
             <div>${lineChartSvg({ series: [...prs, { name: 'Prevalence (no skill)', colour: 'var(--text-muted)', dashed: true, width: 1, points: [{ x: 0, y: prev }, { x: 1, y: prev }] }], xLabel: 'Recall (sensitivity)', yLabel: 'Precision (PPV)', aria: 'Precision-recall curves' })}</div>
         </div>
-        <table class="data-table thr-table"><thead><tr><th>Model</th><th>ROC-AUC (95% CI)</th><th>Average precision</th><th>AUC difference vs top model: DeLong p</th></tr></thead><tbody>${rows}</tbody></table>
+        <table class="data-table thr-table"><thead><tr><th>Model</th><th>ROC-AUC (95% CI)</th><th>Average precision</th><th>AUC difference vs top model: ${clusteredUsed ? 'clustered DeLong (Obuchowski)' : 'DeLong'} p</th></tr></thead><tbody>${rows}</tbody></table>
+        ${clusteredUsed ? `<p class="tune-muted">Patients have several records here, so the comparison treats each patient's records together (Obuchowski's clustered method, ${clusteredUsed} patients); treating records as independent would make p-values too small.</p>` : ''}
         <p class="tune-muted"><strong>ROC curve</strong>: the closer to the top-left corner, the better (the diagonal is chance). <strong>Precision-recall curve</strong>: more informative when the outcome is uncommon; the dashed line is the prevalence (${(prev * 100).toFixed(0)}%), which is what a useless model would achieve. The <strong>DeLong test</strong> asks whether a model's AUC differs from the top-ranked model's on these same patients; p ≥ 0.05 means the difference could easily be chance (✱marks p &lt; 0.05). With small test sets most differences are not significant.</p>`;
 }
 

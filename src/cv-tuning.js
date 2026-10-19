@@ -179,6 +179,9 @@ function updateSplitMethodVisibility() {
 // groups (optional): the patient of each test row (patient-level split), for a patient-level bootstrap
 async function bootstrapFor(ev, seed, groups = null) {
     if (!ev) return null;
+    // The patient of each test record, kept for the clustered AUC comparison. Not enumerable, so it is never
+    // written into reports or model files
+    if (Array.isArray(groups) && groups.length === (ev.actuals || []).length) Object.defineProperty(ev, 'patientGroups', { value: groups, enumerable: false, configurable: true, writable: true });
     await ModelEngine.yieldToBrowser();
     const n = (ev.actuals || []).length;
     const B = n > 5000 ? 200 : n > 1000 ? 500 : 1000;

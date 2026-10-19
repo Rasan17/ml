@@ -200,6 +200,34 @@ function makeRows(n, fn) { return Array.from({ length: n }, (_, i) => fn(i)); }
         return 'refused';
     });
 
+    await check('Clustered DeLong test: with several records per patient the false-positive rate stays near 5% (the unclustered test inflates it)', async () => {
+        const rng = DE.createPRNG(7), g = () => { const u = rng() || 1e-9, v = rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+        let naive = 0, clus = 0; const sims = 200;
+        for (let s = 0; s < sims; s++) {
+            const y = [], a = [], b = [], cl = [];
+            for (let p = 0; p < 60; p++) { const u = g(), ua = g(), ub = g(); for (let k = 0; k < 4; k++) { const yy = rng() < 1 / (1 + Math.exp(-u)) ? 1 : 0; y.push(yy); a.push(yy + 1.2 * ua + 0.5 * g()); b.push(yy + 1.2 * ub + 0.5 * g()); cl.push('P' + p); } }
+            const d0 = ME.delongTest(y, a, b), d1 = ME.delongTest(y, a, b, cl);
+            if (d0 && d0.p < 0.05) naive++; if (d1 && d1.p < 0.05) clus++;
+        }
+        assert(clus / sims <= 0.09, `clustered rate ${clus / sims}`);
+        assert(naive / sims >= clus / sims + 0.03, `unclustered ${naive / sims} not above clustered ${clus / sims}`);
+        return `false positives: unclustered ${(100 * naive / sims).toFixed(1)}%, clustered ${(100 * clus / sims).toFixed(1)}%`;
+    });
+
+    await check('Subgroup bootstrap intervals: 95% intervals for an AUC cover the true value about 95% of the time', async () => {
+        const rng = DE.createPRNG(13), g = () => { const u = rng() || 1e-9, v = rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+        const trueAuc = 0.7602; // AUC of score = y + N(0,1): Phi(1 / sqrt(2))
+        let cover = 0; const sims = 150;
+        for (let s = 0; s < sims; s++) {
+            const y = [], p = [];
+            for (let i = 0; i < 150; i++) { const yy = rng() < 0.35 ? 1 : 0; y.push(yy); p.push(yy + g()); }
+            const ci = ME.bootstrapInterval(y.length, idx => { const yy = idx.map(i => y[i]); return yy.includes(0) && yy.includes(1) ? ME._calculateBinaryAUC(yy, idx.map(i => p[i])) : null; }, { B: 300, seed: s + 1 });
+            if (ci && ci[0] <= trueAuc && trueAuc <= ci[1]) cover++;
+        }
+        assert(cover / sims >= 0.89 && cover / sims <= 0.99, `coverage ${cover / sims}`);
+        return `coverage ${(100 * cover / sims).toFixed(1)}%`;
+    });
+
     results.forEach(r => console.log(r));
     console.log(`\n${passed}/${passed + failed} edge-case checks passed`);
     process.exit(failed ? 1 : 0);

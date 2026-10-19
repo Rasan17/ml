@@ -168,6 +168,8 @@ test('recalibration, subgroup analysis and Shapley explanation in the standard w
     await expect(page.locator('#calibration-panel-container')).toContainText('Recalibrated');
     await page.click('#subgroup-panel-container-btn');
     await expect(page.locator('#subgroup-panel-container-out table')).toContainText('All Testing patients');
+    await expect(page.locator('#subgroup-panel-container-out table')).toContainText('AUC vs other patients (95% CI)');
+    await expect(page.locator('#subgroup-panel-container-out')).toContainText('percentile bootstrap 95% intervals');
     await page.click('button.step-tab[data-step="5"]');
     await page.click('#run-single-predict-btn');
     await expect(page.locator('#single-result-banner')).toContainText('Shapley');
@@ -384,6 +386,28 @@ test('competing risks: death before revision as a competing event, Options A and
     await expect(page.locator('#external-validation-container')).toContainText('Validation of the competing-risk model');
     const [cardDl] = await Promise.all([page.waitForEvent('download'), page.click('#model-card-btn')]);
     expect(fs.readFileSync(await cardDl.path(), 'utf8')).toContain('competing-risk model (cause-specific Cox)');
+    expect(errors).toEqual([]);
+});
+
+test('several records per patient: the patient split is used, and models are compared with the clustered DeLong test', async ({ page }) => {
+    const errors = watch(page);
+    await page.goto('/index.html');
+    // Each of 200 simulated patients appears twice (two admissions with slightly different measurements)
+    const lines = fs.readFileSync(path.join(__dirname, '..', '..', 'medical_shunt_cohort_large.csv'), 'utf8').trim().split(/\r?\n/);
+    const head = lines[0], rows = lines.slice(1, 201);
+    const twice = rows.flatMap(l => [l, l.replace(/,(\d+),(Male|Female),/, (m, a, sx) => `,${Number(a) + 1},${sx},`)]);
+    await page.setInputFiles('#csv-file-input', { name: 'repeated.csv', mimeType: 'text/csv', buffer: Buffer.from([head, ...twice].join('\n')) });
+    await page.click('button.step-tab[data-step="3"]');
+    await page.click('#apply-imputation-btn');
+    await page.click('button.step-tab[data-step="4"]');
+    await page.selectOption('#split-method', 'group');
+    await page.selectOption('#split-group-col', 'Patient_ID');
+    await selectModels(page, ['glm', 'rf']);
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText('Tournament Complete', { timeout: 150000 });
+    const [reportDl] = await Promise.all([page.waitForEvent('download'), page.click('#standard-html-report-btn')]);
+    const report = fs.readFileSync(await reportDl.path(), 'utf8');
+    expect(report).toContain('clustered DeLong (Obuchowski)');
     expect(errors).toEqual([]);
 });
 
