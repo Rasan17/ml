@@ -3048,6 +3048,121 @@
         },
         createCox(config) { return new CoxModel(config); },
 
+        // ---------------------------------------------------------------------------------------------
+        // Competing risks. status: 0 = censored, 1 = the event of interest, 2 = a competing event (e.g. death
+        // before revision), which removes the patient from risk of the event for good.
+        // ---------------------------------------------------------------------------------------------
+
+        /**
+         * Aalen-Johansen cumulative incidence of the event of interest: F(t) = sum over event times s <= t of
+         * S(s-) * d1(s) / n(s), with S the Kaplan-Meier probability of no event of any kind. Returns
+         * [{time, cif}] at each time with an event of interest. Without competing events it equals 1 - Kaplan-Meier.
+         */
+        aalenJohansen(time, status) {
+            const ts = [...new Set(time)].sort((a, b) => a - b);
+            let S = 1, F = 0;
+            const out = [{ time: 0, cif: 0 }];
+            ts.forEach(t => {
+                let n = 0, d1 = 0, dAll = 0;
+                for (let i = 0; i < time.length; i++) {
+                    if (time[i] >= t) n++;
+                    if (time[i] === t && status[i] > 0) { dAll++; if (status[i] === 1) d1++; }
+                }
+                if (!n) return;
+                if (d1) { F += S * d1 / n; out.push({ time: t, cif: F }); }
+                S *= 1 - dAll / n;
+            });
+            return out;
+        },
+        cifAt(aj, t) { let f = 0; for (const k of aj) { if (k.time <= t) f = k.cif; else break; } return f; },
+
+        /**
+         * Predicted cumulative incidence of the event of interest by time t from two cause-specific Cox models
+         * (event of interest, competing event): F1(t|x) = sum over event times s <= t of
+         * exp(-H1(s-|x) - H2(s-|x)) * dH1(s|x), with Breslow baseline hazards (the cause-specific hazards approach)
+         */
+        competingCIF(m1, m2, x1, x2, t) {
+            const e1 = Math.exp(m1.linearPredictor(x1)), e2 = Math.exp(m2.linearPredictor(x2));
+            const b1 = m1.baseline, b2 = m2.baseline;
+            const times = [...new Set([...b1.times, ...b2.times])].filter(s => s <= t).sort((a, b) => a - b);
+            let F = 0, i1 = 0, i2 = 0, H1 = 0, H2 = 0;
+            for (const s of times) {
+                const before1 = H1, before2 = H2;
+                while (i1 < b1.times.length && b1.times[i1] <= s) { H1 = b1.cumHaz[i1]; i1++; }
+                while (i2 < b2.times.length && b2.times[i2] <= s) { H2 = b2.cumHaz[i2]; i2++; }
+                const dH1 = (H1 - before1) * e1;
+                if (dH1 > 0) F += Math.exp(-before1 * e1 - before2 * e2) * dH1;
+            }
+            return Math.min(1, F);
+        },
+
+        /**
+         * Concordance for competing risks (Wolbers et al. 2009): a patient with the event of interest at Ti is
+         * compared with every patient still free of it after Ti (later time, or censored at Ti) and with every
+         * patient who had a competing event by Ti (who can no longer have the event); concordant when the first
+         * has the higher predicted risk. Without competing events it equals Harrell's C.
+         */
+        concordanceIndexCR(time, status, risk) {
+            let conc = 0, comp = 0;
+            const n = time.length;
+            for (let i = 0; i < n; i++) {
+                if (status[i] !== 1) continue;
+                for (let j = 0; j < n; j++) {
+                    if (j === i) continue;
+                    if (time[j] > time[i] || (time[j] === time[i] && status[j] === 0) || (status[j] === 2 && time[j] <= time[i])) {
+                        comp++;
+                        if (risk[i] > risk[j]) conc++; else if (risk[i] === risk[j]) conc += 0.5;
+                    }
+                }
+            }
+            return comp ? conc / comp : null;
+        },
+
+        /**
+         * Time-dependent AUC at tau with competing risks (Blanche et al. 2013, cases = event of interest by tau;
+         * controls = everyone else observed: still free of any event at tau, or a competing event by tau), with
+         * censoring weights. censKM must treat any event as an event (censoringKM(time, status > 0)).
+         */
+        timeDependentAUCcr(time, status, risk, tau, censKM) {
+            if (!time.length || tau >= Math.max(...time)) return null;
+            const gTau = this.kmAt(censKM, tau);
+            const ctrl = [];
+            for (let j = 0; j < time.length; j++) {
+                if (time[j] > tau) { if (gTau > 0) ctrl.push([risk[j], 1 / gTau]); }
+                else if (status[j] === 2) { const g = this.kmAt(censKM, time[j]); if (g > 0) ctrl.push([risk[j], 1 / g]); }
+            }
+            let num = 0, den = 0;
+            for (let i = 0; i < time.length; i++) {
+                if (!(status[i] === 1 && time[i] <= tau)) continue;
+                const g = this.kmAt(censKM, time[i]);
+                if (!(g > 0)) continue;
+                const wi = 1 / g;
+                for (const [r, wj] of ctrl) { const w = wi * wj; den += w; if (risk[i] > r) num += w; else if (risk[i] === r) num += 0.5 * w; }
+            }
+            return den > 0 ? num / den : null;
+        },
+
+        /**
+         * Brier score at tau for a predicted cumulative incidence F(tau|x) with competing risks and censoring
+         * weights: observed 1 for the event of interest by tau, 0 for a competing event by tau or no event at tau;
+         * patients censored before tau get weight 0. Null when not estimable (horizon beyond follow-up).
+         */
+        ipcwBrierCR(time, status, cifAtTau, tau, censKM) {
+            const gTau = this.kmAt(censKM, tau);
+            if (!time.length || tau >= Math.max(...time) || !(gTau > 0)) return null;
+            let sum = 0, contributors = 0;
+            for (let i = 0; i < time.length; i++) {
+                if (time[i] <= tau && status[i] > 0) {
+                    const g = this.kmAt(censKM, time[i]);
+                    if (!(g > 0)) return null;
+                    sum += ((status[i] === 1 ? 1 : 0) - cifAtTau[i]) ** 2 / g; contributors++;
+                } else if (time[i] > tau) {
+                    sum += cifAtTau[i] ** 2 / gTau; contributors++;
+                }
+            }
+            return contributors ? sum / time.length : null;
+        },
+
         /**
          * Harrell's bootstrap optimism for one resample of a Cox model: the resample model's C-index and
          * time-dependent AUC at the horizon on its own resample (censoring weights from the resample) minus on the

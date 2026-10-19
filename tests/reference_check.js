@@ -113,6 +113,40 @@ out.riley = [[24, 0.174, 0.288], [10, 0.3, 0.1], [30, 0.05, 0.04], [15, 0.5, 0.2
     out.survTies = { trT: tr.map(d => d.t), trE: tr.map(d => d.e), teT: tT, teE: tE, risk, taus, surv,
         cindex: ME.concordanceIndex(tT, tE, risk), auc: taus.map(tau => ME.timeDependentAUC(tT, tE, risk, tau, cw)), brier: taus.map((tau, k) => ME.ipcwBrier(tT, tE, surv[k], tau, cw)) };
 }
+// Competing risks: Aalen-Johansen, cause-specific Cox models and their cumulative incidence, Wolbers' C, and the
+// time-dependent AUC and Brier score with a competing event (ties at integer-ish times, censoring)
+{
+    const r4 = DE.createPRNG(55);
+    const mk = n => Array.from({ length: n }, () => {
+        const x1 = r4() * 2 - 1, x2 = r4() < 0.5 ? 1 : 0;
+        const t1 = -Math.log(r4() || 1e-9) / (0.25 * Math.exp(0.8 * x1 + 0.4 * x2)), t2 = -Math.log(r4() || 1e-9) / (0.15 * Math.exp(-0.5 * x1 + 0.6 * x2)), c = r4() * 8;
+        const t = Math.round(Math.min(t1, t2, c) * 4) / 4 + 0.25;
+        return { x: [x1, x2], t, s: c < Math.min(t1, t2) ? 0 : (t1 <= t2 ? 1 : 2) };
+    });
+    const tr = mk(220), te = mk(150), taus = [1.5, 2.5, 4];
+    const tT = tr.map(d => d.t), sT = tr.map(d => d.s), X = tr.map(d => d.x);
+    const m1 = new window.CoxModel().fit(X, tT, sT.map(v => (v === 1 ? 1 : 0)));
+    const m2 = new window.CoxModel().fit(X, tT, sT.map(v => (v === 2 ? 1 : 0)));
+    const aj = ME.aalenJohansen(tT, sT);
+    const eT = te.map(d => d.t), eS = te.map(d => d.s);
+    const cw = ME.censoringKM(tT, sT.map(v => (v > 0 ? 1 : 0)));
+    const risk = te.map(d => ME.competingCIF(m1, m2, d.x, d.x, 2.5));
+    const cif = taus.map(tau => te.map(d => ME.competingCIF(m1, m2, d.x, d.x, tau)));
+    out.cr = { trT: tT, trS: sT, trX: X, teT: eT, teS: eS, teX: te.map(d => d.x), taus,
+        beta1: m1.beta, beta2: m2.beta, aj: taus.map(t => ME.cifAt(aj, t)),
+        cif: cif.map(c => c.slice(0, 5)), risk,
+        cindex: ME.concordanceIndexCR(eT, eS, risk),
+        auc: taus.map(tau => ME.timeDependentAUCcr(eT, eS, cif[taus.indexOf(tau)], tau, cw)),
+        brier: taus.map((tau, k) => ME.ipcwBrierCR(eT, eS, cif[k], tau, cw)) };
+    // Without competing events every competing-risk measure must equal its standard counterpart
+    const st = out.survTies, cw2 = ME.censoringKM(st.trT, st.trE);
+    out.crReduces = {
+        c: [ME.concordanceIndexCR(st.teT, st.teE, st.risk), ME.concordanceIndex(st.teT, st.teE, st.risk)],
+        auc: st.taus.map(tau => [ME.timeDependentAUCcr(st.teT, st.teE, st.risk, tau, cw2), ME.timeDependentAUC(st.teT, st.teE, st.risk, tau, cw2)]),
+        brier: st.taus.map((tau, k) => [ME.ipcwBrierCR(st.teT, st.teE, st.surv[k].map(v => 1 - v), tau, cw2), ME.ipcwBrier(st.teT, st.teE, st.surv[k], tau, cw2)]),
+        aj: [1, 2, 3, 4].map(t => [ME.cifAt(ME.aalenJohansen(st.teT, st.teE), t), 1 - ME.kmAt(ME.kaplanMeier(st.teT, st.teE), t)])
+    };
+}
 // Harrell's bootstrap optimism for a Cox model (Option C for time-to-event outcomes): each resample refits the Cox
 // model and is scored by the app's own ModelEngine.coxResampleOptimism (C-index, time-dependent AUC, calibration slope)
 {

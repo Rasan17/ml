@@ -14,6 +14,7 @@ export default [{
         eqeqeq: ['error', 'smart'],
         'no-unreachable': 'error', 'no-dupe-keys': 'error', 'no-dupe-else-if': 'error', 'no-self-assign': 'error',
         'no-fallthrough': 'error', 'no-const-assign': 'error', 'no-unsafe-finally': 'error', 'no-cond-assign': 'error',
-        'no-redeclare': ['error', { builtinGlobals: false }], 'no-implicit-globals': 'error', 'no-shadow': 'error'
+        'no-redeclare': ['error', { builtinGlobals: false }], 'no-implicit-globals': 'error', 'no-shadow': 'error',
+        'no-use-before-define': ['error', { functions: false, classes: false, variables: true }]
     }
 }];

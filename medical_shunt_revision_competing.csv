@@ -1,0 +1,401 @@
+Patient_ID,Age,Sex,BMI,Aetiology,Valve_Type,Prior_Shunt_Surgery,Months_Followup,Outcome
+CR0001,73,Female,20.9,Idiopathic NPH,Fixed pressure,No,46.5,"Alive, no revision"
+CR0002,71,Male,24.2,Post-traumatic,Programmable,No,21.2,"Alive, no revision"
+CR0003,65,Female,24.2,Idiopathic NPH,Fixed pressure,No,49.2,Revision
+CR0004,53,Female,,Idiopathic NPH,Fixed pressure,No,27.8,Revision
+CR0005,83,Male,28.6,Idiopathic NPH,Fixed pressure,No,5.5,Revision
+CR0006,68,Male,32.7,Idiopathic NPH,Fixed pressure,No,33.7,Death
+CR0007,70,Male,32.5,Idiopathic NPH,Programmable,No,28.7,Death
+CR0008,64,Male,24.4,Idiopathic NPH,Fixed pressure,No,25.5,Revision
+CR0009,67,Female,31.4,Post-haemorrhagic,Programmable,No,42.2,Revision
+CR0010,63,Female,30.0,Idiopathic NPH,Programmable,No,20.7,Revision
+CR0011,71,Male,25.7,Idiopathic NPH,Fixed pressure,No,46.4,Revision
+CR0012,73,Male,,Idiopathic NPH,Programmable,No,43.1,"Alive, no revision"
+CR0013,70,Male,26.8,Idiopathic NPH,Programmable,No,13.7,Revision
+CR0014,77,Female,31.6,Idiopathic NPH,Fixed pressure,Yes,30.9,Revision
+CR0015,59,Male,26.1,Idiopathic NPH,Fixed pressure,No,14.5,"Alive, no revision"
+CR0016,80,Male,23.0,Idiopathic NPH,Fixed pressure,No,28.9,"Alive, no revision"
+CR0017,63,Male,,Post-traumatic,Fixed pressure,Yes,19.1,"Alive, no revision"
+CR0018,68,Female,28.2,Idiopathic NPH,Programmable,No,27.0,Revision
+CR0019,64,Female,24.9,Post-haemorrhagic,Programmable,No,32.3,"Alive, no revision"
+CR0020,67,Male,32.2,Idiopathic NPH,Fixed pressure,Yes,34.1,Revision
+CR0021,68,Male,29.4,Post-haemorrhagic,Programmable,No,0.5,Revision
+CR0022,76,Female,30.3,Idiopathic NPH,Programmable,No,34.1,"Alive, no revision"
+CR0023,92,Female,22.0,Idiopathic NPH,Programmable,No,12.3,"Alive, no revision"
+CR0024,63,Male,26.3,Idiopathic NPH,Fixed pressure,Yes,37.5,"Alive, no revision"
+CR0025,71,Male,31.4,Idiopathic NPH,Programmable,No,10.1,Death
+CR0026,53,Female,24.5,Idiopathic NPH,Fixed pressure,Yes,46.4,"Alive, no revision"
+CR0027,71,Male,28.6,Post-haemorrhagic,Programmable,No,64.7,"Alive, no revision"
+CR0028,74,Female,29.8,Idiopathic NPH,Fixed pressure,No,46.0,Death
+CR0029,83,Male,25.9,Idiopathic NPH,Fixed pressure,Yes,12.6,Revision
+CR0030,85,Female,24.2,Idiopathic NPH,Fixed pressure,No,63.6,"Alive, no revision"
+CR0031,84,Male,,Post-haemorrhagic,Programmable,No,19.7,Death
+CR0032,74,Female,27.9,Idiopathic NPH,Fixed pressure,No,14.0,Death
+CR0033,76,Male,23.8,Post-traumatic,Programmable,Yes,35.0,"Alive, no revision"
+CR0034,68,Male,25.3,Idiopathic NPH,Fixed pressure,Yes,12.1,Death
+CR0035,92,Female,27.7,Idiopathic NPH,Programmable,No,2.0,Revision
+CR0036,69,Male,22.6,Idiopathic NPH,Fixed pressure,No,38.9,"Alive, no revision"
+CR0037,61,Female,21.5,Idiopathic NPH,Fixed pressure,No,38.4,"Alive, no revision"
+CR0038,71,Female,20.2,Post-haemorrhagic,Programmable,Yes,11.9,Death
+CR0039,92,Male,24.7,Post-haemorrhagic,Fixed pressure,No,25.3,Revision
+CR0040,78,Female,24.4,Post-haemorrhagic,Programmable,No,0.7,Death
+CR0041,86,Male,27.9,Idiopathic NPH,Fixed pressure,No,7.4,Death
+CR0042,83,Male,20.5,Post-haemorrhagic,Programmable,No,17.1,Death
+CR0043,75,Male,,Idiopathic NPH,Programmable,No,23.6,Death
+CR0044,57,Male,24.1,Idiopathic NPH,Fixed pressure,No,29.8,Death
+CR0045,87,Male,34.0,Post-haemorrhagic,Programmable,No,3.7,Death
+CR0046,66,Female,25.9,Idiopathic NPH,Programmable,No,65.5,"Alive, no revision"
+CR0047,62,Male,27.6,Post-traumatic,Programmable,No,60.1,"Alive, no revision"
+CR0048,60,Male,,Idiopathic NPH,Fixed pressure,Yes,24.1,Revision
+CR0049,59,Male,28.9,Idiopathic NPH,Fixed pressure,No,2.4,Revision
+CR0050,69,Male,21.2,Idiopathic NPH,Programmable,No,24.4,"Alive, no revision"
+CR0051,73,Male,24.4,Post-haemorrhagic,Programmable,No,49.6,"Alive, no revision"
+CR0052,61,Male,22.4,Post-haemorrhagic,Programmable,No,2.1,Revision
+CR0053,62,Male,26.3,Idiopathic NPH,Programmable,No,9.6,Revision
+CR0054,67,Male,17.0,Post-traumatic,Programmable,No,26.1,"Alive, no revision"
+CR0055,66,Male,32.4,Idiopathic NPH,Programmable,No,1.5,Revision
+CR0056,64,Female,20.7,Post-haemorrhagic,Programmable,Yes,16.0,"Alive, no revision"
+CR0057,60,Male,28.4,Post-traumatic,Fixed pressure,No,25.2,"Alive, no revision"
+CR0058,65,Female,34.3,Idiopathic NPH,Programmable,Yes,25.0,Revision
+CR0059,51,Male,29.1,Idiopathic NPH,Fixed pressure,Yes,15.9,"Alive, no revision"
+CR0060,71,Male,22.2,Idiopathic NPH,Programmable,No,51.3,"Alive, no revision"
+CR0061,67,Female,27.4,Idiopathic NPH,Fixed pressure,No,33.3,"Alive, no revision"
+CR0062,73,Female,22.7,Idiopathic NPH,Fixed pressure,Yes,12.4,Revision
+CR0063,74,Male,23.7,Idiopathic NPH,Programmable,No,20.4,Death
+CR0064,58,Male,34.0,Post-haemorrhagic,Programmable,No,0.8,Revision
+CR0065,82,Male,,Idiopathic NPH,Programmable,No,1.0,Death
+CR0066,81,Male,32.4,Idiopathic NPH,Programmable,No,48.9,"Alive, no revision"
+CR0067,78,Male,17.2,Post-haemorrhagic,Programmable,No,3.7,Revision
+CR0068,66,Female,,Idiopathic NPH,Fixed pressure,No,6.0,Revision
+CR0069,74,Female,29.3,Post-haemorrhagic,Fixed pressure,No,8.2,Revision
+CR0070,68,Male,25.0,Idiopathic NPH,Programmable,Yes,22.4,"Alive, no revision"
+CR0071,79,Female,25.8,Idiopathic NPH,Programmable,Yes,18.6,Revision
+CR0072,67,Female,,Post-haemorrhagic,Programmable,No,16.3,"Alive, no revision"
+CR0073,59,Female,38.5,Post-haemorrhagic,Programmable,No,23.5,"Alive, no revision"
+CR0074,63,Male,36.9,Post-traumatic,Programmable,No,0.8,Revision
+CR0075,65,Female,25.4,Idiopathic NPH,Fixed pressure,No,34.2,"Alive, no revision"
+CR0076,77,Female,21.9,Idiopathic NPH,Fixed pressure,No,68.2,"Alive, no revision"
+CR0077,62,Male,26.4,Idiopathic NPH,Fixed pressure,No,6.9,Revision
+CR0078,71,Male,22.1,Post-haemorrhagic,Fixed pressure,No,20.6,Revision
+CR0079,81,Male,24.6,Post-traumatic,Programmable,No,6.8,Revision
+CR0080,69,Male,27.0,Idiopathic NPH,Fixed pressure,No,0.5,Revision
+CR0081,74,Female,30.9,Post-haemorrhagic,Fixed pressure,Yes,3.5,Revision
+CR0082,92,Female,29.0,Post-haemorrhagic,Programmable,No,29.0,Death
+CR0083,78,Male,31.6,Idiopathic NPH,Fixed pressure,No,16.8,Death
+CR0084,84,Female,33.3,Idiopathic NPH,Programmable,No,43.3,"Alive, no revision"
+CR0085,73,Male,27.8,Post-traumatic,Programmable,No,15.2,"Alive, no revision"
+CR0086,69,Male,36.5,Idiopathic NPH,Programmable,No,44.7,"Alive, no revision"
+CR0087,57,Female,27.8,Idiopathic NPH,Fixed pressure,No,17.6,"Alive, no revision"
+CR0088,80,Female,23.7,Post-haemorrhagic,Programmable,No,0.5,Revision
+CR0089,71,Male,27.8,Idiopathic NPH,Programmable,No,10.6,Revision
+CR0090,86,Male,22.1,Idiopathic NPH,Fixed pressure,Yes,9.7,Revision
+CR0091,82,Female,23.7,Post-haemorrhagic,Programmable,No,18.9,Revision
+CR0092,69,Female,27.2,Idiopathic NPH,Programmable,No,13.1,Revision
+CR0093,63,Female,17.0,Idiopathic NPH,Fixed pressure,Yes,24.5,"Alive, no revision"
+CR0094,63,Male,35.0,Idiopathic NPH,Programmable,No,53.7,"Alive, no revision"
+CR0095,67,Male,23.3,Idiopathic NPH,Fixed pressure,No,41.9,"Alive, no revision"
+CR0096,70,Male,22.9,Post-haemorrhagic,Fixed pressure,No,19.1,Revision
+CR0097,75,Male,18.4,Idiopathic NPH,Programmable,No,26.4,"Alive, no revision"
+CR0098,63,Female,27.2,Idiopathic NPH,Fixed pressure,No,25.9,"Alive, no revision"
+CR0099,59,Male,22.7,Idiopathic NPH,Programmable,No,36.3,"Alive, no revision"
+CR0100,82,Male,29.0,Idiopathic NPH,Programmable,No,10.1,Death
+CR0101,66,Female,25.0,Idiopathic NPH,Programmable,Yes,31.5,Revision
+CR0102,78,Male,25.4,Idiopathic NPH,Programmable,No,29.1,Death
+CR0103,81,Male,22.7,Idiopathic NPH,Programmable,No,35.4,"Alive, no revision"
+CR0104,80,Female,20.1,Post-traumatic,Fixed pressure,No,2.3,Revision
+CR0105,88,Male,24.7,Idiopathic NPH,Programmable,Yes,0.6,Death
+CR0106,73,Male,25.5,Idiopathic NPH,Programmable,Yes,16.5,"Alive, no revision"
+CR0107,74,Female,23.3,Post-haemorrhagic,Fixed pressure,No,7.7,Death
+CR0108,71,Female,25.7,Post-haemorrhagic,Fixed pressure,Yes,5.9,Revision
+CR0109,88,Female,32.8,Post-haemorrhagic,Programmable,No,16.3,Revision
+CR0110,74,Female,34.8,Post-haemorrhagic,Fixed pressure,No,8.2,Revision
+CR0111,84,Female,26.4,Post-haemorrhagic,Fixed pressure,No,31.3,Death
+CR0112,67,Female,29.4,Idiopathic NPH,Programmable,Yes,69.2,"Alive, no revision"
+CR0113,81,Female,26.8,Idiopathic NPH,Programmable,No,50.6,"Alive, no revision"
+CR0114,75,Male,30.1,Idiopathic NPH,Programmable,No,35.7,"Alive, no revision"
+CR0115,92,Male,27.1,Idiopathic NPH,Programmable,No,3.6,Revision
+CR0116,75,Male,23.1,Idiopathic NPH,Programmable,No,20.9,"Alive, no revision"
+CR0117,82,Male,18.9,Post-traumatic,Programmable,No,15.3,Death
+CR0118,73,Male,30.2,Idiopathic NPH,Fixed pressure,No,16.8,Death
+CR0119,62,Female,33.7,Post-traumatic,Fixed pressure,No,4.8,Revision
+CR0120,55,Female,24.8,Idiopathic NPH,Fixed pressure,No,11.6,Revision
+CR0121,66,Male,25.7,Post-haemorrhagic,Programmable,Yes,12.9,Revision
+CR0122,72,Female,22.9,Post-haemorrhagic,Programmable,Yes,4.1,Death
+CR0123,81,Female,27.7,Post-haemorrhagic,Programmable,Yes,7.4,Revision
+CR0124,62,Female,29.6,Idiopathic NPH,Fixed pressure,No,26.3,"Alive, no revision"
+CR0125,66,Female,21.7,Idiopathic NPH,Fixed pressure,No,24.9,Revision
+CR0126,71,Male,23.5,Idiopathic NPH,Programmable,No,28.7,"Alive, no revision"
+CR0127,92,Female,30.6,Post-haemorrhagic,Programmable,No,18.2,Revision
+CR0128,68,Female,36.0,Post-traumatic,Programmable,No,52.9,Revision
+CR0129,74,Male,25.0,Idiopathic NPH,Programmable,No,52.8,"Alive, no revision"
+CR0130,92,Male,,Post-traumatic,Programmable,Yes,12.8,"Alive, no revision"
+CR0131,71,Male,29.0,Post-traumatic,Programmable,No,12.0,Revision
+CR0132,82,Female,26.4,Post-haemorrhagic,Fixed pressure,No,8.8,Death
+CR0133,68,Male,17.0,Post-traumatic,Programmable,No,8.5,Revision
+CR0134,86,Male,29.4,Post-haemorrhagic,Fixed pressure,No,11.8,Revision
+CR0135,81,Male,25.4,Idiopathic NPH,Programmable,No,15.5,Revision
+CR0136,84,Male,25.3,Idiopathic NPH,Programmable,No,13.6,Death
+CR0137,81,Female,31.1,Idiopathic NPH,Fixed pressure,No,5.5,Revision
+CR0138,69,Male,25.8,Idiopathic NPH,Programmable,No,16.5,Revision
+CR0139,72,Female,21.8,Post-haemorrhagic,Programmable,No,41.8,Death
+CR0140,82,Female,31.6,Idiopathic NPH,Programmable,No,27.9,"Alive, no revision"
+CR0141,78,Female,31.7,Idiopathic NPH,Programmable,Yes,6.8,Revision
+CR0142,54,Female,25.9,Idiopathic NPH,Programmable,No,22.7,Revision
+CR0143,59,Male,25.0,Post-haemorrhagic,Fixed pressure,No,1.2,Revision
+CR0144,72,Female,37.7,Idiopathic NPH,Programmable,No,50.3,"Alive, no revision"
+CR0145,77,Male,30.4,Idiopathic NPH,Programmable,No,14.8,Revision
+CR0146,64,Female,29.5,Post-haemorrhagic,Programmable,Yes,3.9,Revision
+CR0147,69,Female,25.3,Post-haemorrhagic,Programmable,No,47.8,Revision
+CR0148,46,Male,29.1,Idiopathic NPH,Fixed pressure,No,57.1,"Alive, no revision"
+CR0149,81,Male,34.6,Idiopathic NPH,Programmable,No,7.6,Death
+CR0150,71,Male,25.3,Idiopathic NPH,Programmable,No,0.6,Death
+CR0151,68,Female,33.6,Idiopathic NPH,Fixed pressure,No,34.0,"Alive, no revision"
+CR0152,80,Male,29.0,Idiopathic NPH,Fixed pressure,No,16.3,Death
+CR0153,76,Male,20.0,Idiopathic NPH,Programmable,Yes,14.3,Revision
+CR0154,46,Male,27.7,Post-haemorrhagic,Programmable,No,20.2,Revision
+CR0155,79,Female,29.3,Post-haemorrhagic,Programmable,No,1.2,Death
+CR0156,68,Male,26.4,Idiopathic NPH,Programmable,Yes,7.3,Revision
+CR0157,54,Male,24.4,Idiopathic NPH,Programmable,No,62.5,"Alive, no revision"
+CR0158,70,Male,30.5,Post-traumatic,Programmable,Yes,3.3,Revision
+CR0159,74,Male,27.7,Idiopathic NPH,Programmable,No,26.0,"Alive, no revision"
+CR0160,76,Male,21.9,Post-haemorrhagic,Programmable,No,16.2,"Alive, no revision"
+CR0161,82,Female,27.6,Post-haemorrhagic,Fixed pressure,Yes,13.3,Death
+CR0162,76,Male,30.3,Post-haemorrhagic,Fixed pressure,No,7.0,Death
+CR0163,74,Male,17.0,Idiopathic NPH,Programmable,No,27.7,"Alive, no revision"
+CR0164,77,Female,27.0,Post-haemorrhagic,Programmable,No,5.2,Revision
+CR0165,78,Male,25.6,Idiopathic NPH,Programmable,Yes,26.5,"Alive, no revision"
+CR0166,85,Male,21.0,Idiopathic NPH,Programmable,No,18.6,"Alive, no revision"
+CR0167,74,Male,20.6,Post-traumatic,Programmable,No,59.9,Revision
+CR0168,79,Male,,Post-haemorrhagic,Fixed pressure,Yes,10.3,Revision
+CR0169,74,Female,22.9,Post-haemorrhagic,Fixed pressure,No,53.2,"Alive, no revision"
+CR0170,85,Male,27.3,Post-haemorrhagic,Programmable,No,2.7,Death
+CR0171,78,Male,24.5,Idiopathic NPH,Programmable,Yes,31.0,Death
+CR0172,80,Male,30.5,Idiopathic NPH,Fixed pressure,No,47.8,Revision
+CR0173,79,Female,17.0,Idiopathic NPH,Programmable,No,13.6,"Alive, no revision"
+CR0174,66,Male,,Idiopathic NPH,Programmable,No,24.1,Revision
+CR0175,64,Female,26.8,Post-haemorrhagic,Programmable,No,9.2,Death
+CR0176,80,Female,23.3,Post-traumatic,Programmable,No,3.9,Revision
+CR0177,51,Female,25.6,Idiopathic NPH,Programmable,No,15.5,"Alive, no revision"
+CR0178,71,Female,27.4,Post-traumatic,Fixed pressure,No,36.9,"Alive, no revision"
+CR0179,85,Male,28.5,Idiopathic NPH,Programmable,Yes,29.4,Death
+CR0180,58,Male,,Post-haemorrhagic,Fixed pressure,No,5.0,Revision
+CR0181,73,Female,29.7,Idiopathic NPH,Fixed pressure,Yes,25.1,Revision
+CR0182,66,Male,23.6,Idiopathic NPH,Programmable,Yes,14.9,Death
+CR0183,82,Male,29.8,Post-haemorrhagic,Programmable,No,32.2,"Alive, no revision"
+CR0184,57,Male,23.9,Post-traumatic,Programmable,No,51.5,"Alive, no revision"
+CR0185,67,Male,,Post-haemorrhagic,Fixed pressure,Yes,28.1,"Alive, no revision"
+CR0186,66,Female,28.4,Post-haemorrhagic,Programmable,No,33.7,Revision
+CR0187,67,Female,29.9,Post-haemorrhagic,Fixed pressure,No,16.9,Revision
+CR0188,82,Male,28.6,Idiopathic NPH,Programmable,No,23.6,"Alive, no revision"
+CR0189,72,Male,27.2,Post-traumatic,Fixed pressure,No,30.8,Revision
+CR0190,68,Male,20.2,Idiopathic NPH,Fixed pressure,No,7.1,Death
+CR0191,77,Male,33.5,Idiopathic NPH,Fixed pressure,No,60.6,Death
+CR0192,80,Female,22.6,Post-haemorrhagic,Programmable,No,48.0,Death
+CR0193,76,Female,23.1,Post-haemorrhagic,Programmable,No,13.2,Revision
+CR0194,76,Male,27.8,Post-haemorrhagic,Fixed pressure,Yes,28.2,Revision
+CR0195,69,Female,26.7,Post-traumatic,Programmable,No,68.0,"Alive, no revision"
+CR0196,72,Female,,Post-traumatic,Programmable,No,47.1,Revision
+CR0197,77,Male,30.2,Post-haemorrhagic,Fixed pressure,No,0.7,Revision
+CR0198,75,Male,29.2,Idiopathic NPH,Fixed pressure,No,17.1,"Alive, no revision"
+CR0199,85,Female,20.1,Idiopathic NPH,Fixed pressure,Yes,18.1,"Alive, no revision"
+CR0200,70,Female,29.9,Idiopathic NPH,Fixed pressure,No,51.6,Revision
+CR0201,92,Male,21.2,Post-haemorrhagic,Programmable,Yes,11.9,Revision
+CR0202,71,Male,34.8,Post-haemorrhagic,Fixed pressure,No,6.5,Revision
+CR0203,68,Female,21.2,Idiopathic NPH,Programmable,No,7.6,Revision
+CR0204,72,Female,20.9,Post-haemorrhagic,Programmable,No,16.7,Death
+CR0205,77,Male,28.5,Post-haemorrhagic,Programmable,No,5.3,Revision
+CR0206,68,Male,25.3,Idiopathic NPH,Programmable,No,13.3,"Alive, no revision"
+CR0207,92,Female,31.9,Idiopathic NPH,Programmable,No,6.8,Revision
+CR0208,79,Female,25.2,Idiopathic NPH,Programmable,No,24.5,Death
+CR0209,84,Female,32.8,Idiopathic NPH,Fixed pressure,No,15.7,Revision
+CR0210,77,Male,22.4,Idiopathic NPH,Fixed pressure,No,48.1,Revision
+CR0211,70,Male,,Idiopathic NPH,Fixed pressure,No,3.9,Death
+CR0212,58,Male,25.9,Post-haemorrhagic,Programmable,No,20.8,Revision
+CR0213,81,Male,28.0,Idiopathic NPH,Fixed pressure,No,35.5,"Alive, no revision"
+CR0214,82,Male,30.7,Idiopathic NPH,Programmable,Yes,37.7,Revision
+CR0215,67,Female,25.5,Idiopathic NPH,Programmable,No,51.0,"Alive, no revision"
+CR0216,73,Male,36.2,Idiopathic NPH,Programmable,Yes,5.4,Death
+CR0217,80,Male,38.9,Post-haemorrhagic,Programmable,No,3.0,Revision
+CR0218,68,Male,22.7,Post-haemorrhagic,Programmable,No,24.2,Death
+CR0219,81,Female,21.8,Idiopathic NPH,Programmable,No,38.5,"Alive, no revision"
+CR0220,78,Male,25.5,Post-haemorrhagic,Fixed pressure,No,23.5,"Alive, no revision"
+CR0221,71,Male,26.4,Idiopathic NPH,Programmable,No,30.2,"Alive, no revision"
+CR0222,80,Male,24.9,Idiopathic NPH,Fixed pressure,No,29.2,Revision
+CR0223,70,Female,24.9,Post-traumatic,Programmable,Yes,38.2,Death
+CR0224,60,Male,29.5,Post-haemorrhagic,Fixed pressure,No,15.5,Revision
+CR0225,62,Male,31.9,Idiopathic NPH,Programmable,No,50.2,Revision
+CR0226,85,Male,35.5,Idiopathic NPH,Fixed pressure,No,6.3,Revision
+CR0227,69,Male,31.5,Idiopathic NPH,Fixed pressure,No,10.1,Revision
+CR0228,80,Male,30.6,Idiopathic NPH,Fixed pressure,No,12.7,"Alive, no revision"
+CR0229,92,Male,28.5,Idiopathic NPH,Programmable,No,5.8,Death
+CR0230,72,Male,30.9,Idiopathic NPH,Programmable,No,28.8,"Alive, no revision"
+CR0231,76,Female,22.9,Post-haemorrhagic,Programmable,No,1.8,Revision
+CR0232,88,Male,24.8,Idiopathic NPH,Programmable,No,15.7,Death
+CR0233,78,Male,31.5,Idiopathic NPH,Programmable,No,20.4,"Alive, no revision"
+CR0234,79,Female,31.8,Post-haemorrhagic,Programmable,No,21.0,Revision
+CR0235,76,Male,30.3,Post-haemorrhagic,Fixed pressure,No,19.9,"Alive, no revision"
+CR0236,57,Female,30.7,Post-haemorrhagic,Fixed pressure,No,6.4,Revision
+CR0237,64,Female,32.9,Idiopathic NPH,Programmable,No,17.3,"Alive, no revision"
+CR0238,72,Male,25.2,Post-haemorrhagic,Programmable,No,68.5,"Alive, no revision"
+CR0239,70,Male,28.7,Post-haemorrhagic,Programmable,Yes,17.8,Revision
+CR0240,68,Female,21.0,Idiopathic NPH,Programmable,Yes,16.5,"Alive, no revision"
+CR0241,73,Female,26.0,Idiopathic NPH,Programmable,No,48.5,"Alive, no revision"
+CR0242,69,Female,23.0,Post-haemorrhagic,Programmable,No,15.3,"Alive, no revision"
+CR0243,80,Female,26.5,Idiopathic NPH,Programmable,No,12.4,Revision
+CR0244,74,Female,24.8,Post-traumatic,Programmable,No,23.6,Death
+CR0245,68,Female,19.9,Post-haemorrhagic,Programmable,No,21.2,"Alive, no revision"
+CR0246,83,Male,24.8,Idiopathic NPH,Fixed pressure,No,5.4,Revision
+CR0247,73,Male,25.9,Post-haemorrhagic,Programmable,Yes,0.5,Revision
+CR0248,89,Male,20.6,Idiopathic NPH,Programmable,No,10.5,Death
+CR0249,81,Male,34.5,Idiopathic NPH,Fixed pressure,No,15.4,Death
+CR0250,52,Female,34.6,Idiopathic NPH,Programmable,No,3.2,Revision
+CR0251,81,Male,25.1,Post-haemorrhagic,Programmable,No,5.6,Revision
+CR0252,63,Male,26.7,Idiopathic NPH,Fixed pressure,No,11.9,Revision
+CR0253,70,Female,27.9,Idiopathic NPH,Programmable,Yes,27.1,"Alive, no revision"
+CR0254,55,Male,24.9,Post-haemorrhagic,Programmable,No,14.6,Revision
+CR0255,82,Female,27.8,Idiopathic NPH,Fixed pressure,No,18.4,"Alive, no revision"
+CR0256,66,Female,17.9,Idiopathic NPH,Programmable,Yes,13.3,Revision
+CR0257,69,Male,23.6,Idiopathic NPH,Fixed pressure,No,42.7,"Alive, no revision"
+CR0258,63,Female,33.5,Idiopathic NPH,Programmable,No,6.3,Death
+CR0259,71,Female,,Post-traumatic,Fixed pressure,No,8.9,Revision
+CR0260,63,Male,29.4,Idiopathic NPH,Fixed pressure,Yes,13.7,Revision
+CR0261,90,Female,34.2,Post-haemorrhagic,Programmable,No,8.3,Death
+CR0262,92,Male,25.6,Post-traumatic,Programmable,No,9.1,Death
+CR0263,67,Female,30.8,Idiopathic NPH,Programmable,Yes,12.5,"Alive, no revision"
+CR0264,67,Male,31.6,Post-traumatic,Fixed pressure,No,24.0,"Alive, no revision"
+CR0265,78,Female,26.2,Post-haemorrhagic,Fixed pressure,No,21.4,"Alive, no revision"
+CR0266,77,Male,24.3,Idiopathic NPH,Programmable,No,12.8,Death
+CR0267,55,Male,21.3,Post-haemorrhagic,Programmable,Yes,15.0,"Alive, no revision"
+CR0268,75,Female,31.2,Idiopathic NPH,Programmable,Yes,38.3,"Alive, no revision"
+CR0269,56,Female,26.8,Post-haemorrhagic,Programmable,No,33.4,"Alive, no revision"
+CR0270,85,Female,30.4,Post-haemorrhagic,Fixed pressure,No,37.3,"Alive, no revision"
+CR0271,80,Female,21.3,Idiopathic NPH,Programmable,No,6.3,Revision
+CR0272,74,Female,35.3,Post-haemorrhagic,Fixed pressure,No,15.2,Revision
+CR0273,76,Male,25.5,Idiopathic NPH,Programmable,No,4.0,Death
+CR0274,65,Male,35.4,Idiopathic NPH,Programmable,No,32.5,Revision
+CR0275,69,Female,22.5,Post-traumatic,Programmable,No,24.8,Revision
+CR0276,67,Male,,Post-traumatic,Fixed pressure,Yes,11.3,Revision
+CR0277,87,Female,23.9,Idiopathic NPH,Programmable,No,3.3,Revision
+CR0278,66,Male,21.9,Idiopathic NPH,Programmable,No,40.5,Death
+CR0279,69,Male,32.8,Idiopathic NPH,Fixed pressure,No,23.3,"Alive, no revision"
+CR0280,88,Male,34.3,Idiopathic NPH,Fixed pressure,Yes,1.8,Death
+CR0281,71,Female,32.4,Idiopathic NPH,Fixed pressure,No,32.3,"Alive, no revision"
+CR0282,83,Female,27.9,Post-haemorrhagic,Fixed pressure,No,14.1,Revision
+CR0283,75,Male,28.7,Post-haemorrhagic,Programmable,Yes,6.3,Revision
+CR0284,80,Male,26.9,Idiopathic NPH,Fixed pressure,Yes,20.3,"Alive, no revision"
+CR0285,63,Male,33.4,Idiopathic NPH,Programmable,Yes,47.1,"Alive, no revision"
+CR0286,73,Male,30.9,Post-traumatic,Fixed pressure,No,43.6,"Alive, no revision"
+CR0287,73,Male,29.2,Idiopathic NPH,Programmable,No,3.7,Death
+CR0288,54,Male,24.2,Post-haemorrhagic,Programmable,No,8.2,Revision
+CR0289,63,Male,21.9,Idiopathic NPH,Fixed pressure,No,0.5,Revision
+CR0290,68,Male,25.9,Post-traumatic,Programmable,No,33.5,Revision
+CR0291,83,Male,20.5,Idiopathic NPH,Programmable,No,8.1,Revision
+CR0292,64,Male,27.8,Post-haemorrhagic,Fixed pressure,No,10.6,Revision
+CR0293,83,Female,25.5,Post-traumatic,Fixed pressure,No,8.9,Death
+CR0294,79,Male,28.1,Post-haemorrhagic,Programmable,No,3.0,Death
+CR0295,68,Male,32.1,Post-traumatic,Fixed pressure,No,21.0,Revision
+CR0296,79,Male,28.4,Post-traumatic,Fixed pressure,Yes,33.6,Death
+CR0297,85,Male,25.4,Post-traumatic,Fixed pressure,No,8.8,Death
+CR0298,79,Male,19.5,Idiopathic NPH,Fixed pressure,No,57.2,"Alive, no revision"
+CR0299,75,Male,32.5,Post-traumatic,Programmable,Yes,18.9,Revision
+CR0300,75,Female,30.3,Post-haemorrhagic,Programmable,No,70.9,"Alive, no revision"
+CR0301,56,Male,32.4,Idiopathic NPH,Programmable,Yes,35.2,"Alive, no revision"
+CR0302,52,Female,26.3,Idiopathic NPH,Programmable,No,22.5,Revision
+CR0303,76,Female,23.2,Idiopathic NPH,Fixed pressure,No,15.6,Death
+CR0304,79,Female,27.6,Idiopathic NPH,Fixed pressure,No,20.9,Death
+CR0305,57,Female,29.7,Idiopathic NPH,Fixed pressure,No,12.1,Revision
+CR0306,80,Female,28.3,Post-haemorrhagic,Fixed pressure,No,27.1,Revision
+CR0307,71,Female,,Post-traumatic,Programmable,Yes,13.5,Death
+CR0308,60,Female,23.2,Post-haemorrhagic,Programmable,No,41.6,"Alive, no revision"
+CR0309,78,Male,23.6,Idiopathic NPH,Fixed pressure,No,15.8,Revision
+CR0310,60,Female,28.0,Idiopathic NPH,Programmable,No,52.9,"Alive, no revision"
+CR0311,61,Female,28.7,Idiopathic NPH,Programmable,No,22.0,Revision
+CR0312,87,Female,33.9,Idiopathic NPH,Programmable,Yes,53.8,Death
+CR0313,57,Male,34.8,Post-haemorrhagic,Programmable,No,7.8,Revision
+CR0314,68,Female,26.7,Idiopathic NPH,Fixed pressure,Yes,13.8,Revision
+CR0315,70,Male,32.5,Post-traumatic,Fixed pressure,No,35.6,"Alive, no revision"
+CR0316,86,Male,19.8,Post-haemorrhagic,Programmable,Yes,9.6,Death
+CR0317,70,Female,21.3,Post-haemorrhagic,Programmable,No,8.9,Revision
+CR0318,80,Male,28.5,Post-haemorrhagic,Programmable,Yes,48.7,"Alive, no revision"
+CR0319,67,Female,28.6,Idiopathic NPH,Programmable,No,12.3,Revision
+CR0320,54,Female,25.7,Idiopathic NPH,Programmable,No,35.0,Revision
+CR0321,78,Female,22.3,Idiopathic NPH,Programmable,No,68.3,"Alive, no revision"
+CR0322,61,Male,31.8,Post-haemorrhagic,Programmable,No,2.9,Revision
+CR0323,83,Female,19.2,Idiopathic NPH,Fixed pressure,No,4.2,Revision
+CR0324,80,Male,30.7,Idiopathic NPH,Fixed pressure,No,7.1,Revision
+CR0325,86,Male,27.9,Idiopathic NPH,Fixed pressure,Yes,11.9,Revision
+CR0326,70,Female,18.0,Idiopathic NPH,Fixed pressure,No,13.5,Revision
+CR0327,65,Male,24.1,Post-haemorrhagic,Fixed pressure,No,29.6,Revision
+CR0328,48,Female,35.4,Idiopathic NPH,Programmable,No,19.5,"Alive, no revision"
+CR0329,80,Male,21.2,Post-haemorrhagic,Programmable,No,29.4,"Alive, no revision"
+CR0330,75,Female,22.8,Post-haemorrhagic,Programmable,No,14.8,Revision
+CR0331,69,Male,28.8,Idiopathic NPH,Programmable,No,14.8,Death
+CR0332,63,Female,24.2,Post-haemorrhagic,Fixed pressure,No,28.4,"Alive, no revision"
+CR0333,75,Male,27.0,Post-haemorrhagic,Programmable,No,33.7,Death
+CR0334,68,Female,27.4,Post-haemorrhagic,Fixed pressure,Yes,13.0,Revision
+CR0335,67,Male,22.6,Idiopathic NPH,Programmable,No,52.3,"Alive, no revision"
+CR0336,79,Female,28.1,Idiopathic NPH,Programmable,No,29.7,Death
+CR0337,63,Female,22.5,Idiopathic NPH,Programmable,No,38.4,Revision
+CR0338,70,Male,23.3,Idiopathic NPH,Programmable,No,5.7,Death
+CR0339,65,Female,31.1,Post-traumatic,Fixed pressure,No,20.0,Revision
+CR0340,56,Male,22.2,Idiopathic NPH,Programmable,Yes,14.7,"Alive, no revision"
+CR0341,64,Female,31.3,Idiopathic NPH,Fixed pressure,No,21.1,"Alive, no revision"
+CR0342,90,Female,22.6,Idiopathic NPH,Fixed pressure,No,6.1,Revision
+CR0343,83,Male,21.0,Idiopathic NPH,Programmable,No,29.5,"Alive, no revision"
+CR0344,76,Male,26.4,Post-traumatic,Fixed pressure,No,8.4,Death
+CR0345,84,Female,,Idiopathic NPH,Programmable,Yes,62.4,"Alive, no revision"
+CR0346,75,Female,22.6,Idiopathic NPH,Programmable,No,18.8,"Alive, no revision"
+CR0347,61,Male,29.7,Idiopathic NPH,Fixed pressure,No,26.2,Death
+CR0348,68,Male,23.0,Post-haemorrhagic,Programmable,No,6.9,Revision
+CR0349,64,Male,22.8,Post-haemorrhagic,Programmable,Yes,42.9,"Alive, no revision"
+CR0350,67,Female,26.7,Idiopathic NPH,Programmable,No,15.0,Death
+CR0351,65,Male,29.4,Idiopathic NPH,Fixed pressure,No,52.6,Revision
+CR0352,73,Male,24.2,Idiopathic NPH,Fixed pressure,No,24.4,"Alive, no revision"
+CR0353,69,Male,25.6,Post-haemorrhagic,Fixed pressure,Yes,29.9,Revision
+CR0354,70,Male,27.9,Idiopathic NPH,Fixed pressure,No,22.9,"Alive, no revision"
+CR0355,75,Male,27.7,Idiopathic NPH,Fixed pressure,Yes,16.0,Revision
+CR0356,81,Female,29.1,Post-haemorrhagic,Programmable,No,15.0,Death
+CR0357,79,Female,26.6,Post-haemorrhagic,Fixed pressure,No,25.5,"Alive, no revision"
+CR0358,76,Male,27.2,Idiopathic NPH,Fixed pressure,No,6.7,Revision
+CR0359,56,Male,22.3,Post-haemorrhagic,Programmable,No,6.5,Revision
+CR0360,61,Female,31.3,Idiopathic NPH,Programmable,No,58.7,"Alive, no revision"
+CR0361,48,Male,29.5,Post-haemorrhagic,Programmable,Yes,16.7,Revision
+CR0362,65,Female,25.6,Idiopathic NPH,Fixed pressure,No,14.2,Death
+CR0363,49,Male,21.2,Idiopathic NPH,Programmable,No,39.4,"Alive, no revision"
+CR0364,65,Female,25.0,Idiopathic NPH,Programmable,No,57.0,"Alive, no revision"
+CR0365,71,Male,30.2,Idiopathic NPH,Programmable,Yes,11.3,Revision
+CR0366,83,Male,21.9,Idiopathic NPH,Programmable,No,25.0,Revision
+CR0367,84,Male,30.7,Post-haemorrhagic,Programmable,Yes,8.8,Death
+CR0368,89,Male,23.9,Idiopathic NPH,Programmable,No,5.3,Death
+CR0369,85,Female,29.3,Idiopathic NPH,Programmable,No,31.3,"Alive, no revision"
+CR0370,59,Female,23.6,Post-traumatic,Programmable,No,43.5,"Alive, no revision"
+CR0371,80,Male,25.7,Post-traumatic,Fixed pressure,No,3.1,Death
+CR0372,78,Female,25.7,Post-traumatic,Fixed pressure,No,17.1,"Alive, no revision"
+CR0373,77,Female,24.6,Post-haemorrhagic,Fixed pressure,No,55.4,"Alive, no revision"
+CR0374,82,Female,37.5,Idiopathic NPH,Fixed pressure,No,16.7,Revision
+CR0375,90,Female,21.8,Idiopathic NPH,Programmable,No,20.3,Death
+CR0376,82,Male,32.5,Post-haemorrhagic,Fixed pressure,Yes,4.8,Death
+CR0377,69,Female,18.4,Idiopathic NPH,Fixed pressure,No,48.4,"Alive, no revision"
+CR0378,63,Male,32.8,Post-traumatic,Fixed pressure,No,36.9,Revision
+CR0379,78,Male,26.4,Idiopathic NPH,Programmable,No,41.1,"Alive, no revision"
+CR0380,75,Male,29.2,Post-haemorrhagic,Fixed pressure,Yes,4.6,Revision
+CR0381,61,Male,27.3,Idiopathic NPH,Fixed pressure,Yes,6.5,Revision
+CR0382,74,Female,29.2,Idiopathic NPH,Programmable,No,14.0,Revision
+CR0383,71,Male,22.1,Idiopathic NPH,Programmable,No,37.5,"Alive, no revision"
+CR0384,58,Female,18.8,Idiopathic NPH,Programmable,No,38.9,"Alive, no revision"
+CR0385,84,Female,35.0,Idiopathic NPH,Programmable,Yes,19.9,Revision
+CR0386,71,Female,23.2,Idiopathic NPH,Programmable,No,1.3,Revision
+CR0387,68,Female,26.4,Post-haemorrhagic,Fixed pressure,No,35.2,Death
+CR0388,81,Male,23.3,Idiopathic NPH,Programmable,No,19.1,Death
+CR0389,70,Female,31.9,Idiopathic NPH,Fixed pressure,No,24.6,Revision
+CR0390,81,Male,27.9,Idiopathic NPH,Fixed pressure,No,13.3,Death
+CR0391,84,Female,24.8,Idiopathic NPH,Programmable,No,51.9,Death
+CR0392,78,Female,30.7,Idiopathic NPH,Programmable,No,2.8,Death
+CR0393,79,Female,29.3,Post-haemorrhagic,Programmable,No,20.7,"Alive, no revision"
+CR0394,72,Female,18.8,Post-haemorrhagic,Programmable,No,17.8,Revision
+CR0395,88,Female,25.0,Post-traumatic,Programmable,No,16.9,Death
+CR0396,79,Female,20.4,Idiopathic NPH,Programmable,Yes,19.4,Revision
+CR0397,73,Male,25.4,Idiopathic NPH,Programmable,No,14.2,Death
+CR0398,79,Male,27.4,Idiopathic NPH,Fixed pressure,No,20.9,Death
+CR0399,71,Male,,Idiopathic NPH,Programmable,No,58.3,Death
+CR0400,79,Male,27.6,Post-haemorrhagic,Fixed pressure,Yes,22.6,Death

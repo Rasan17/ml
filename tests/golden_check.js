@@ -28,6 +28,17 @@ function configsFor(p, target, meta) {
     return cfg;
 }
 
+// The Cox design the app uses (src/survival.js coxDesign): one reference category dropped per categorical predictor
+function coxColumns(prep) {
+    const idx = [];
+    prep.featureCols.forEach(col => {
+        const m = prep.featureMetadata[col];
+        if (m.type === 'nominal') { const ref = m.mode !== undefined ? m.mode : m.categories[0]; m.categories.forEach((cat, k) => { if (cat !== ref) idx.push(m.startIndex + k); }); }
+        else idx.push(m.startIndex);
+    });
+    return x => idx.map(i => x[i]);
+}
+
 (async () => {
     const out = {};
     // 1. iNPH demo (420 patients): Option A as the app runs it (split first, imputation fitted on training rows)
@@ -64,10 +75,25 @@ function configsFor(p, target, meta) {
         const imp = DE.imputeDataset(p.rows, cfg, DE.analyzeColumns(p.headers, p.rows));
         const prep = DE.prepareFeaturesAndTarget(imp.imputedRows, cfg);
         const t = imp.imputedRows.map(r => Number(r.Months_To_Revision_Or_Censoring)), e = imp.imputedRows.map(r => (r.Shunt_Revision === 'Yes' ? 1 : 0));
-        const cox = ME.createCox().fit(prep.X, t, e);
-        const lp = prep.X.map(x => cox.linearPredictor(x));
+        const pick = coxColumns(prep), X = prep.X.map(pick);
+        const cox = ME.createCox().fit(X, t, e);
+        const lp = X.map(x => cox.linearPredictor(x));
         out.survival_cox = { converged: cox.converged, beta: cox.beta.map(r4), cIndex: r4(ME.concordanceIndex(t, e, lp)),
             tdAuc24: r4(ME.timeDependentAUC(t, e, lp, 24, ME.censoringKM(t, e))) };
+    }
+    // 2b. Competing risks demo: cause-specific Cox models (revision, death), cumulative incidence, Wolbers' C
+    {
+        const p = load('medical_shunt_revision_competing.csv');
+        const cfg = configsFor(p, 'Outcome', ['Patient_ID', 'Months_Followup']);
+        const imp = DE.imputeDataset(p.rows, cfg, DE.analyzeColumns(p.headers, p.rows));
+        const prep = DE.prepareFeaturesAndTarget(imp.imputedRows, cfg);
+        const t = imp.imputedRows.map(r => Number(r.Months_Followup)), st = imp.imputedRows.map(r => (r.Outcome === 'Revision' ? 1 : r.Outcome === 'Death' ? 2 : 0));
+        const X = prep.X.map(coxColumns(prep));
+        const m1 = ME.createCox().fit(X, t, st.map(v => (v === 1 ? 1 : 0))), m2 = ME.createCox().fit(X, t, st.map(v => (v === 2 ? 1 : 0)));
+        const cif = X.map(x => ME.competingCIF(m1, m2, x, x, 36));
+        out.competing = { converged: m1.converged && m2.converged, beta1: m1.beta.map(r4), beta2: m2.beta.map(r4), wolbersC: r4(ME.concordanceIndexCR(t, st, cif)),
+            meanCIF36: r4(cif.reduce((a, b) => a + b, 0) / cif.length), aalenJohansen36: r4(ME.cifAt(ME.aalenJohansen(t, st), 36)),
+            aucCR36: r4(ME.timeDependentAUCcr(t, st, cif, 36, ME.censoringKM(t, st.map(v => (v > 0 ? 1 : 0))))) };
     }
     // 3. Regression demo: ridge/linear model R²
     {

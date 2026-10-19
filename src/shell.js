@@ -348,6 +348,10 @@ function setupEventListeners() {
         // Time-to-event outcome: chosen in Step 2 (the time and event columns are recognised automatically)
         if (AppState.parsedData) { AppState.outcomeType = 'survival'; AppState.survival = null; goToStep(2); }
     });
+    document.getElementById('sample-competing-btn')?.addEventListener('click', async () => {
+        await loadSampleDataset('medical_shunt_revision_competing.csv', 'Shunt Revision with Death as a Competing Event (simulated, 400 patients)');
+        if (AppState.parsedData) { AppState.outcomeType = 'survival'; AppState.survival = null; goToStep(2); }
+    });
     document.getElementById('sample-breast-btn')?.addEventListener('click', () => loadSampleDataset('breast_cancer_wisconsin.csv', 'Breast Cancer Wisconsin Diagnostic (public UCI data, 569 patients)'));
     if (DOM.sampleCardioBtn) {
         DOM.sampleCardioBtn.addEventListener('click', () => loadSampleDataset('universal_medical_cohort.csv', 'Cardiometabolic Risk Cohort (Binary)'));

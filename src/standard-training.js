@@ -35,7 +35,7 @@ async function trainSurvivalStep4(spec) {
         : validation === 'separate' ? { externalRows: AppState.separateTestRawRows || [] } : {};
     DOM.trainModelBtn.disabled = true;
     try {
-        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, splitFn: (rows, labels, r, s) => splitRowsForWorkflow(rows, labels, r, true, s), describeSplit, ...extra });
+        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, competingValue: spec.competingValue || null, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase), validation, splitFn: (rows, labels, r, s) => splitRowsForWorkflow(rows, labels, r, true, s), describeSplit, ...extra });
         if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
         // Steps 5 and 6 now predict with the Cox model
         if (DOM.toStep5Btn) DOM.toStep5Btn.disabled = false;

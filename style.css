@@ -1903,6 +1903,8 @@ body.comparison-running { overflow: hidden; }
 
 /* Survival analysis */
 .surv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.surv-grid .form-group { display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; min-width: 0; }
+.surv-grid .form-select, .surv-grid .form-input { width: 100%; box-sizing: border-box; }
 .surv-predictors { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 6px 0 4px; font-size: 12.5px; color: var(--text-secondary); }
 .surv-pred { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 

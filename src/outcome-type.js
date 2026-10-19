@@ -8,8 +8,9 @@ import { AppState, escapeHtml } from './core.js';
 function numericCols(rows, headers) {
     return headers.filter(h => { const v = rows.map(r => r[h]).filter(x => !DataEngine.isMissing(x)); return v.length > 0 && v.every(x => isFinite(Number(x))); });
 }
-function twoValueCols(rows, headers) {
-    return headers.filter(h => new Set(rows.map(r => r[h]).filter(x => !DataEngine.isMissing(x)).map(x => String(x).trim())).size === 2);
+// Event-status columns: two values (event / no event) or a few (event, competing event such as death, censored)
+function eventCols(rows, headers) {
+    return headers.filter(h => { const k = new Set(rows.map(r => r[h]).filter(x => !DataEngine.isMissing(x)).map(x => String(x).trim())).size; return k >= 2 && k <= 6; });
 }
 
 // The survival specification in force, or null for a standard outcome
@@ -42,12 +43,15 @@ function renderOutcomeTypePanel(onChange) {
     if (!box || !AppState.parsedData) return;
     const { headers, rows } = AppState.parsedData;
     const surv = AppState.outcomeType === 'survival';
-    const timeCols = numericCols(rows, headers), eventCols = twoValueCols(rows, headers);
+    const timeCols = numericCols(rows, headers), evCols = eventCols(rows, headers);
     const s = AppState.survival || {};
     const tc = s.timeCol && timeCols.includes(s.timeCol) ? s.timeCol : (timeCols.find(h => /time|month|day|year|follow|surv|duration/i.test(h)) || timeCols[0] || '');
-    const ec = s.eventCol && eventCols.includes(s.eventCol) ? s.eventCol : (eventCols.find(h => /event|death|died|revision|status|outcome|fail|recur/i.test(h)) || eventCols[0] || '');
+    const ec = s.eventCol && evCols.includes(s.eventCol) ? s.eventCol : (evCols.find(h => /event|death|died|revision|status|outcome|fail|recur/i.test(h)) || evCols[0] || '');
     const vals = ec ? [...new Set(rows.map(r => r[ec]).filter(v => !DataEngine.isMissing(v)).map(v => String(v).trim()))].sort() : [];
-    const ev = s.eventValue && vals.includes(s.eventValue) ? s.eventValue : (vals.find(v => /^(yes|1|true|dead|died|event|revised|revision)$/i.test(v)) || vals[vals.length - 1] || '');
+    const ev = s.eventValue && vals.includes(s.eventValue) ? s.eventValue : (vals.find(v => /^(yes|1|true|event|revised|revision|recurrence|relapse)$/i.test(v)) || vals.find(v => /^(dead|died|death)$/i.test(v)) || vals[vals.length - 1] || '');
+    // A competing event is offered only when the column has more than two values; a death value is suggested
+    const others = vals.filter(v => v !== ev);
+    const cvSel = vals.length > 2 ? (s.eventCol === ec && s.competingValue !== undefined && (s.competingValue === null || others.includes(s.competingValue)) ? s.competingValue : (others.find(v => /^(dead|died|death|deceased)$/i.test(v)) || null)) : null;
     // Default horizon: the median follow-up time (users should choose a clinically meaningful one)
     const horizonFor = (col, cur) => { if (cur && cur.timeCol === col && cur.horizon > 0) return cur.horizon; const t = rows.map(r => Number(r[col])).filter(v => isFinite(v) && v > 0).sort((a, b) => a - b); return t.length ? Number(t[Math.floor(t.length / 2)].toPrecision(3)) : ''; };
     const opts = (list, sel) => list.map(h => `<option value="${escapeHtml(h)}"${h === sel ? ' selected' : ''}>${escapeHtml(h)}</option>`).join('');
@@ -60,30 +64,31 @@ function renderOutcomeTypePanel(onChange) {
             </div>
             ${surv ? `<div class="surv-grid">
                 <label class="form-group"><span class="form-label">Follow-up time column</span><select id="ot-time-col" class="form-select">${opts(timeCols, tc)}</select></label>
-                <label class="form-group"><span class="form-label">Event column (did the event happen?)</span><select id="ot-event-col" class="form-select">${opts(eventCols, ec)}</select></label>
+                <label class="form-group"><span class="form-label">Event column (what happened?)</span><select id="ot-event-col" class="form-select">${opts(evCols, ec)}</select></label>
                 <label class="form-group"><span class="form-label">Value meaning "event occurred"</span><select id="ot-event-value" class="form-select">${opts(vals, ev)}</select></label>
+                ${vals.length > 2 ? `<label class="form-group"><span class="form-label">Competing event (optional)</span><select id="ot-competing-value" class="form-select"><option value=""${cvSel ? '' : ' selected'}>None: every other value is censoring</option>${others.map(v => `<option value="${escapeHtml(v)}"${v === cvSel ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('')}</select></label>` : ''}
                 <label class="form-group"><span class="form-label">Prediction horizon (same units as time)</span><input type="number" id="ot-horizon" class="form-input" min="0" step="any" value="${escapeHtml(String(horizonFor(tc, s)))}"></label>
             </div>
             ${Object.keys(AppState.columnConfigs).filter(c => AppState.columnConfigs[c].survivalDisplaced).map(c => `<p class="tune-warn">"${escapeHtml(c)}" was the outcome column, so it is now excluded (an outcome must not be used as a predictor). Tick it below only if it is genuinely known when the prediction is made.</p>`).join('')}
-            <p class="tune-muted">The time column is the time from the start of follow-up to the event, or to the last follow-up for patients without the event (censored). Both columns form the outcome: they are never used as predictors or to fill in missing values. Step 4 fits a Cox proportional-hazards model.</p>` : ''}
+            <p class="tune-muted">The time column is the time from the start of follow-up to the event, or to the last follow-up for patients without the event (censored). Both columns form the outcome: they are never used as predictors or to fill in missing values. Step 4 fits a Cox proportional-hazards model.${vals.length > 2 ? ' <strong>Competing event:</strong> an event after which the event of interest can no longer happen (for example death before a shunt revision). Choosing it gives cause-specific Cox models and the cumulative incidence of the event, so its risk is not overestimated; values that are neither the event nor the competing event count as censored (still under follow-up).' : ''}</p>` : ''}
         </div>`;
     const commit = () => {
         const type = box.querySelector('input[name="outcome-type"]:checked')?.value || 'standard';
         AppState.outcomeType = type;
         if (type === 'survival') {
             const t = document.getElementById('ot-time-col'), e = document.getElementById('ot-event-col'), v = document.getElementById('ot-event-value');
-            const h = document.getElementById('ot-horizon');
-            AppState.survival = { timeCol: t ? t.value : tc, eventCol: e ? e.value : ec, eventValue: v ? v.value : ev, horizon: h && Number(h.value) > 0 ? Number(h.value) : null };
+            const h = document.getElementById('ot-horizon'), c = document.getElementById('ot-competing-value');
+            AppState.survival = { timeCol: t ? t.value : tc, eventCol: e ? e.value : ec, eventValue: v ? v.value : ev, competingValue: c ? (c.value || null) : null, horizon: h && Number(h.value) > 0 ? Number(h.value) : null };
         }
         applySurvivalRoles();
         if (onChange) onChange();
     };
     box.querySelectorAll('input[name="outcome-type"]').forEach(r => r.addEventListener('change', () => { commit(); renderOutcomeTypePanel(onChange); }));
-    ['ot-time-col', 'ot-event-col', 'ot-event-value', 'ot-horizon'].forEach(id => document.getElementById(id)?.addEventListener('change', e => {
-        if (id === 'ot-event-col' && AppState.survival) AppState.survival.eventValue = null;
+    ['ot-time-col', 'ot-event-col', 'ot-event-value', 'ot-competing-value', 'ot-horizon'].forEach(id => document.getElementById(id)?.addEventListener('change', e => {
+        if (id === 'ot-event-col' && AppState.survival) { AppState.survival.eventValue = null; AppState.survival.competingValue = undefined; }
         commit(); renderOutcomeTypePanel(onChange);
     }));
-    if (surv && (!AppState.survival || AppState.survival.timeCol !== tc || AppState.survival.eventCol !== ec || AppState.survival.eventValue !== ev)) { AppState.survival = { timeCol: tc, eventCol: ec, eventValue: ev, horizon: Number(horizonFor(tc, null)) || null }; applySurvivalRoles(); }
+    if (surv && (!AppState.survival || AppState.survival.timeCol !== tc || AppState.survival.eventCol !== ec || AppState.survival.eventValue !== ev)) { AppState.survival = { timeCol: tc, eventCol: ec, eventValue: ev, competingValue: cvSel, horizon: Number(horizonFor(tc, null)) || null }; applySurvivalRoles(); }
     document.body.dataset.outcome = surv ? 'survival' : 'standard';
 }
 

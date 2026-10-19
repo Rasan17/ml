@@ -349,6 +349,44 @@ test('leakage safeguard: the leakage teaching example triggers a warning, and de
     expect(errors).toEqual([]);
 });
 
+test('competing risks: death before revision as a competing event, Options A and C, Steps 5 and 6', async ({ page }) => {
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await page.click('#sample-competing-btn');
+    await expect(page.locator('#step-2-content')).toBeVisible();
+    await expect(page.locator('#ot-event-value')).toHaveValue('Revision');
+    await expect(page.locator('#ot-competing-value')).toHaveValue('Death');
+    await page.fill('#ot-horizon', '36');
+    await page.dispatchEvent('#ot-horizon', 'change');
+    await page.click('button.step-tab[data-step="3"]');
+    await page.click('#apply-imputation-btn');
+    await page.click('button.step-tab[data-step="4"]');
+    const box = page.locator('#survival-step4-results');
+    await page.check('input[name="validation-mode"][value="split"]', { force: true });
+    await page.click('#train-model-btn');
+    await expect(box).toContainText('Competing-risk model (cause-specific Cox)', { timeout: 120000 });
+    await expect(box).toContainText("Wolbers' C-index");
+    await expect(box).toContainText('Cause-specific hazard ratios for the competing event "Death"');
+    await expect(box).toContainText('Why competing risks matter here');
+    await page.check('input[name="validation-mode"][value="bootstrap"]', { force: true });
+    await page.selectOption('#bootstrap-reps', '50');
+    await page.evaluate(() => { document.getElementById('survival-step4-results').innerHTML = ''; });
+    await page.click('#train-model-btn');
+    await expect(box).toContainText('Not defined for the cumulative incidence with competing risks', { timeout: 180000 });
+    console.log('Competing risks, Option C:', (await box.locator('table', { hasText: 'Optimism' }).innerText()).replace(/\s+/g, ' '));
+    await page.click('#to-step-5-btn');
+    await page.click('#surv-predict-btn');
+    await expect(page.locator('#surv-predict-out')).toContainText('Neither yet');
+    await page.click('button.step-tab[data-step="6"]');
+    await page.setInputFiles('#batch-file-input', path.join(__dirname, '..', '..', 'medical_shunt_revision_competing.csv'));
+    await page.click('#run-batch-predict-btn');
+    await expect(page.locator('#batch-table-container')).toContainText('Predicted_competing_risk_by_36');
+    await expect(page.locator('#external-validation-container')).toContainText('Validation of the competing-risk model');
+    const [cardDl] = await Promise.all([page.waitForEvent('download'), page.click('#model-card-btn')]);
+    expect(fs.readFileSync(await cardDl.path(), 'utf8')).toContain('competing-risk model (cause-specific Cox)');
+    expect(errors).toEqual([]);
+});
+
 test('opened directly from disk (file://), the fallback bundle runs', async ({ page }) => {
     const errors = watch(page);
     const root = path.join(__dirname, '..', '..');

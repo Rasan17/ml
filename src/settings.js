@@ -261,7 +261,7 @@ function applySettings(settings) {
     const oc = settings.outcome || {};
     if (oc.type === 'survival' && headers.includes(oc.timeCol) && headers.includes(oc.eventCol)) {
         AppState.outcomeType = 'survival';
-        AppState.survival = { timeCol: oc.timeCol, eventCol: oc.eventCol, eventValue: String(oc.eventValue ?? ''), horizon: Number(oc.horizon) > 0 ? Number(oc.horizon) : null };
+        AppState.survival = { timeCol: oc.timeCol, eventCol: oc.eventCol, eventValue: String(oc.eventValue ?? ''), competingValue: oc.competingValue === null || oc.competingValue === undefined || oc.competingValue === '' ? null : String(oc.competingValue), horizon: Number(oc.horizon) > 0 ? Number(oc.horizon) : null };
     } else {
         AppState.outcomeType = 'standard'; AppState.survival = null;
     }

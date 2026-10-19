@@ -146,6 +146,61 @@ try:
     chk("Harrell's C-index with heavy ties (vs scikit-survival concordance_index_censored)", st['cindex'], concordance_index_censored(np.array(st['teE'], bool), np.array(st['teT'], float), np.array(st['risk']))[0], 1e-12)
     chk('Time-dependent AUC with heavy ties (vs scikit-survival)', st['auc'], [cumulative_dynamic_auc(ytr2, yte2, np.array(st['risk']), [t])[0][0] for t in st['taus']], 1e-10)
     chk('Censoring-weighted Brier score with heavy ties (vs scikit-survival)', st['brier'], [brier_score(ytr2, yte2, np.array(st['surv'][k]).reshape(-1, 1), [t])[1][0] for k, t in enumerate(st['taus'])], 1e-10)
+    # Competing risks, against scikit-survival (Aalen-Johansen), statsmodels (cause-specific Cox) and independent
+    # NumPy implementations of the cause-specific cumulative incidence, Wolbers' C and the weighted AUC and Brier score
+    from sksurv.nonparametric import cumulative_incidence_competing_risks
+    cr = o['cr']
+    tT, sT, X = np.array(cr['trT']), np.array(cr['trS']), np.array(cr['trX'])
+    xs, ci = cumulative_incidence_competing_risks(sT, tT)
+    chk('Aalen-Johansen cumulative incidence (vs scikit-survival)', cr['aj'], [ci[1][xs <= t][-1] for t in cr['taus']], 1e-10)
+    b1 = PHReg(tT, X, status=(sT == 1).astype(int), ties='efron').fit().params
+    b2 = PHReg(tT, X, status=(sT == 2).astype(int), ties='efron').fit().params
+    chk('Cause-specific Cox coefficients, event and competing event (vs statsmodels)', list(cr['beta1']) + list(cr['beta2']), list(b1) + list(b2), 1e-6)
+    def breslow(beta, ev):
+        w = np.exp(X @ beta); us = np.unique(tT[ev == 1])
+        return us, np.array([np.sum((tT == u) & (ev == 1)) / w[tT >= u].sum() for u in us])
+    u1, d1 = breslow(b1, (sT == 1).astype(int)); u2, d2 = breslow(b2, (sT == 2).astype(int))
+    def cif_np(x, tau):
+        e1, e2 = np.exp(np.dot(x, b1)), np.exp(np.dot(x, b2)); F = 0.0
+        for sv in sorted(set(u1[u1 <= tau]) | set(u2[u2 <= tau])):
+            H1 = d1[u1 < sv].sum() * e1; H2 = d2[u2 < sv].sum() * e2
+            F += np.exp(-H1 - H2) * d1[u1 == sv].sum() * e1
+        return F
+    chk('Cause-specific cumulative incidence F1(t|x) (independent NumPy)', [v for row in cr['cif'] for v in row], [cif_np(x, tau) for tau in cr['taus'] for x in cr['teX'][:5]], 1e-8)
+    eT, eS, rk = np.array(cr['teT']), np.array(cr['teS']), np.array(cr['risk'])
+    conc = comp = 0.0
+    for i in range(len(eT)):
+        if eS[i] != 1: continue
+        m = ((eT > eT[i]) | ((eT == eT[i]) & (eS == 0)) | ((eS == 2) & (eT <= eT[i]))); m[i] = False
+        comp += m.sum(); conc += (rk[i] > rk[m]).sum() + 0.5 * (rk[i] == rk[m]).sum()
+    chk("Wolbers' concordance for competing risks (independent NumPy)", cr['cindex'], conc / comp, 1e-12)
+    def G_at(t):  # censoring Kaplan-Meier from the training patients, events before censoring at tied times
+        g = 1.0
+        for u in np.unique(tT[tT <= t]):
+            n = (tT >= u).sum(); d = ((tT == u) & (sT > 0)).sum(); c = ((tT == u) & (sT == 0)).sum()
+            if n - d > 0: g *= 1 - c / (n - d)
+        return g
+    cifs = [np.array([cif_np(x, tau) for x in cr['teX']]) for tau in cr['taus']]
+    aucs, briers = [], []
+    for k, tau in enumerate(cr['taus']):
+        gt = G_at(tau); cases = [(i, 1 / G_at(eT[i])) for i in range(len(eT)) if eS[i] == 1 and eT[i] <= tau]
+        ctrls = [(j, 1 / gt) for j in range(len(eT)) if eT[j] > tau] + [(j, 1 / G_at(eT[j])) for j in range(len(eT)) if eS[j] == 2 and eT[j] <= tau]
+        num = den = 0.0
+        for i, wi in cases:
+            for j, wj in ctrls:
+                w = wi * wj; den += w; num += w * (1.0 if cifs[k][i] > cifs[k][j] else 0.5 if cifs[k][i] == cifs[k][j] else 0.0)
+        aucs.append(num / den)
+        tot = 0.0
+        for i in range(len(eT)):
+            if eT[i] <= tau and eS[i] > 0: tot += ((1.0 if eS[i] == 1 else 0.0) - cifs[k][i]) ** 2 / G_at(eT[i])
+            elif eT[i] > tau: tot += cifs[k][i] ** 2 / gt
+        briers.append(tot / len(eT))
+    chk('Time-dependent AUC with a competing event (independent NumPy)', cr['auc'], aucs, 1e-8)
+    chk('Brier score with a competing event (independent NumPy)', cr['brier'], briers, 1e-8)
+    rd = o['crReduces']
+    chk('Without competing events, Wolbers C, AUC, Brier and Aalen-Johansen equal Harrell C, AUC, Brier and 1 - Kaplan-Meier',
+        [rd['c'][0]] + [p[0] for p in rd['auc']] + [p[0] for p in rd['brier']] + [p[0] for p in rd['aj']],
+        [rd['c'][1]] + [p[1] for p in rd['auc']] + [p[1] for p in rd['brier']] + [p[1] for p in rd['aj']], 1e-12)
     # Harrell's bootstrap optimism for a Cox model: per resample, refit with statsmodels PHReg (Efron ties), then
     # Harrell's C (NumPy), Uno's time-dependent AUC (scikit-survival) and the calibration slope (PHReg on the
     # original patients' linear predictor), each on the resample and on the original patients
