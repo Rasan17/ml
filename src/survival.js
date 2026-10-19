@@ -272,7 +272,8 @@ async function runSurvivalAnalysis(o) {
             slope, slopeCI: slopes.length >= 20 ? (() => { const a = slopes.slice().sort((x, y) => x - y); return [a[Math.floor(0.025 * (a.length - 1))], a[Math.floor(0.975 * (a.length - 1))]]; })() : null,
             seconds: Math.round((Date.now() - t0) / 1000) };
     }
-    SURV.result = { competing, cv, model, naiveObs, meanCompeting, obsCompeting, competingTrain: sTr.filter(v => v === 2).length, competingTest: sTe.filter(v => v === 2).length,
+    const rowNo = new Map(AppState.parsedData.rows.map((r, i) => [r, i + 1]));
+    SURV.result = { testRowNumbers: validation === 'split' ? testRows.map(r => rowNo.get(r)).filter(Boolean) : null, competing, cv, model, naiveObs, meanCompeting, obsCompeting, competingTrain: sTr.filter(v => v === 2).length, competingTest: sTe.filter(v => v === 2).length,
         ciGroupCol, droppedBlank, splitInfo, splitText: o.describeSplit && splitInfo ? o.describeSplit(splitInfo) : 'random split, balanced by outcome', censKM, validation, optimism, externalExcluded, boxId: boxId || 'survival-step4-results', miInfo, completeCase: Boolean(o.completeCase), lastEvent, tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, obsAllCI, meanPred, obsAll, curveGroups, maxFollow,
         nTrain: Xtr.length, nTest: Xte.length, eventsTrain: events, eventsTest: eTe.reduce((a, b) => a + b, 0), excluded };
     renderSurvivalResults();
@@ -355,9 +356,11 @@ function renderSurvivalResults() {
             </div>
             ${r.nTest < 100 || r.eventsTest < 50 ? `<div class="tune-warn">⚠︎ Few ${who} or events: these performance estimates are imprecise.</div>` : ''}
             <button type="button" class="btn btn-secondary btn-sm" id="surv-report-btn">Download Survival Analysis Report (.JSON)</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="surv-r-check-btn" title="An R script that rebuilds this analysis independently from your data file and prints the app's and R's results side by side">R cross-check script</button>
         </div>
         <p class="tune-muted">Predicted ${cr ? 'risks' : 'event-free probabilities'} for one patient: Step 5. For a file of patients (and validation on it if it contains the follow-up time and event): Step 6.</p>`;
     document.getElementById('surv-report-btn').addEventListener('click', downloadSurvivalReport);
+    document.getElementById('surv-r-check-btn').addEventListener('click', () => { if (SURV.onRCheck) SURV.onRCheck(); });
 }
 
 // Step 5 for a time-to-event outcome: predicted event-free probability for one patient

@@ -37,6 +37,8 @@ import { forgetStoredSettings, handleUnexpectedError } from './settings.js';
 import { initAnalysisSummary } from './analysis-summary.js';
 import './interpretation.js';
 import './safeguards.js';
+import { downloadRCrossCheck } from './r-crosscheck.js';
+import './r-script.js';
 import { downloadModelCard } from './model-card.js';
 
 AppState.pipeline = createEmptyPipelineState(42);
@@ -72,6 +74,7 @@ function start() {
     document.getElementById('standard-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('standard'));
     document.getElementById('pipeline-tripod-btn')?.addEventListener('click', () => downloadTripodChecklist('pipeline'));
     document.getElementById('standard-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('standard'));
+    document.getElementById('standard-r-check-btn')?.addEventListener('click', () => downloadRCrossCheck('standard'));
     window.downloadValidationReport = downloadValidationReport;
     document.getElementById('pipeline-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('pipeline'));
     document.getElementById('mi-select')?.addEventListener('change', () => {

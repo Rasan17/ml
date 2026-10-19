@@ -244,6 +244,27 @@ The suite includes built-in clinical datasets for instant experimentation:
 
 [`docs/ethics-committee-information-pack.html`](docs/ethics-committee-information-pack.html) describes, for research ethics and data-protection review, how patient data are handled (processed only in the browser, never transmitted; offline use), the intended use and regulatory status, what each export contains, and the accuracy and verification evidence. Open it in a browser and print it to PDF to submit it, or use the editable Word version [`docs/ethics-committee-information-pack.docx`](docs/ethics-committee-information-pack.docx).
 
+## Cross-checking an analysis in R
+
+Before publishing a result, reproduce it independently. In Step 4, **R cross-check script** (next to the reports; for time-to-event outcomes, under the results) downloads an R script written for the analysis on screen. It contains no patient data, only:
+- the settings: outcome, predictors and their coding, missing-data methods, validation design;
+- the row numbers of the Testing set;
+- the app's results.
+
+Put it in the same folder as your data file and run `Rscript crosscheck_….R`, or open it in RStudio and click Source. R rebuilds the analysis from the CSV file with standard packages (stats, survival, pROC, rms, riskRegression, prodlim; mice for multiple imputation) and prints the app's and R's results side by side.
+
+| Analysis | R reproduces | Expected agreement |
+|---|---|---|
+| Logistic regression (yes/no outcome) | The app's model (the same lightly penalised logistic regression) and R's standard `glm` | AUC, Brier score and calibration within about 0.005 for the same model |
+| Option C | `rms::validate` (Harrell's bootstrap) | Corrected AUC within about 0.02; the corrected calibration slope is a little lower in R, which corrects an unpenalised model |
+| Linear regression | The app's ridge model and R's `lm` | Same model: within 0.01 |
+| Cox model | `survival::coxph` and `concordance`; `riskRegression::Score` | C-index identical; time-dependent AUC and Brier score within about 0.03 (R weights for censoring with the Testing set, the app with the training patients) |
+| Competing risks | `riskRegression::CSC`, `Score`, `prodlim` (Aalen–Johansen) | Wolbers' C and observed risk identical; AUC and Brier within about 0.03 |
+
+Other models (random forest, boosted trees, neural network, k-NN) have no identical R counterpart. Cross-check the logistic regression, which should be in every comparison anyway. The script covers yes/no, numerical and time-to-event outcomes. The automated test `tests/ui/r-crosscheck.spec.js` generates five such scripts and, in the `r-crosscheck` GitHub workflow, runs them in R and fails on disagreement.
+
+The cross-check has already found one problem. For numerical outcomes, the app's ridge regression used to stop after a fixed 150 gradient-descent iterations, before reaching its optimum: on the 20-patient recovery demo, R² on 4 Testing patients was 0.88 instead of 0.82. It is now solved exactly and matches scikit-learn to 10⁻¹⁶.
+
 ## Release archives
 
 Build a release zip from the tracked files only (no `node_modules/`, `.git/`, Office lock files, videos or the workflow guide, which are attached to GitHub Releases separately):
@@ -266,7 +287,7 @@ node tests/golden_check.js                                         # frozen resu
 node tests/end_to_end.js                                           # 26 end-to-end checks: binary/multiclass/regression, missing values, unseen categories, rare outcome, tiny cohort, patient/date splits, calibration, threshold, NN fallback, batch = evaluation preprocessing, export/import of all model types; Option C on pure noise (tuning repeated, .632+ for flexible models, model-selection correction); .632+ no-information rates; TreeSHAP and sampled Shapley vs brute force; time-dependent AUC/Brier under censoring
 python3 tests/benchmark_vs_python.py                               # app vs scikit-learn / PyTorch / imbalanced-learn (~2 min)
 python3 tests/nn_forward_check.py                                  # exact forward pass of the trained TF.js network, recomputed in NumPy
-npm ci && npx playwright install --with-deps && npm run test:ui   # 38 browser tests in Chromium, Firefox and WebKit (Safari's engine): every workflow, multiple imputation everywhere (folds, bootstrap, pipeline), interface levels, a network audit; yes/no, numerical, three-category and time-to-event outcomes (Cox model with Options A, B and C, protected outcome columns); settings round-trip; export/re-import of a multiply imputed, recalibrated model; batch prediction; and an axe-core accessibility scan (WCAG 2.1 AA) of every main screen in both themes
+npm ci && npx playwright install --with-deps && npm run test:ui   # 43 browser tests in Chromium, Firefox and WebKit (Safari's engine): every workflow, multiple imputation everywhere (folds, bootstrap, pipeline), interface levels, a network audit; yes/no, numerical, three-category and time-to-event outcomes (Cox model with Options A, B and C, protected outcome columns); settings round-trip; export/re-import of a multiply imputed, recalibrated model; batch prediction; and an axe-core accessibility scan (WCAG 2.1 AA) of every main screen in both themes
 node tools/build.js                                                # rebuild the file:// bundle and import-map versions after editing src/
 ```
 

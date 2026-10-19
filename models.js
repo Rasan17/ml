@@ -579,10 +579,33 @@
                     yield epoch;
                 }
             } else {
-                // Ridge Linear Regression via Gradient Descent with momentum.
-                // Objective: (1/2n)·Σ(pred − y)² + (λ/2)·‖w‖² (intercept unpenalised), whose gradient is
-                // (1/n)·Σ err·x + λw, exactly as computed below. This is equivalent to scikit-learn
-                // Ridge(alpha = n·λ) (checked in tests/reference_check.py); the learning rate applies to it.
+                // Ridge linear regression. Objective: (1/2n)·Σ(pred − y)² + (λ/2)·‖w‖² (intercept unpenalised),
+                // equivalent to scikit-learn Ridge(alpha = n·λ). Solved exactly (centred normal equations), so the
+                // result does not depend on a learning rate or number of iterations; gradient descent with momentum
+                // is kept only for very wide data (more than 400 encoded columns).
+                if (p <= 400) {
+                    const mx = new Array(p).fill(0);
+                    let my = 0;
+                    for (let i = 0; i < n; i++) { my += y[i] / n; for (let j = 0; j < p; j++) mx[j] += X[i][j] / n; }
+                    const M = Array.from({ length: p }, () => new Array(p + 1).fill(0));
+                    for (let i = 0; i < n; i++) {
+                        const xc = X[i].map((v, j) => v - mx[j]), yc = y[i] - my;
+                        for (let a2 = 0; a2 < p; a2++) { if (xc[a2] === 0) continue; for (let b2 = a2; b2 < p; b2++) M[a2][b2] += xc[a2] * xc[b2] / n; M[a2][p] += xc[a2] * yc / n; }
+                    }
+                    for (let a2 = 0; a2 < p; a2++) { for (let b2 = 0; b2 < a2; b2++) M[a2][b2] = M[b2][a2]; M[a2][a2] += Math.max(this.lambdaL2, 1e-10); }
+                    for (let c = 0; c < p; c++) {
+                        let piv = c;
+                        for (let r = c + 1; r < p; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+                        [M[c], M[piv]] = [M[piv], M[c]];
+                        for (let r = 0; r < p; r++) { if (r === c) continue; const f = M[r][c] / M[c][c]; if (f) for (let q = c; q <= p; q++) M[r][q] -= f * M[c][q]; }
+                    }
+                    this.weights = M.map((row, j) => row[p] / row[j]);
+                    this.bias = my - this.weights.reduce((acc, w, j) => acc + w * mx[j], 0);
+                    this.solvedExactly = true;
+                    this._checkFinite(0);
+                    yield 0;
+                    return;
+                }
                 this.weights = new Array(p).fill(0);
                 this.bias = 0;
                 const velW = new Array(p).fill(0);

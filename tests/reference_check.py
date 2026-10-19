@@ -60,7 +60,7 @@ yR=np.array(o['regY']); pR=np.array(o['regP']); r=o['reg_eval']
 chk('R²',r['r2'],metrics.r2_score(yR,pR),6e-5); chk('RMSE',r['rmse'],np.sqrt(metrics.mean_squared_error(yR,pR)),6e-5); chk('MAE',r['mae'],metrics.mean_absolute_error(yR,pR),6e-5)
 X=np.column_stack([col('x1'),col('x2'),col('x3')]); n=len(X)
 rd=Ridge(alpha=n*o['ridge']['lambda']).fit(X,yR)
-chk('Ridge coefficients (GD vs closed form)',o['ridge']['w'],rd.coef_,1e-3); chk('Ridge intercept',o['ridge']['b'],rd.intercept_,1e-3)
+chk('Ridge coefficients (exact solution vs scikit-learn)',o['ridge']['w'],rd.coef_,1e-9); chk('Ridge intercept',o['ridge']['b'],rd.intercept_,1e-9)
 yc=np.array(o['logit']['yc'])
 # 2-class softmax with L2 on BOTH class vectors (lambda/2 each) is equivalent to binary logistic
 # regression with penalty (lambda/4)||w||^2, i.e. scikit-learn C = 2/(n*lambda)

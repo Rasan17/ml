@@ -362,6 +362,8 @@ async function startModelTraining() {
                 splitSeed,
                 'standard'
             );
+            // Row numbers (1-based, as in the CSV file) of the Testing set, for the R cross-check script
+            { const pos = new Map(AppState.parsedData.rows.map((r, i) => [r, i + 1])); AppState.lastSplitTestRowNumbers = rowSplit.testX.map(r => pos.get(r)).filter(Boolean); }
             const trainImp = DataEngine.imputeDataset(rowSplit.trainX, AppState.columnConfigs, AppState.columnAnalysis);
             const testImp = DataEngine.imputeDataset(rowSplit.testX, AppState.columnConfigs, AppState.columnAnalysis, trainImp.plan);
             let splitPrep = DataEngine.prepareFeaturesAndTarget(trainImp.imputedRows, AppState.columnConfigs);

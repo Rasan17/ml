@@ -25,6 +25,7 @@ async function loadSampleDataset(filename, displayName) {
         processCSVContent(text, displayName);
         // Recorded after processCSVContent (which resets it): identifies the built-in cohort explicitly
         AppState.sampleCohortFile = SAMPLE_COHORTS[filename] ? filename : null;
+        AppState.sourceFile = filename;
     } catch (err) {
         alert(`Error loading sample dataset: ${err.message}`);
     }
@@ -147,6 +148,7 @@ function processCSVContent(csvText, name) {
         AppState.sampleCohortFile = null; // set again by loadSampleDataset for built-in cohorts
         AppState.parsedData = parsed;
         AppState.fileName = name;
+        AppState.sourceFile = name; // the file's own name (a built-in cohort's file name is set by loadSampleDataset)
         DataEngine.parseIssues(parsed).forEach(msg => alert(msg));
 
         const analysis = DataEngine.analyzeColumns(parsed.headers, parsed.rows);
