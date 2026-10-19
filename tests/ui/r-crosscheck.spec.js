@@ -78,7 +78,7 @@ for (const sc of SCENARIOS) {
         expect(text).toContain('APP <- list(');
         expect(text).toContain('contains no patient data');
         if (sc.mode !== 'bootstrap') expect(text).toMatch(/test_rows = c\(\d+/);
-        if (!hasR) return;
+        if (!hasR) { if (process.env.CI_REQUIRE_R) throw new Error('R and its packages were expected (CI_REQUIRE_R) but are not available'); return; }
         fs.copyFileSync(path.join(ROOT, sc.data), path.join(dir, sc.data));
         const out = execFileSync('Rscript', [script], { cwd: dir, encoding: 'utf8', timeout: 540000 });
         const rows = parseTable(out);
@@ -90,5 +90,6 @@ for (const sc of SCENARIOS) {
         }
         const counts = rows.filter(x => /^(Patients|Events) evaluated/.test(x.measure));
         counts.forEach(x => expect(x.r, x.measure).toBe(x.app));
+        console.log(`R cross-check (${sc.name}) ran in R and agreed: ${Object.keys(sc.tol).map(m => { const r = rows.find(x => x.measure === m && x.app !== '-'); return `${m} app ${r.app} / R ${r.r}`; }).join('; ')}`);
     });
 }

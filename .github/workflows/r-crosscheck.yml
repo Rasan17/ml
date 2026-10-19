@@ -26,4 +26,6 @@ jobs:
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
       - name: Generate the scripts in the app and run them in R
-        run: npx playwright test tests/ui/r-crosscheck.spec.js --project=chromium
+        run: npx playwright test tests/ui/r-crosscheck.spec.js --project=chromium --reporter=list
+        env:
+          CI_REQUIRE_R: '1'
