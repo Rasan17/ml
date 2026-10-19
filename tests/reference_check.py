@@ -139,6 +139,28 @@ try:
     chk('Time-dependent AUC with censoring weights (vs scikit-survival cumulative_dynamic_auc)',sd['auc'],auc_ref,1e-10)
     bs_ref=[brier_score(ytr,yte,np.array(sd['surv'][k]).reshape(-1,1),[t])[1][0] for k,t in enumerate(sd['taus'])]
     chk('Brier score with censoring weights (vs scikit-survival brier_score)',sd['brier'],bs_ref,1e-10)
+    # Harrell's bootstrap optimism for a Cox model: per resample, refit with statsmodels PHReg (Efron ties), then
+    # Harrell's C (NumPy), Uno's time-dependent AUC (scikit-survival) and the calibration slope (PHReg on the
+    # original patients' linear predictor), each on the resample and on the original patients
+    def _harrell(t, e, lp):
+        conc = comp = 0.0
+        for i in range(len(t)):
+            if e[i] != 1: continue
+            m = (t > t[i]) | ((t == t[i]) & (e == 0)); comp += m.sum(); conc += (lp[i] > lp[m]).sum() + 0.5 * (lp[i] == lp[m]).sum()
+        return conc / comp
+    co = o['coxOpt']; H = co['horizon']; yO = Surv.from_arrays(cE.astype(bool), cT)
+    rc, rtd, rsl = [], [], []
+    for idx in co['idxs']:
+        idx = np.array(idx); Xb, tb, eb = cX[idx], cT[idx], cE[idx]
+        beta = PHReg(tb, Xb, status=eb, ties='efron').fit().params
+        lpB, lpO = Xb @ beta, cX @ beta
+        rc.append(_harrell(tb, eb, lpB) - _harrell(cT, cE, lpO))
+        yB = Surv.from_arrays(eb.astype(bool), tb)
+        rtd.append(cumulative_dynamic_auc(yB, yB, lpB, [H])[0][0] - cumulative_dynamic_auc(yO, yO, lpO, [H])[0][0])
+        rsl.append(PHReg(cT, lpO.reshape(-1, 1), status=cE, ties='efron').fit().params[0])
+    chk("Cox bootstrap optimism: C-index (resample minus original), per resample", co['c'], rc, 1e-6)
+    chk("Cox bootstrap optimism: time-dependent AUC at the horizon, per resample", co['td'], rtd, 1e-6)
+    chk("Cox bootstrap calibration slope on the original patients, per resample", co['slope'], rsl, 1e-6)
 except ImportError:
     print('scikit-survival not installed: time-dependent AUC and Brier checks skipped (pip install scikit-survival)')
 # Riley minimum sample size (binary outcome) vs the pmsampsize package, every criterion and the final size

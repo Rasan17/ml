@@ -46,7 +46,9 @@ function sanitizedPrep(prep) {
     const miceImputation = Boolean(prep.imputation && prep.imputation.mice);
     if (miceImputation) {
         out.imputation = { ...(out.imputation || { configs: JSON.parse(JSON.stringify(prep.imputation.configs)) }), mice: JSON.parse(JSON.stringify(prep.imputation.mice)) };
-        if (prep.multipleImputation) out.multipleImputation = JSON.parse(JSON.stringify(prep.multipleImputation));
+        // The convergence trace is a diagnostic only and is left out: with one missing cell its "mean imputed value"
+        // would be a single training patient's observed value
+        if (prep.multipleImputation) { const { trace, traceScale, ...miInfo } = prep.multipleImputation; out.multipleImputation = JSON.parse(JSON.stringify(miInfo)); }
     }
     return { prep: out, knnImputation: knnImputation || miceImputation, miceImputation, knnFilling: knnImputation, knnColumns };
 }

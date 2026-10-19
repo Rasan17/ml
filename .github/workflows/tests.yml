@@ -33,6 +33,9 @@ jobs:
       - name: Module imports resolve (no missing cross-module imports)
         run: node tests/module_check.js
 
+      - name: No undefined names in src/ (ESLint no-undef)
+        run: npx --yes eslint@9.39.5 -c eslint.config.mjs src
+
       - name: Edge cases (data engine and models)
         run: node tests/edge_cases.js
 

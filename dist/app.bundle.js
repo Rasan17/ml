@@ -3894,10 +3894,10 @@ function renderMiceDiagnostics(containerId, mi) {
     if (!cols.length) { box.innerHTML = ''; return; }
     const drifting = [], rhats = [];
     const charts = cols.map(c => {
-        const series = mi.trace.map((t, l) => ({ name: `Imputation ${l + 1}`, colour: CURVE_COLOURS[l % CURVE_COLOURS.length], points: (t[c] || []).map((v, it) => ({ x: it + 1, y: v })) }));
+        const series = mi.trace.map((t, l) => ({ name: `Imputation ${l + 1}`, colour: CURVE_COLOURS[l % CURVE_COLOURS.length], points: (Array.isArray(t && t[c]) ? t[c] : []).map((v, it) => ({ x: it + 1, y: Number(v) })).filter(pt => isFinite(pt.y)) }));
         const all = series.flatMap(se => se.points.map(p => p.y));
         const sd = (mi.traceScale && mi.traceScale[c] && mi.traceScale[c].sd) || 1;
-        const rhat = miceRhat(mi.trace.map(t => t[c] || []));
+        const rhat = miceRhat(series.map(se => se.points.map(pt => pt.y)));
         if (rhat !== null && rhat > 1.3) drifting.push(`${c} (R̂ ${rhat.toFixed(2)})`);
         rhats.push(rhat);
         const lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.15 || sd * 0.1 || 1;
@@ -9160,7 +9160,9 @@ function sanitizedPrep(prep) {
     const miceImputation = Boolean(prep.imputation && prep.imputation.mice);
     if (miceImputation) {
         out.imputation = { ...(out.imputation || { configs: JSON.parse(JSON.stringify(prep.imputation.configs)) }), mice: JSON.parse(JSON.stringify(prep.imputation.mice)) };
-        if (prep.multipleImputation) out.multipleImputation = JSON.parse(JSON.stringify(prep.multipleImputation));
+        // The convergence trace is a diagnostic only and is left out: with one missing cell its "mean imputed value"
+        // would be a single training patient's observed value
+        if (prep.multipleImputation) { const { trace, traceScale, ...miInfo } = prep.multipleImputation; out.multipleImputation = JSON.parse(JSON.stringify(miInfo)); }
     }
     return { prep: out, knnImputation: knnImputation || miceImputation, miceImputation, knnFilling: knnImputation, knnColumns };
 }
@@ -9735,7 +9737,7 @@ async function runSurvivalAnalysis(o) {
         const B = o.B || 100;
         const keys = o.groupCol ? rows.map(r => r[o.groupCol]) : null;
         const idxs = keys ? bootstrapResamplesGrouped(keys, B, seed) : bootstrapResamples(rows.length, B, seed);
-        const dc = [], dtd = [], slopes = [], cOrigs = [];
+        const dc = [], dtd = [], slopes = [];
         let skipped = 0;
         const t0 = Date.now();
         for (let b = 0; b < idxs.length; b++) {
@@ -9747,13 +9749,11 @@ async function runSurvivalAnalysis(o) {
             const eb = f.encode(bRows), eo = f.encode(rows);
             const tB = eb.rows.map(r => Number(r[tc])), eB = eb.rows.map(evLabel), lpB = eb.X.map(x => f.cox.linearPredictor(x));
             const tO = eo.rows.map(r => Number(r[tc])), eO = eo.rows.map(evLabel), lpO = eo.X.map(x => f.cox.linearPredictor(x));
-            const cB = ModelEngine.concordanceIndex(tB, eB, lpB), cO = ModelEngine.concordanceIndex(tO, eO, lpO);
-            if (cB === null || cO === null) { skipped++; continue; }
-            dc.push(cB - cO); cOrigs.push(cO);
-            const aB = ModelEngine.timeDependentAUC(tB, eB, lpB, horizon, ModelEngine.censoringKM(tB, eB)), aO = ModelEngine.timeDependentAUC(tO, eO, lpO, horizon, censKM);
-            if (aB !== null && aO !== null) dtd.push(aB - aO);
-            const sm = ModelEngine.createCox().fit(lpO.map(v => [v]), tO, eO);
-            if (sm.converged) slopes.push(sm.summary(['lp'])[0].coef);
+            const op = ModelEngine.coxResampleOptimism({ t: tB, e: eB, lp: lpB }, { t: tO, e: eO, lp: lpO }, horizon, censKM);
+            if (op.c === null) { skipped++; continue; }
+            dc.push(op.c);
+            if (op.td !== null) dtd.push(op.td);
+            if (op.slope !== null) slopes.push(op.slope);
         }
         const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
         const oc = mean(dc), otd = mean(dtd), slope = mean(slopes);

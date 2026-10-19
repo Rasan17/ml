@@ -190,7 +190,7 @@ async function runSurvivalAnalysis(o) {
         const B = o.B || 100;
         const keys = o.groupCol ? rows.map(r => r[o.groupCol]) : null;
         const idxs = keys ? bootstrapResamplesGrouped(keys, B, seed) : bootstrapResamples(rows.length, B, seed);
-        const dc = [], dtd = [], slopes = [], cOrigs = [];
+        const dc = [], dtd = [], slopes = [];
         let skipped = 0;
         const t0 = Date.now();
         for (let b = 0; b < idxs.length; b++) {
@@ -202,13 +202,11 @@ async function runSurvivalAnalysis(o) {
             const eb = f.encode(bRows), eo = f.encode(rows);
             const tB = eb.rows.map(r => Number(r[tc])), eB = eb.rows.map(evLabel), lpB = eb.X.map(x => f.cox.linearPredictor(x));
             const tO = eo.rows.map(r => Number(r[tc])), eO = eo.rows.map(evLabel), lpO = eo.X.map(x => f.cox.linearPredictor(x));
-            const cB = ModelEngine.concordanceIndex(tB, eB, lpB), cO = ModelEngine.concordanceIndex(tO, eO, lpO);
-            if (cB === null || cO === null) { skipped++; continue; }
-            dc.push(cB - cO); cOrigs.push(cO);
-            const aB = ModelEngine.timeDependentAUC(tB, eB, lpB, horizon, ModelEngine.censoringKM(tB, eB)), aO = ModelEngine.timeDependentAUC(tO, eO, lpO, horizon, censKM);
-            if (aB !== null && aO !== null) dtd.push(aB - aO);
-            const sm = ModelEngine.createCox().fit(lpO.map(v => [v]), tO, eO);
-            if (sm.converged) slopes.push(sm.summary(['lp'])[0].coef);
+            const op = ModelEngine.coxResampleOptimism({ t: tB, e: eB, lp: lpB }, { t: tO, e: eO, lp: lpO }, horizon, censKM);
+            if (op.c === null) { skipped++; continue; }
+            dc.push(op.c);
+            if (op.td !== null) dtd.push(op.td);
+            if (op.slope !== null) slopes.push(op.slope);
         }
         const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
         const oc = mean(dc), otd = mean(dtd), slope = mean(slopes);

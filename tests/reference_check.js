@@ -102,5 +102,17 @@ out.riley = [[24, 0.174, 0.288], [10, 0.3, 0.1], [30, 0.05, 0.04], [15, 0.5, 0.2
     const per = mi.datasets.map(stats);
     out.mice = { rows: miRows, pooled: [0, 1, 2, 3].map(j => per.reduce((x, p) => x + p[j], 0) / per.length) };
 }
+// Harrell's bootstrap optimism for a Cox model (Option C for time-to-event outcomes): each resample refits the Cox
+// model and is scored by the app's own ModelEngine.coxResampleOptimism (C-index, time-dependent AUC, calibration slope)
+{
+    const n = cxT.length, rng = DE.createPRNG(2024), horizon = 1.0, censKM = ME.censoringKM(cxT, cxE);
+    const idxs = Array.from({ length: 25 }, () => Array.from({ length: n }, () => Math.floor(rng() * n)));
+    const per = idxs.map(idx => {
+        const Xb = idx.map(i => cxX[i]), tb = idx.map(i => cxT[i]), eb = idx.map(i => cxE[i]);
+        const m = new window.CoxModel().fit(Xb, tb, eb);
+        return ME.coxResampleOptimism({ t: tb, e: eb, lp: Xb.map(x => m.linearPredictor(x)) }, { t: cxT, e: cxE, lp: cxX.map(x => m.linearPredictor(x)) }, horizon, censKM);
+    });
+    out.coxOpt = { idxs, horizon, c: per.map(p => p.c), td: per.map(p => p.td), slope: per.map(p => p.slope) };
+}
 fs.writeFileSync(path.join(__dirname,'reference_values.json'),JSON.stringify(out));
 console.log('App values written to tests/reference_values.json; now run: python3 tests/reference_check.py');

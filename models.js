@@ -3045,6 +3045,20 @@
         },
         createCox(config) { return new CoxModel(config); },
 
+        /**
+         * Harrell's bootstrap optimism for one resample of a Cox model: the resample model's C-index and
+         * time-dependent AUC at the horizon on its own resample (censoring weights from the resample) minus on the
+         * original patients (censoring weights censKM), and the calibration slope (Cox regression of the original
+         * patients' outcome on the resample model's linear predictor). Null parts when not estimable.
+         */
+        coxResampleOptimism(boot, orig, horizon, censKM) {
+            const cB = this.concordanceIndex(boot.t, boot.e, boot.lp), cO = this.concordanceIndex(orig.t, orig.e, orig.lp);
+            const aB = this.timeDependentAUC(boot.t, boot.e, boot.lp, horizon, this.censoringKM(boot.t, boot.e));
+            const aO = this.timeDependentAUC(orig.t, orig.e, orig.lp, horizon, censKM);
+            const sm = new CoxModel().fit(orig.lp.map(v => [v]), orig.t, orig.e);
+            return { c: cB !== null && cO !== null ? cB - cO : null, cOrig: cO, td: aB !== null && aO !== null ? aB - aO : null, slope: sm.converged ? sm.beta[0] : null };
+        },
+
         /** Platt scaling: logistic regression of the outcome on logit(p) (Newton-Raphson); null if not estimable */
         fitPlatt(y, p) {
             const lp = p.map(logitClip);

@@ -594,10 +594,10 @@ function renderMiceDiagnostics(containerId, mi) {
     if (!cols.length) { box.innerHTML = ''; return; }
     const drifting = [], rhats = [];
     const charts = cols.map(c => {
-        const series = mi.trace.map((t, l) => ({ name: `Imputation ${l + 1}`, colour: CURVE_COLOURS[l % CURVE_COLOURS.length], points: (t[c] || []).map((v, it) => ({ x: it + 1, y: v })) }));
+        const series = mi.trace.map((t, l) => ({ name: `Imputation ${l + 1}`, colour: CURVE_COLOURS[l % CURVE_COLOURS.length], points: (Array.isArray(t && t[c]) ? t[c] : []).map((v, it) => ({ x: it + 1, y: Number(v) })).filter(pt => isFinite(pt.y)) }));
         const all = series.flatMap(se => se.points.map(p => p.y));
         const sd = (mi.traceScale && mi.traceScale[c] && mi.traceScale[c].sd) || 1;
-        const rhat = miceRhat(mi.trace.map(t => t[c] || []));
+        const rhat = miceRhat(series.map(se => se.points.map(pt => pt.y)));
         if (rhat !== null && rhat > 1.3) drifting.push(`${c} (R̂ ${rhat.toFixed(2)})`);
         rhats.push(rhat);
         const lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.15 || sd * 0.1 || 1;
