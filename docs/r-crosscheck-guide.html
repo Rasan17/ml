@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running the R Cross-check</title>
+<style>
+/* Layout: a single reading column of numbered steps, with an RStudio pane map and side-by-side result tables */
+:root {
+  --bg: #f7f9fa; --surface: #ffffff; --ink: #142026; --muted: #4d5f68; --line: #d5dfe3;
+  --accent: #0e6f86; --accent-soft: #e2f1f4; --code-bg: #eef3f5; --ok: #1f7a4d; --warn: #9a5b00; --warn-soft: #fbf0dd;
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --sans: "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f171b; --surface: #16222a; --ink: #e3ecef; --muted: #9db0b8; --line: #2a3a42;
+  --accent: #5cc3d8; --accent-soft: #173640; --code-bg: #1b2b33; --ok: #6fd3a0; --warn: #f0b45a; --warn-soft: #3a2c14; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f171b; --surface: #16222a; --ink: #e3ecef; --muted: #9db0b8; --line: #2a3a42;
+  --accent: #5cc3d8; --accent-soft: #173640; --code-bg: #1b2b33; --ok: #6fd3a0; --warn: #f0b45a; --warn-soft: #3a2c14; color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 17px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 64px; }
+main { max-width: 760px; margin: 0 auto; display: grid; gap: 40px; }
+h1, h2, h3 { font-family: var(--serif); text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 40px); font-weight: 650; }
+h2 { font-size: 24px; font-weight: 650; }
+h3 { font-size: 18px; font-weight: 650; font-family: var(--sans); }
+p { margin: 0; }
+.lede { color: var(--muted); font-size: 18px; max-width: 62ch; }
+.eyebrow { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+header { display: grid; gap: 12px; }
+section { display: grid; gap: 14px; }
+.step { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 16px; }
+.step-no { width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--accent); color: var(--accent); font-weight: 700;
+  display: grid; place-items: center; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.step-body { display: grid; gap: 12px; min-width: 0; }
+ul, ol { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+code { font-family: var(--mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+kbd { font-family: var(--mono); font-size: 0.82em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--surface); }
+.code { position: relative; background: var(--code-bg); border-radius: 8px; border: 1px solid var(--line); }
+.code pre { margin: 0; padding: 14px 16px; padding-right: 76px; overflow-x: auto; font-family: var(--mono); font-size: 14px; line-height: 1.55; }
+.copy { position: absolute; top: 8px; right: 8px; font: 600 13px var(--sans); color: var(--accent); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.copy:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a { color: var(--accent); }
+.note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; }
+.tip { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+tr:last-child td { border-bottom: 0; }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agree { color: var(--ok); font-weight: 600; }
+/* A sketch of the RStudio window: four panes */
+.panes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--line); padding: 6px; border-radius: 10px; }
+.pane { background: var(--surface); border-radius: 6px; padding: 10px 12px; min-height: 92px; display: grid; align-content: start; gap: 4px; }
+.pane b { font-size: 14px; }
+.pane span { font-size: 13.5px; color: var(--muted); }
+.pane.hot { outline: 2px solid var(--accent); }
+.foot { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); padding-top: 16px; }
+@media (max-width: 520px) { body { font-size: 16px; } .panes { grid-template-columns: 1fr; } .step { grid-template-columns: 32px minmax(0, 1fr); gap: 0 12px; } .step-no { width: 30px; height: 30px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="eyebrow">Universal Medical ML/NeuralNet Predictor</span>
+    <h1>Running the R cross-check in RStudio</h1>
+    <p class="lede">The app can write an R script that rebuilds your analysis independently from your data file and prints the app's results next to R's. This guide takes you from the button in the app to reading the comparison, in about ten minutes the first time.</p>
+  </header>
+
+  <section>
+    <h2>What you need</h2>
+    <ul>
+      <li><strong>R</strong> (version 4.1 or later) and <strong>RStudio</strong>, both free. If <code>R.version.string</code> prints a version in the RStudio Console, you are ready.</li>
+      <li>The <strong>CSV file you analysed</strong> in the app, unchanged and with the same name.</li>
+      <li>An analysis in Step 4 that includes the <strong>logistic / linear regression (GLM)</strong>, or a <strong>time-to-event</strong> (Cox or competing-risk) model. Random forests, boosted trees, neural networks and k-NN have no identical R counterpart.</li>
+    </ul>
+    <p class="tip">The script contains no patient data: only your settings, the row numbers of the Testing set and the app's results. It can be shared with a statistician or kept with your study records.</p>
+  </section>
+
+  <section>
+    <h2>Step by step</h2>
+
+    <div class="step">
+      <div class="step-no">1</div>
+      <div class="step-body">
+        <h3>Download the script from the app</h3>
+        <p>After training in Step 4, click <strong>R cross-check script</strong>:</p>
+        <ul>
+          <li>yes/no or numerical outcomes: in the row of report buttons above the results, next to <em>Printable report</em>;</li>
+          <li>time-to-event outcomes: under the results, next to <em>Download Survival Analysis Report</em>.</li>
+        </ul>
+        <p>Your browser saves a file named like <code>crosscheck_medical_shunt_cohort_large_2026-10-19.R</code>, usually in <em>Downloads</em>.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-no">2</div>
+      <div class="step-body">
+        <h3>Put the script and the data file in the same folder</h3>
+        <p>The script looks for the data file next to itself. Its first lines show the exact name it expects, after <code>data_file =</code>.</p>
+        <p>For the built-in demo cohorts, the CSV files are in the app folder in iCloud Drive (<em>anti-gavity › universal-medical-ml-predictor v2</em>), so the simplest route is to move the <code>.R</code> file into that folder. They can also be downloaded from the website:</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Demo</th><th>File</th></tr></thead>
+          <tbody>
+            <tr><td>iNPH shunt response, 420 patients</td><td><a href="https://rasan17.github.io/ml/medical_shunt_cohort_large.csv">medical_shunt_cohort_large.csv</a></td></tr>
+            <tr><td>Its validation cohort, 150 patients (Option B)</td><td><a href="https://rasan17.github.io/ml/medical_shunt_validation_cohort.csv">medical_shunt_validation_cohort.csv</a></td></tr>
+            <tr><td>Shunt revision, time to event</td><td><a href="https://rasan17.github.io/ml/medical_shunt_revision_survival.csv">medical_shunt_revision_survival.csv</a></td></tr>
+            <tr><td>Shunt revision with death as a competing event</td><td><a href="https://rasan17.github.io/ml/medical_shunt_revision_competing.csv">medical_shunt_revision_competing.csv</a></td></tr>
+            <tr><td>Functional recovery score (numerical)</td><td><a href="https://rasan17.github.io/ml/medical_recovery_score.csv">medical_recovery_score.csv</a></td></tr>
+          </tbody>
+        </table></div>
+        <p>For Option B, put the validation file in the same folder too.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-no">3</div>
+      <div class="step-body">
+        <h3>Install the R packages (first time only)</h3>
+        <p>In RStudio, click in the <strong>Console</strong> (bottom left), paste this line and press <kbd>Enter</kbd>. It takes a few minutes; you never need to repeat it.</p>
+        <div class="code"><pre id="code-install">install.packages(c("survival", "pROC", "rms", "riskRegression", "prodlim", "mice"))</pre><button class="copy" type="button" data-target="code-install">Copy</button></div>
+        <p>If RStudio asks whether to install from source, answer <em>No</em>.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-no">4</div>
+      <div class="step-body">
+        <h3>Open the script and click Source</h3>
+        <ol>
+          <li>In RStudio, choose <strong>File › Open File…</strong> and select the <code>.R</code> file. It opens in the top-left pane.</li>
+          <li>Click <strong>Source</strong> at the top right of that pane, or press <kbd>Cmd</kbd> <kbd>Shift</kbd> <kbd>S</kbd> on a Mac (<kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>S</kbd> on Windows).</li>
+        </ol>
+        <p class="note">Do not use <em>Import Dataset</em>. The script reads the CSV file itself. A run takes from a few seconds to about a minute (longer for Option C, which repeats the analysis on resampled cohorts).</p>
+        <div class="panes" aria-label="The four panes of RStudio and what appears in each">
+          <div class="pane hot"><b>Script (top left)</b><span>Your <code>.R</code> file, with the Source button at its top right.</span></div>
+          <div class="pane"><b>Environment (top right)</b><span>Objects the script created: <code>d</code> (your data), <code>fit</code>, <code>APP</code>, <code>RES</code>. Nothing to do here.</span></div>
+          <div class="pane hot"><b>Console (bottom left)</b><span>The comparison table appears here when the run finishes.</span></div>
+          <div class="pane"><b>Files / Plots (bottom right)</b><span>Not used by the cross-check.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-no">5</div>
+      <div class="step-body">
+        <h3>Read the comparison</h3>
+        <p>The Console shows a table headed <em>Cross-check of the app's analysis in R</em>. To show it again at any time, or to open it as a spreadsheet-style tab with all its columns:</p>
+        <div class="code"><pre id="code-show">print(RES)
+View(RES)</pre><button class="copy" type="button" data-target="code-show">Copy</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>A worked example</h2>
+    <p>The 420-patient iNPH demo, validated with Option C (bootstrap, 100 resamples), checked in RStudio:</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Measure</th><th>App</th><th>R</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>Patients / events evaluated</td><td class="num">420 / 290</td><td class="num">420 / 290</td><td>R used exactly the same patients</td></tr>
+        <tr><td>ROC-AUC, same model</td><td class="num">0.803</td><td class="num">0.803</td><td class="agree">Identical</td></tr>
+        <tr><td>Brier score, same model</td><td class="num">0.158</td><td class="num">0.158</td><td class="agree">Identical</td></tr>
+        <tr><td>Calibration slope, same model</td><td class="num">1.053</td><td class="num">1.052</td><td class="agree">Agrees</td></tr>
+        <tr><td>Calibration slope, standard glm</td><td class="num">–</td><td class="num">1.000</td><td>Always exactly 1 when a standard model is scored on its own patients; not a result</td></tr>
+        <tr><td>Optimism-corrected AUC</td><td class="num">0.770</td><td class="num">0.767</td><td class="agree">Agrees (bootstrap variation)</td></tr>
+        <tr><td>Optimism-corrected calibration slope</td><td class="num">0.881</td><td class="num">0.826</td><td>Expected difference: R corrects its unpenalised model, the app its lightly penalised one; both mean predictions need some shrinkage</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>How close should they be?</h2>
+    <p>Rows labelled <em>same model as the app</em> compare like with like. Rows labelled <em>standard glm</em> or <em>lm</em> show R's usual unpenalised model, so small differences there are expected.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Analysis</th><th>Expected agreement</th></tr></thead>
+      <tbody>
+        <tr><td>Logistic regression: AUC, Brier score, calibration</td><td>Within about 0.005 for the same model</td></tr>
+        <tr><td>Option C: corrected AUC</td><td>Within about 0.02</td></tr>
+        <tr><td>Option C: corrected calibration slope</td><td>A little lower in R (it corrects an unpenalised model)</td></tr>
+        <tr><td>Linear regression: R², RMSE, MAE</td><td>Within 0.01 for the same model</td></tr>
+        <tr><td>Cox model: C-index, observed and predicted risk</td><td>Identical or within 0.005</td></tr>
+        <tr><td>Time-dependent AUC and Brier score (survival, competing risks)</td><td>Within about 0.03: R weights for censoring with the Testing set, the app with the training patients</td></tr>
+        <tr><td>Multiple imputation (MICE), k-NN filling</td><td>Small differences: R uses close equivalents</td></tr>
+      </tbody>
+    </table></div>
+    <p>A large difference means the two analyses are not the same: check the data file and the settings before relying on either result.</p>
+  </section>
+
+  <section>
+    <h2>If something goes wrong</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Message in the Console</th><th>What to do</th></tr></thead>
+      <tbody>
+        <tr><td><code>Data file "…" not found</code></td><td>Put the CSV in the same folder as the script, with exactly the name shown after <code>data_file =</code>.</td></tr>
+        <tr><td><code>The data file has … rows; the analysis in the app had …</code></td><td>It is a different or edited version of the file. Use the one analysed in the app.</td></tr>
+        <tr><td><code>The R package "…" is needed</code></td><td>Run the install line from step 3.</td></tr>
+        <tr><td>A warning that the Testing set rebuilt here does not match</td><td>Same cause as above: check that the file is identical to the one used in the app.</td></tr>
+        <tr><td>The table is cut off on the right</td><td>The Console is narrow; run <code>View(RES)</code> to see every column.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Reporting it</h2>
+    <p>When the key numbers agree, the methods section can say so. Run this to see your exact R and package versions:</p>
+    <div class="code"><pre id="code-session">sessionInfo()</pre><button class="copy" type="button" data-target="code-session">Copy</button></div>
+    <p>For example: <em>“Model performance was reproduced independently in R (version 4.6; packages survival, pROC, rms, riskRegression) using a script generated by the software; the apparent AUC was 0.803 in both, and the optimism-corrected AUC 0.770 in the software and 0.767 in R.”</em></p>
+  </section>
+
+  <p class="foot">The cross-check covers yes/no, numerical and time-to-event outcomes, with Options A, B and C. Outcomes with more than two categories are not covered. Research and education use only.</p>
+</main>
+
+<script>
+document.querySelectorAll('.copy').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const pre = document.getElementById(btn.dataset.target);
+    const done = () => { btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1600); };
+    const select = () => { const r = document.createRange(); r.selectNodeContents(pre); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); btn.textContent = 'Selected: press Cmd+C'; };
+    try { navigator.clipboard.writeText(pre.textContent).then(done, select); } catch (e) { select(); }
+  });
+});
+</script>
+
+</body>
+</html>

@@ -251,7 +251,7 @@ Before publishing a result, reproduce it independently. In Step 4, **R cross-che
 - the row numbers of the Testing set;
 - the app's results.
 
-Put it in the same folder as your data file and run `Rscript crosscheck_….R`, or open it in RStudio and click Source. R rebuilds the analysis from the CSV file with standard packages (stats, survival, pROC, rms, riskRegression, prodlim; mice for multiple imputation) and prints the app's and R's results side by side.
+Put it in the same folder as your data file and run `Rscript crosscheck_….R`, or open it in RStudio and click Source. A step-by-step guide for RStudio is in [`docs/r-crosscheck-guide.html`](https://rasan17.github.io/ml/docs/r-crosscheck-guide.html). R rebuilds the analysis from the CSV file with standard packages (stats, survival, pROC, rms, riskRegression, prodlim; mice for multiple imputation) and prints the app's and R's results side by side.
 
 | Analysis | R reproduces | Expected agreement |
 |---|---|---|
