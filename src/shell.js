@@ -342,6 +342,7 @@ function setupEventListeners() {
     if (DOM.sampleCardioBtn) {
         DOM.sampleCardioBtn.addEventListener('click', () => loadSampleDataset('universal_medical_cohort.csv', 'Cardiometabolic Risk Cohort (Binary)'));
     }
+    document.getElementById('sample-leakage-btn')?.addEventListener('click', () => loadSampleDataset('medical_shunt_cohort_leakage.csv', 'Leakage teaching example: iNPH cohort plus gait improvement at 6 months (simulated, 420 patients)'));
     DOM.sampleCohortBtn.addEventListener('click', () => loadSampleDataset('medical_shunt_cohort.csv', 'Neurosurgical Shunt Response Cohort'));
     if (DOM.sampleShuntLargeBtn) DOM.sampleShuntLargeBtn.addEventListener('click', () => loadSampleDataset('medical_shunt_cohort_large.csv', 'iNPH Shunt Response Cohort (simulated, 420 patients)'));
     DOM.sampleRegressionBtn.addEventListener('click', () => loadSampleDataset('medical_recovery_score.csv', 'Functional Recovery Score (Continuous Regression)'));

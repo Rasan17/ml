@@ -2,11 +2,16 @@
 
 medical_shunt_cohort_large.csv        420 patients from three hospitals (development cohort)
 medical_shunt_validation_cohort.csv   150 patients from a fourth hospital (external validation, Option B)
+medical_shunt_cohort.csv              40-patient mini demo (one hospital): the same model, to show how unstable
+                                      and imprecise results are with a small cohort
+medical_batch_unseen_cases.csv        10 further patients from the same model, for batch prediction (Step 6)
+medical_shunt_cohort_leakage.csv      teaching example of leakage: the 420-patient cohort plus one column measured
+                                      after shunting (gait improvement at 6 months), which largely defines response
 
 The patients are simulated, not real. Distributions and effect sizes are chosen to be clinically plausible
 (about two thirds respond to shunting; a positive CSF tap test, DESH, a narrow callosal angle, high
 outflow resistance and shorter symptom duration favour response), so that models reach realistic
-discrimination (AUC around 0.75) rather than the near-perfect scores of the small 40-patient demo.
+discrimination (AUC around 0.75), never the near-perfect separation that real clinical predictors do not give.
 Missing values follow common practice: infusion-test results (ICP, Rout, PVI) are missing together when
 no infusion study was done, and a few other values are unrecorded.
 
@@ -78,9 +83,9 @@ def simulate(n, seed, sites, prefix, shift=None):
     return rows, lp, respond
 
 
-def write(name, rows):
+def write(name, rows, cols=COLS):
     with open(os.path.join(ROOT, name), 'w', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=COLS, lineterminator='\n')
+        w = csv.DictWriter(f, fieldnames=cols, lineterminator='\n', extrasaction='ignore')
         w.writeheader()
         w.writerows(rows)
 
@@ -98,5 +103,22 @@ if __name__ == '__main__':
     val, lp_v, y_v = simulate(150, 4711, ['Hospital D'], 'NPHV', shift={'age': 2, 'log_duration': 0.15, 'desh': -0.05, 'intercept': -0.1})
     write('medical_shunt_cohort_large.csv', dev)
     write('medical_shunt_validation_cohort.csv', val)
-    for name, lp, y in [('development', lp_d, y_d), ('validation', lp_v, y_v)]:
+    # Mini demo and its batch cases: one hospital, no Site column
+    no_site = [c for c in COLS if c != 'Site']
+    mini, lp_m, y_m = simulate(40, 404, ['Hospital A'], 'NPH')
+    batch, lp_b, y_b = simulate(10, 1010, ['Hospital A'], 'NEW')
+    # (blank cells are kept: the app fills them with the model's own missing-data method at prediction time)
+    write('medical_shunt_cohort.csv', mini, no_site)
+    write('medical_batch_unseen_cases.csv', batch, no_site)
+    # Leakage example: gait improvement 6 months after shunting is how response is usually judged, so it is
+    # (almost) a copy of the outcome and is not known when the decision to shunt is made. Responders improve by at
+    # least 1 point (that is how response is judged); a few non-responders also improve by 1 point
+    rng = np.random.default_rng(99)
+    leak_cols = COLS[:-1] + ['Gait_Improvement_6mo_Points', 'Shunt_Response']
+    leaky = []
+    for r, y in zip(dev, y_d):
+        imp = rng.normal(1.8, 0.6) if y else rng.normal(-0.3, 0.4)
+        leaky.append({**r, 'Gait_Improvement_6mo_Points': int(np.clip(np.round(imp), -1 if not y else 1, 3 if y else 1))})
+    write('medical_shunt_cohort_leakage.csv', leaky, leak_cols)
+    for name, lp, y in [('development', lp_d, y_d), ('validation', lp_v, y_v), ('mini demo', lp_m, y_m)]:
         print(f'{name}: {len(y)} patients, {y.mean():.0%} responders, AUC of the true risk score {auc(lp, y):.3f}')

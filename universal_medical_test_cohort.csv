@@ -1,9 +1,9 @@
 Patient_MRN,Age,Sex,BMI,Systolic_BP_mmHg,Diastolic_BP_mmHg,Serum_Creatinine_mg_dl,HbA1c_Percent,NYHA_Heart_Failure_Class,Smoking_Status,ECG_Ischemia,Charlson_Comorbidity_Index,Cardiovascular_Event_1Yr
-TEST-MED-2001,66,Male,29.1,146,90,1.2,7.5,1,Former,Present,2,Yes
-TEST-MED-2002,50,Female,23.8,118,76,0.7,5.4,0,Never,Absent,0,No
-TEST-MED-2003,73,Male,32.0,162,96,1.9,8.7,3,Current,Present,4,Yes
-TEST-MED-2004,69,Female,28.8,134,80,1.1,6.6,2,Former,Present,2,Yes
-TEST-MED-2005,58,Male,26.4,128,82,0.9,5.8,1,Never,Absent,1,No
-TEST-MED-2006,77,Male,30.5,152,92,1.6,8.1,3,Current,Present,3,Yes
-TEST-MED-2007,63,Female,25.2,122,78,0.8,5.6,0,Former,Absent,0,No
-TEST-MED-2008,81,Female,33.1,170,98,2.1,9.2,4,Never,Present,5,Yes
+TEST-MED-2001,54,Male,29.3,124,72,1.1,6.9,1,Former,Absent,0,No
+TEST-MED-2002,72,Female,34.6,162,96,1.5,6.1,0,Current,Absent,2,Yes
+TEST-MED-2003,70,Male,24.5,152,84,0.8,4.8,3,Never,Present,2,No
+TEST-MED-2004,55,Male,34.7,121,69,0.5,7.6,2,Former,Present,0,No
+TEST-MED-2005,64,Male,25.7,131,68,1.1,6.7,2,Former,Absent,2,Yes
+TEST-MED-2006,66,Male,21.1,140,69,1.8,4.8,0,Never,Present,2,No
+TEST-MED-2007,40,Male,30.0,123,65,0.7,6.6,2,Former,Absent,0,No
+TEST-MED-2008,67,Male,29.5,129,83,1.0,4.8,2,Former,Present,2,No

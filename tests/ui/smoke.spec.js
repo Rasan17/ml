@@ -300,22 +300,20 @@ test('time-to-event outcome columns are protected: follow-up time never a predic
     expect(errors).toEqual([]);
 });
 
-test('leakage safeguard: a predictor that copies the outcome triggers a warning, and declining stops the analysis', async ({ page }) => {
+test('leakage safeguard: the leakage teaching example triggers a warning, and declining stops the analysis', async ({ page }) => {
     const errors = [];
     page.on('pageerror', e => errors.push(String(e)));
     const dialogs = [];
     page.on('dialog', d => { dialogs.push(d.message()); if (/Possible leakage/.test(d.message())) d.dismiss(); else d.accept(); });
     await page.goto('/index.html');
-    const csv = fs.readFileSync(path.join(__dirname, '..', '..', 'medical_shunt_cohort_large.csv'), 'utf8').trim().split(/\r?\n/);
-    const head = csv[0].split(','), yi = head.indexOf('Shunt_Response');
-    const leaked = [csv[0].replace('Shunt_Response', 'Followup_Status_Code,Shunt_Response'), ...csv.slice(1).map(l => { const c = l.split(','); c.splice(yi, 0, c[yi] === 'Responder' ? '1' : '0'); return c.join(','); })].join('\n');
-    await page.setInputFiles('#csv-file-input', { name: 'leaky.csv', mimeType: 'text/csv', buffer: Buffer.from(leaked) });
+    await page.click('#sample-leakage-btn'); // the built-in teaching example: a post-operative column that largely defines response
+    await expect(page.locator('#data-stats-grid')).toContainText('420');
     await page.click('button.step-tab[data-step="3"]');
     await page.click('#apply-imputation-btn');
     await page.click('button.step-tab[data-step="4"]');
     await page.click('#train-model-btn');
     await expect(page.locator('#train-status')).toContainText('Stopped: check the predictors flagged as possible leakage');
-    expect(dialogs.some(m => /Possible leakage/.test(m) && /Followup_Status_Code/.test(m))).toBe(true);
+    expect(dialogs.some(m => /Possible leakage/.test(m) && /Gait_Improvement_6mo_Points/.test(m))).toBe(true);
     expect(errors).toEqual([]);
 });
 
