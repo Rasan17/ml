@@ -186,6 +186,29 @@ test('survival analysis tab fits a Cox model', async ({ page }) => {
     expect(errors).toEqual([]);
 });
 
+test('time-to-event outcome chosen in Step 2 is fitted by Step 4 (Cox model, single imputation and MICE)', async ({ page }) => {
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await page.click('#sample-survival-btn');
+    await page.click('button.step-tab[data-step="2"]');
+    await page.check('input[name="outcome-type"][value="survival"]');
+    await page.fill('#ot-horizon', '24');
+    await page.dispatchEvent('#ot-horizon', 'change');
+    for (const mode of ['single', 'mice5']) {
+        await page.click('button.step-tab[data-step="3"]');
+        await page.selectOption('#mi-select', mode);
+        await page.click('#apply-imputation-btn');
+        await page.click('button.step-tab[data-step="4"]');
+        await expect(page.locator('.survival-step4-note')).toBeVisible();
+        await expect(page.locator('.model-cards-grid')).toBeHidden();
+        await page.evaluate(() => { document.getElementById('survival-step4-results').innerHTML = ''; });
+        await page.click('#train-model-btn');
+        await expect(page.locator('#survival-step4-results')).toContainText(mode === 'single' ? 'single imputation' : 'MICE, 5 datasets', { timeout: 120000 });
+        await expect(page.locator('#survival-step4-results')).toContainText("Harrell's C-index");
+    }
+    expect(errors).toEqual([]);
+});
+
 test('opened directly from disk (file://), the fallback bundle runs', async ({ page }) => {
     const errors = watch(page);
     const root = path.join(__dirname, '..', '..');

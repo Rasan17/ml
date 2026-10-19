@@ -39,6 +39,8 @@ function renderOutcomeTypePanel(onChange) {
     const ec = s.eventCol && eventCols.includes(s.eventCol) ? s.eventCol : (eventCols.find(h => /event|death|died|revision|status|outcome|fail|recur/i.test(h)) || eventCols[0] || '');
     const vals = ec ? [...new Set(rows.map(r => r[ec]).filter(v => !DataEngine.isMissing(v)).map(v => String(v).trim()))].sort() : [];
     const ev = s.eventValue && vals.includes(s.eventValue) ? s.eventValue : (vals.find(v => /^(yes|1|true|dead|died|event|revised|revision)$/i.test(v)) || vals[vals.length - 1] || '');
+    // Default horizon: the median follow-up time (users should choose a clinically meaningful one)
+    const horizonFor = (col, cur) => { if (cur && cur.timeCol === col && cur.horizon > 0) return cur.horizon; const t = rows.map(r => Number(r[col])).filter(v => isFinite(v) && v > 0).sort((a, b) => a - b); return t.length ? Number(t[Math.floor(t.length / 2)].toPrecision(3)) : ''; };
     const opts = (list, sel) => list.map(h => `<option value="${escapeHtml(h)}"${h === sel ? ' selected' : ''}>${escapeHtml(h)}</option>`).join('');
     box.innerHTML = `
         <div class="cal-panel outcome-type-panel">
@@ -51,6 +53,7 @@ function renderOutcomeTypePanel(onChange) {
                 <label class="form-group"><span class="form-label">Follow-up time column</span><select id="ot-time-col" class="form-select">${opts(timeCols, tc)}</select></label>
                 <label class="form-group"><span class="form-label">Event column (did the event happen?)</span><select id="ot-event-col" class="form-select">${opts(eventCols, ec)}</select></label>
                 <label class="form-group"><span class="form-label">Value meaning "event occurred"</span><select id="ot-event-value" class="form-select">${opts(vals, ev)}</select></label>
+                <label class="form-group"><span class="form-label">Prediction horizon (same units as time)</span><input type="number" id="ot-horizon" class="form-input" min="0" step="any" value="${escapeHtml(String(horizonFor(tc, s)))}"></label>
             </div>
             <p class="tune-muted">The time column is the time from the start of follow-up to the event, or to the last follow-up for patients without the event (censored). Both columns form the outcome: they are never used as predictors or to fill in missing values. Step 4 fits a Cox proportional-hazards model.</p>` : ''}
         </div>`;
@@ -59,17 +62,19 @@ function renderOutcomeTypePanel(onChange) {
         AppState.outcomeType = type;
         if (type === 'survival') {
             const t = document.getElementById('ot-time-col'), e = document.getElementById('ot-event-col'), v = document.getElementById('ot-event-value');
-            AppState.survival = { timeCol: t ? t.value : tc, eventCol: e ? e.value : ec, eventValue: v ? v.value : ev };
+            const h = document.getElementById('ot-horizon');
+            AppState.survival = { timeCol: t ? t.value : tc, eventCol: e ? e.value : ec, eventValue: v ? v.value : ev, horizon: h && Number(h.value) > 0 ? Number(h.value) : null };
         }
         applySurvivalRoles();
         if (onChange) onChange();
     };
     box.querySelectorAll('input[name="outcome-type"]').forEach(r => r.addEventListener('change', () => { commit(); renderOutcomeTypePanel(onChange); }));
-    ['ot-time-col', 'ot-event-col', 'ot-event-value'].forEach(id => document.getElementById(id)?.addEventListener('change', e => {
+    ['ot-time-col', 'ot-event-col', 'ot-event-value', 'ot-horizon'].forEach(id => document.getElementById(id)?.addEventListener('change', e => {
         if (id === 'ot-event-col' && AppState.survival) AppState.survival.eventValue = null;
         commit(); renderOutcomeTypePanel(onChange);
     }));
-    if (surv && (!AppState.survival || AppState.survival.timeCol !== tc || AppState.survival.eventCol !== ec || AppState.survival.eventValue !== ev)) { AppState.survival = { timeCol: tc, eventCol: ec, eventValue: ev }; applySurvivalRoles(); }
+    if (surv && (!AppState.survival || AppState.survival.timeCol !== tc || AppState.survival.eventCol !== ec || AppState.survival.eventValue !== ev)) { AppState.survival = { timeCol: tc, eventCol: ec, eventValue: ev, horizon: Number(horizonFor(tc, null)) || null }; applySurvivalRoles(); }
+    document.body.dataset.outcome = surv ? 'survival' : 'standard';
 }
 
 export { applySurvivalRoles, renderOutcomeTypePanel, survivalSpec };

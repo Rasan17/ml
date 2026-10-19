@@ -5,6 +5,7 @@
 /* global DataEngine, ModelEngine */
 import { AppState, escapeHtml, APP_VERSION } from './core.js';
 import { lineChartSvg, chartLegend } from './panels.js';
+import { prepareMultipleImputation } from './multiple-imputation.js';
 
 const SURV = { result: null };
 
@@ -87,43 +88,88 @@ function coxDesign(prep) {
 }
 
 async function runSurvival() {
-    const status = document.getElementById('surv-status');
-    const tc = document.getElementById('surv-time-col').value;
-    const ec = document.getElementById('surv-event-col').value;
-    const ev = document.getElementById('surv-event-value').value;
-    const preds = [...document.querySelectorAll('.surv-pred-check')].filter(c => c.checked).map(c => c.value);
-    const horizon = parseFloat(document.getElementById('surv-horizon').value);
-    const ratio = parseFloat(document.getElementById('surv-split').value) || 0.8;
-    const seed = parseInt(document.getElementById('surv-seed').value, 10) || 42;
+    return runSurvivalAnalysis({
+        tc: document.getElementById('surv-time-col').value, ec: document.getElementById('surv-event-col').value,
+        ev: document.getElementById('surv-event-value').value,
+        preds: [...document.querySelectorAll('.surv-pred-check')].filter(c => c.checked).map(c => c.value),
+        horizon: parseFloat(document.getElementById('surv-horizon').value),
+        ratio: parseFloat(document.getElementById('surv-split').value) || 0.8,
+        seed: parseInt(document.getElementById('surv-seed').value, 10) || 42,
+        status: document.getElementById('surv-status'), boxId: 'survival-results', miM: 0
+    });
+}
+
+// Cox models fitted on each multiply imputed training dataset, used together: hazard ratios pooled by Rubin's
+// rules, predictions (linear predictor, survival probability) averaged over the imputations. Patients carry one
+// encoded version per imputation chain (x.__mi), as for the other models.
+function pooledCox(models) {
+    const each = (x, f) => { const xs = x.__mi || [x]; return models.reduce((a, m, l) => a + f(m, xs[Math.min(l, xs.length - 1)]), 0) / models.length; };
+    return {
+        pooled: models.length,
+        converged: models.every(m => m.converged),
+        linearPredictor: x => each(x, (m, xv) => m.linearPredictor(xv)),
+        survivalAt: (x, t) => each(x, (m, xv) => m.survivalAt(xv, t)),
+        summary: names => {
+            const per = models.map(m => m.summary(names));
+            const est = per.map(sm => ({ coef: sm.map(r => r.coef), se: sm.map(r => r.se) }));
+            const pool = ModelEngine.poolRubin(est);
+            return names.map((nm, j) => ({ name: nm, coef: pool[j].coef, se: pool[j].se, p: pool[j].p, hr: Math.exp(pool[j].coef), hrLow: Math.exp(pool[j].low), hrHigh: Math.exp(pool[j].high) }));
+        }
+    };
+}
+
+/**
+ * Time-to-event analysis (Cox model) shared by Step 4 and the survival tab. o: { tc, ec, ev, preds, horizon,
+ * ratio, seed, status, boxId, miM }: time and event columns, event value, predictors, horizon, training share,
+ * split seed, status element, results container, and the number of multiple imputations (0 = single imputation
+ * with the Step 3 methods).
+ */
+async function runSurvivalAnalysis(o) {
+    const { tc, ec, ev, preds, horizon, ratio, seed, status, boxId, miM = 0 } = o;
     if (!tc || !ec) throw new Error('Choose the time and event columns.');
     if (!preds.length) throw new Error('Choose at least one predictor.');
     if (!(horizon > 0)) throw new Error('Enter a prediction horizon greater than 0.');
-    status.textContent = 'Fitting…';
+    if (status) status.textContent = 'Fitting…';
     await ModelEngine.yieldToBrowser();
 
-    const rows = AppState.parsedData.rows.filter(r => !DataEngine.isMissing(r[tc]) && Number(r[tc]) > 0 && !DataEngine.isMissing(r[ec]));
+    // Patients need a follow-up time and an event status; complete-case analysis (Step 3) also drops blank predictors
+    const rows = AppState.parsedData.rows.filter(r => !DataEngine.isMissing(r[tc]) && Number(r[tc]) > 0 && !DataEngine.isMissing(r[ec])
+        && (!o.completeCase || preds.every(c => !DataEngine.isMissing(r[c]))));
     const excluded = AppState.parsedData.rows.length - rows.length;
     const cfg = {};
     preds.forEach(c => { cfg[c] = { ...(AppState.columnConfigs[c] || { type: 'continuous', imputationStrategy: 'median' }), role: 'feature' }; });
     cfg[ec] = { role: 'target', type: 'nominal' };
     const evLabel = r => (String(r[ec]).trim() === ev ? 1 : 0);
     const split = DataEngine.trainTestSplit(rows, rows.map(r => String(evLabel(r))), ratio, true, seed);
-    const trImp = DataEngine.imputeDataset(split.trainX, cfg, AppState.columnAnalysis);
-    const teImp = DataEngine.imputeDataset(split.testX, cfg, AppState.columnAnalysis, trImp.plan);
-    const prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, cfg);
-    prep.imputation = { configs: JSON.parse(JSON.stringify(cfg)), plan: trImp.plan };
-    const te = DataEngine.prepareTestingDataset(teImp.imputedRows, prep);
-    const cols = coxDesign(prep);
-    const Xtr = prep.X.map(x => cols.map(c => x[c.idx]));
-    const Xte = te.X.map(x => cols.map(c => x[c.idx]));
-    const tTr = trImp.imputedRows.map(r => Number(r[tc])), eTr = trImp.imputedRows.map(evLabel);
+    let prep, te, cols, Xtr, Xte, tTr, eTr, cox, penalised = false, miInfo = null;
+    // Cox design columns of an encoded patient (and of each of its imputed versions)
+    const design = x => { const d = cols.map(c => x[c.idx]); if (x.__mi) Object.defineProperty(d, '__mi', { value: x.__mi.map(v => cols.map(c => v[c.idx])), enumerable: false }); return d; };
+    const fitCox = (X, t, e) => { let m = ModelEngine.createCox().fit(X, t, e); if (!m.converged) { m = ModelEngine.createCox({ penalty: 0.1 }).fit(X, t, e); penalised = true; } return m; };
+    if (miM) {
+        // Multiple imputation (Step 3): MICE on the training patients (time and event never used); one Cox model per dataset
+        const mi = await prepareMultipleImputation(split.trainX, cfg, miM, seed);
+        prep = mi.prep;
+        cols = coxDesign(prep);
+        tTr = split.trainX.map(r => Number(r[tc])); eTr = split.trainX.map(evLabel);
+        cox = pooledCox(mi.sets.map(st => fitCox(st.X.map(x => cols.map(c => x[c.idx])), tTr, eTr)));
+        Xtr = mi.sets[0].X.map(x => cols.map(c => x[c.idx]));
+        te = DataEngine.prepareTestingDataset(split.testX, prep);
+        miInfo = { m: miM, imputedColumns: mi.imputedColumns, trace: prep.multipleImputation && prep.multipleImputation.trace, traceScale: prep.multipleImputation && prep.multipleImputation.traceScale };
+    } else {
+        const trImp = DataEngine.imputeDataset(split.trainX, cfg, AppState.columnAnalysis);
+        const teImp = DataEngine.imputeDataset(split.testX, cfg, AppState.columnAnalysis, trImp.plan);
+        prep = DataEngine.prepareFeaturesAndTarget(trImp.imputedRows, cfg);
+        prep.imputation = { configs: JSON.parse(JSON.stringify(cfg)), plan: trImp.plan };
+        te = DataEngine.prepareTestingDataset(teImp.imputedRows, prep);
+        cols = coxDesign(prep);
+        Xtr = prep.X.map(x => cols.map(c => x[c.idx]));
+        tTr = trImp.imputedRows.map(r => Number(r[tc])); eTr = trImp.imputedRows.map(evLabel);
+    }
+    Xte = te.X.map(design);
     const tTe = te.validRows.map(r => Number(r[tc])), eTe = te.validRows.map(evLabel);
     const events = eTr.reduce((a, b) => a + b, 0);
     if (events < 5) throw new Error(`Only ${events} events in the training patients; at least 5 are needed.`);
-
-    let cox = ModelEngine.createCox().fit(Xtr, tTr, eTr);
-    let penalised = false;
-    if (!cox.converged) { cox = ModelEngine.createCox({ penalty: 0.1 }).fit(Xtr, tTr, eTr); penalised = true; }
+    if (!miM) cox = fitCox(Xtr, tTr, eTr);
     const lpTe = Xte.map(x => cox.linearPredictor(x));
     const cIndex = ModelEngine.concordanceIndex(tTe, eTe, lpTe);
     // bootstrap CI for the C-index (test patients resampled)
@@ -169,10 +215,11 @@ async function runSurvival() {
     const kmGroups = tert.map(g => ModelEngine.kaplanMeier(g.map(i => tTe[i]), g.map(i => eTe[i])));
     const maxFollow = Math.max(...tTr, ...tTe);
     const lastEvent = Math.max(0, ...tTr.filter((_, i) => eTr[i] === 1));
-    SURV.result = { lastEvent, tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, obsAllCI, meanPred, obsAll, kmGroups, maxFollow,
+    SURV.result = { boxId: boxId || 'survival-results', miInfo, completeCase: Boolean(o.completeCase), lastEvent, tc, ec, ev, preds, horizon, ratio, seed, cols, prep, cox, penalised, cIndex, cCI, tdAuc, tdCI, brier, brierNull, scaledBrier, calib, obsAllCI, meanPred, obsAll, kmGroups, maxFollow,
         nTrain: Xtr.length, nTest: Xte.length, eventsTrain: events, eventsTest: eTe.reduce((a, b) => a + b, 0), excluded };
     renderSurvivalResults();
-    status.textContent = '';
+    if (status) status.textContent = '';
+    return SURV.result;
 }
 
 function stepPoints(km) {
@@ -183,7 +230,7 @@ function stepPoints(km) {
 
 function renderSurvivalResults() {
     const r = SURV.result;
-    const box = document.getElementById('survival-results');
+    const box = document.getElementById(r ? r.boxId : 'survival-results');
     if (!r || !box) return;
     const f2 = v => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
     const summary = r.cox.summary(r.cols.map(c => c.name));
@@ -201,7 +248,8 @@ function renderSurvivalResults() {
     box.innerHTML = `
         <div class="cal-panel">
             <div class="tune-title">⏱️ Cox proportional-hazards model: ${escapeHtml(r.ec)} = "${escapeHtml(r.ev)}" over ${escapeHtml(r.tc)}</div>
-            <p class="tune-muted">${r.nTrain} training patients (${r.eventsTrain} events) and ${r.nTest} test patients (${r.eventsTest} events), split ${Math.round(r.ratio * 100)}/${Math.round((1 - r.ratio) * 100)} (stratified by event, seed ${r.seed})${r.excluded ? `; ${r.excluded} row(s) without a usable time or event were excluded` : ''}.${r.penalised ? ' <strong>The unpenalised model did not converge, so a small ridge penalty (0.1) was applied.</strong>' : ''}${epp < 10 ? ` <strong>Caution:</strong> only ${epp.toFixed(1)} events per model parameter; the estimates are unstable.` : ''}</p>
+            <p class="tune-muted">${r.nTrain} training patients (${r.eventsTrain} events) and ${r.nTest} test patients (${r.eventsTest} events), split ${Math.round(r.ratio * 100)}/${Math.round((1 - r.ratio) * 100)} (stratified by event, seed ${r.seed})${r.excluded ? `; ${r.excluded} row(s) without a usable time or event were excluded` : ''}.${r.penalised ? ' <strong>The unpenalised model did not converge, so a small ridge penalty (0.1) was applied.</strong>' : ''}${epp < 10 ? ` <strong>Caution:</strong> only ${epp.toFixed(1)} events per model parameter; the estimates are unstable.` : ''}
+            Missing predictor values: ${r.miInfo ? `multiple imputation (MICE, ${r.miInfo.m} datasets, fitted on the training patients without the time or event); one Cox model per dataset, hazard ratios pooled by Rubin's rules and predictions averaged` : r.completeCase ? 'complete-case analysis (patients with a blank predictor excluded)' : 'single imputation with the Step 3 methods, fitted on the training patients'}.</p>
             <div class="cmp-guide-title" style="font-size: 13px;">Hazard ratios (training patients)</div>
             <table class="data-table thr-table"><thead><tr><th>Predictor</th><th>Hazard ratio (95% CI)</th><th>Scale</th><th>p-value</th></tr></thead><tbody>${hrRows}</tbody></table>
             <p class="tune-muted">A hazard ratio above 1 means the event tends to happen sooner (higher instantaneous risk); below 1, later. Each is adjusted for the other predictors; categorical predictors are compared with their most common category. The Cox model assumes the hazard ratios stay constant over follow-up (proportional hazards); check this clinically, e.g. whether the Kaplan-Meier curves below cross. Associations, not causation.</p>
@@ -249,6 +297,7 @@ function predictOne() {
     document.querySelectorAll('.surv-in').forEach(el => { input[el.dataset.col] = el.value; });
     const x = DataEngine.transformSingleRow(input, r.prep, []);
     const xd = r.cols.map(c => x[c.idx]);
+    if (x.__mi) Object.defineProperty(xd, '__mi', { value: x.__mi.map(v => r.cols.map(c => v[c.idx])), enumerable: false }); // multiply imputed patient
     const times = [0.25, 0.5, 0.75, 1].map(f => Number((r.horizon * f * 2 / 2).toPrecision(3)));
     times[3] = r.horizon;
     const rows = times.map(t => `<tr><td>${t}</td><td>${(r.cox.survivalAt(xd, t) * 100).toFixed(1)}%</td></tr>`).join('');
@@ -275,4 +324,4 @@ function downloadSurvivalReport() {
     URL.revokeObjectURL(url);
 }
 
-export { renderSurvivalSetup, runSurvival };
+export { SURV, renderSurvivalSetup, runSurvival, runSurvivalAnalysis };

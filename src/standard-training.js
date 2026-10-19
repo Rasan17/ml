@@ -10,12 +10,42 @@ import { disposeModels, evalAbortOpts, markBaselineDeployed, setupTrainingLossCh
 import { getHyperparamsForModel } from './training-setup.js';
 import { FLEXIBLE_MODELS, INNER_TUNE_MAX_FOLDS, bootstrapResamples, bootstrapResamplesGrouped, noInformationRates, plus632, selectionOptimism, youdenThreshold } from './validation-core.js';
 import { scheduleAnalysisSummary } from './analysis-summary.js';
+import { survivalSpec } from './outcome-type.js';
+import { runSurvivalAnalysis } from './survival.js';
+
+// Step 4 for a time-to-event outcome (chosen in Step 2): a Cox model with the Step 2 predictors and the Step 3
+// missing-data handling (single imputation methods or MICE), validated on a held-out testing set (Option A)
+async function trainSurvivalStep4(spec) {
+    const valMode = document.querySelector('input[name="validation-mode"]:checked')?.value || AppState.validationMode || 'split';
+    const box = document.getElementById('survival-step4-results');
+    if (valMode !== 'split') {
+        DOM.trainStatus.innerHTML = `<span style="color: var(--accent-amber);">⚠️ For time-to-event outcomes, Step 4 currently supports Option A (held-out testing set). Bootstrap internal validation and a separate validation cohort for Cox models are being added; choose Option A for now.</span>`;
+        return;
+    }
+    const preds = Object.keys(AppState.columnConfigs).filter(c => AppState.columnConfigs[c].role === 'feature');
+    const trainPct = parseFloat(document.getElementById('train-pct-input')?.value) || 80;
+    const ratio = Math.min(0.95, Math.max(0.50, trainPct / 100));
+    const custom = document.querySelector('input[name="split-seed-mode"]:checked')?.value === 'custom';
+    const seed = custom ? (parseSeed(document.getElementById('split-seed-input')?.value) ?? 42) : 42;
+    const miM = AppState.completeCase ? 0 : readMultipleImputation();
+    DOM.trainModelBtn.disabled = true;
+    try {
+        await runSurvivalAnalysis({ tc: spec.timeCol, ec: spec.eventCol, ev: spec.eventValue, preds, horizon: spec.horizon, ratio, seed, status: DOM.trainStatus, boxId: 'survival-step4-results', miM, completeCase: Boolean(AppState.completeCase) });
+        if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+        DOM.trainStatus.innerHTML = `<span style="color: var(--accent-rose);">⚠️ ${escapeHtml(err.message || String(err))}</span>`;
+    } finally {
+        DOM.trainModelBtn.disabled = false;
+    }
+}
 
 async function startModelTraining() {
     if (!AppState.imputedData) {
         alert("Please execute Data Imputation first.");
         return;
     }
+    const survSpec = survivalSpec();
+    if (survSpec) { await trainSurvivalStep4(survSpec); return; }
 
     const watchdog = AppState.watchdogs ? AppState.watchdogs.step4 : null;
     const runDataset = AppState.datasetRun; // results are installed only if the same dataset is still loaded
