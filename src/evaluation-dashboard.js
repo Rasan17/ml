@@ -36,7 +36,7 @@ function renderEvaluationDashboard() {
             const oc = evalRes.optimismCorrection || {};
             DOM.retrainStatusBanner.innerHTML = `
                 <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 16px;">
-                    <div style="font-weight: 700; font-size: 13.5px; color: var(--accent-emerald);">🔁 Option C: Internal Validation by Bootstrap Optimism Correction</div>
+                    <div style="font-weight: 700; font-size: 13.5px; color: var(--accent-emerald);">Option C: Internal Validation by Bootstrap Optimism Correction</div>
                     <div style="font-size: 12px; color: var(--text-secondary); margin-top: 3px;">
                         Every model was trained on all <strong>${totalCount}</strong> patients. Performance figures are <strong>optimism-corrected</strong> using ${oc.B || '?'} bootstrap resamples (fewer for neural networks / ensembles), each repeating missing-value filling, encoding, scaling and training. There is no separate test set; confirm on an independent cohort (Option B) before clinical use.
                     </div>
@@ -46,7 +46,7 @@ function renderEvaluationDashboard() {
                 <div style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                     <div>
                         <div style="font-weight: 700; font-size: 13.5px; color: var(--accent-purple); display: flex; align-items: center; gap: 6px;">
-                            <span>🛡️</span> Option B: Independent External Validation Cohort
+                            Option B: Independent External Validation Cohort
                         </div>
                         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 3px;">
                             Tested on separate external <strong>Dataset (ii) (${testCount} test cases)</strong> with zero data leakage. All models trained on 100% of <strong>Dataset (i) (${trainCount} patients)</strong>.
@@ -137,24 +137,24 @@ function renderEvaluationDashboard() {
             const nPred = Math.max(1, prep.X[0].length - Object.values(prep.featureMetadata || {}).filter(m => m.type === 'nominal' && m.length > 1).length);
             const epv = minority / nPred;
             if (epv < 10) {
-                notes.push(`⚠️ <strong>Small sample for the number of predictors:</strong> the smaller outcome group has ${minority} patient(s) for ${nPred} predictor parameter(s) (${epv.toFixed(1)} per parameter; at least 10–20 is a common rule of thumb, and see the Riley criteria in Step 4). Models may overfit; consider fewer predictors or more patients, and treat the results as exploratory.`);
+                notes.push(`⚠︎ <strong>Small sample for the number of predictors:</strong> the smaller outcome group has ${minority} patient(s) for ${nPred} predictor parameter(s) (${epv.toFixed(1)} per parameter; at least 10–20 is a common rule of thumb, and see the Riley criteria in Step 4). Models may overfit; consider fewer predictors or more patients, and treat the results as exploratory.`);
             }
         }
         if (evalRes && evalRes.multipleImputation) {
             const mi = evalRes.multipleImputation;
-            notes.push(`🧩 <strong>Multiple imputation:</strong> missing predictor values${mi.imputedColumns && mi.imputedColumns.length ? ` (${mi.imputedColumns.map(escapeHtml).join(', ')})` : ''} were imputed ${mi.m} times by chained equations with predictive mean matching, fitted on the Training patients only and without the outcome. One model was trained on each completed dataset and the predictions are averaged; Testing and new patients with missing values are imputed in the same way.${evalRes.cv && evalRes.cv.imputation ? ` Cross-validation folds (model selection, tuning, recalibration): ${escapeHtml(evalRes.cv.imputation)}.` : ''}${mi.insideResamples ? ` Bootstrap resamples: ${escapeHtml(mi.insideResamples)}.` : ''}`);
+            notes.push(`<strong>Multiple imputation:</strong> missing predictor values${mi.imputedColumns && mi.imputedColumns.length ? ` (${mi.imputedColumns.map(escapeHtml).join(', ')})` : ''} were imputed ${mi.m} times by chained equations with predictive mean matching, fitted on the Training patients only and without the outcome. One model was trained on each completed dataset and the predictions are averaged; Testing and new patients with missing values are imputed in the same way.${evalRes.cv && evalRes.cv.imputation ? ` Cross-validation folds (model selection, tuning, recalibration): ${escapeHtml(evalRes.cv.imputation)}.` : ''}${mi.insideResamples ? ` Bootstrap resamples: ${escapeHtml(mi.insideResamples)}.` : ''}`);
         }
-        if (evalRes && evalRes.multipleImputationSkipped) notes.push(`🧩 ${escapeHtml(evalRes.multipleImputationSkipped)}`);
+        if (evalRes && evalRes.multipleImputationSkipped) notes.push(`${escapeHtml(evalRes.multipleImputationSkipped)}`);
         if (isOptionC && evalRes && evalRes.recalibration) {
-            notes.push(`📐 <strong>Recalibrated</strong> with ${evalRes.recalibration.method === 'platt' ? 'Platt scaling' : 'isotonic regression'}, fitted on ${escapeHtml(evalRes.recalibration.fittedOn)}. The recalibration was refitted inside ${typeof evalRes.recalibrationInResamples === 'number' ? evalRes.recalibrationInResamples : 'every'} bootstrap resample(s) on their own cross-validated predictions, so the optimism-corrected results include its effect.`);
+            notes.push(`<strong>Recalibrated</strong> with ${evalRes.recalibration.method === 'platt' ? 'Platt scaling' : 'isotonic regression'}, fitted on ${escapeHtml(evalRes.recalibration.fittedOn)}. The recalibration was refitted inside ${typeof evalRes.recalibrationInResamples === 'number' ? evalRes.recalibrationInResamples : 'every'} bootstrap resample(s) on their own cross-validated predictions, so the optimism-corrected results include its effect.`);
         }
         // Option A: one random split is a single, noisy draw
-        if (!isOptionB && !isOptionC && evalRes) notes.push('🎲 <strong>One split:</strong> these results come from a single division of the patients into Training and Testing sets. Another split could give noticeably different figures, so a good result here is not evidence of reproducibility. Bootstrap validation (Option C) uses every patient and is more stable; an independent cohort (Option B) gives the strongest evidence.');
-        if (isOptionC && evalRes && evalRes.recalibrationSkipped) notes.push(`📐 ${escapeHtml(evalRes.recalibrationSkipped)}`);
+        if (!isOptionB && !isOptionC && evalRes) notes.push('<strong>One split:</strong> these results come from a single division of the patients into Training and Testing sets. Another split could give noticeably different figures, so a good result here is not evidence of reproducibility. Bootstrap validation (Option C) uses every patient and is more stable; an independent cohort (Option B) gives the strongest evidence.');
+        if (isOptionC && evalRes && evalRes.recalibrationSkipped) notes.push(`${escapeHtml(evalRes.recalibrationSkipped)}`);
         if (evalRes && evalRes.cv) {
             notes.push(`Best model chosen by ${evalRes.cv.folds}-fold cross-validation inside the Training set${evalRes.cv.grouped ? ' (each patient\'s records kept in one fold)' : ''}; missing-value filling (${escapeHtml(evalRes.cv.imputation || 'Step 3 methods')}), encoding and scaling were refitted inside every fold.`);
         } else if (allResults.length > 1 && !isOptionC) {
-            notes.push(`⚠️ <strong>Exploratory model choice:</strong> the leading model was chosen by its score on the same Testing patients it is reported on, so its test results are optimistic (the best of ${allResults.length} scores is partly luck). For a reportable result, choose "Cross-validation within the Training set" for model selection, so the Testing set is used once, only to evaluate the chosen model.`);
+            notes.push(`⚠︎ <strong>Exploratory model choice:</strong> the leading model was chosen by its score on the same Testing patients it is reported on, so its test results are optimistic (the best of ${allResults.length} scores is partly luck). For a reportable result, choose "Cross-validation within the Training set" for model selection, so the Testing set is used once, only to evaluate the chosen model.`);
         }
         // Who the test metrics rest on: patients, events and non-events, with a warning when they are few
         if (!isOptionC && evalRes && evalRes.isClassification && Array.isArray(evalRes.actuals) && evalRes.actuals.length) {
@@ -167,7 +167,7 @@ function renderEvaluationDashboard() {
             if (nGroups < expected) warn = ' <strong>Not every outcome group is present, so AUC and per-group results cannot be estimated.</strong>';
             else if (fewest < 10) warn = ' <strong>Fewer than 10 patients in the smallest group: AUC, sensitivity, calibration and their intervals are unreliable; treat them as illustrative only.</strong>';
             else if (fewest < 50) warn = ' With fewer than about 50 patients in the smallest group these estimates are imprecise (see the 95% intervals); calibration needs about 100 in each group.';
-            notes.push(`${fewest < 50 || nGroups < expected ? '⚠️ ' : ''}<strong>Testing set:</strong> ${n} ${isOptionB ? 'patients in Dataset (ii)' : 'test records'} (${groups.join(', ')}).${warn}`);
+            notes.push(`${fewest < 50 || nGroups < expected ? '⚠︎ ' : ''}<strong>Testing set:</strong> ${n} ${isOptionB ? 'patients in Dataset (ii)' : 'test records'} (${groups.join(', ')}).${warn}`);
         }
         if (prep && prep.isClassification && prep.positiveClass !== null && prep.positiveClass !== undefined) {
             notes.push(`Positive (event) class for ROC-AUC, Brier score, sensitivity and TP/FN: <strong>${escapeHtml(prep.positiveClass)}</strong>. Change it in Step 2 (target card) if this is not the outcome of interest.`);
@@ -201,7 +201,7 @@ function renderEvaluationDashboard() {
         }
         summariseHeldOutSet(evalRes).forEach(n => notes.push(n));
         resultsForNotes.forEach(r => {
-            if (r && r.fallbackNote) notes.push(`⚠️ ${escapeHtml(r.fallbackNote)}`);
+            if (r && r.fallbackNote) notes.push(`⚠︎ ${escapeHtml(r.fallbackNote)}`);
             if (r && r.weightingNote) notes.push(`Ensemble: ${escapeHtml(r.weightingNote)}`);
             if (r && r.nnNote) notes.push(`Neural network: ${escapeHtml(r.nnNote)}`);
         });
@@ -234,7 +234,7 @@ function renderEvaluationDashboard() {
                 const isChampion = idx === 0;
                 const isDeployed = AppState.deployedModelId === resItem.modelId;
 
-                const rankBadge = isChampion ? '🥇 #1' : (idx === 1 ? '🥈 #2' : (idx === 2 ? '🥉 #3' : `#${idx + 1}`));
+                const rankBadge = isChampion ? '#1' : (idx === 1 ? '#2' : (idx === 2 ? '#3' : `#${idx + 1}`));
                 const scoreDisplay = rEval.isClassification 
                     ? `<strong style="color: var(--accent-cyan); font-size: 14.5px;">${(rEval.accuracy * 100).toFixed(1)}%</strong>${accuracyInterval(rEval) ? `<div style="font-size: 10px; color: var(--text-muted);">95% CI ${(accuracyInterval(rEval).ci[0] * 100).toFixed(0)}–${(accuracyInterval(rEval).ci[1] * 100).toFixed(0)}%</div>` : ''}`
                     : `<strong style="color: var(--accent-cyan); font-size: 14.5px;">R²: ${fmtR2(rEval.r2)}</strong>${ciSpan(rEval, 'r2')}`;
@@ -260,11 +260,11 @@ function renderEvaluationDashboard() {
                     ? `${rEval.brierScore.toFixed(3)}${ciSpan(rEval, 'brierScore')}` : '-';
 
                 const seedDisplay = (rEval.seed !== null && rEval.seed !== undefined)
-                    ? `<span class="seed-pill" title="Click to copy reproducibility seed: ${rEval.seed}" ${actionAttrs('copySeedToClipboard', rEval.seed)}>🌱 ${rEval.seed} <span class="copy-icon">📋</span></span>`
+                    ? `<span class="seed-pill" title="Click to copy reproducibility seed: ${rEval.seed}" ${actionAttrs('copySeedToClipboard', rEval.seed)}>seed ${rEval.seed} <span class="copy-icon"><span class="ico ico-clipboard" aria-hidden="true"></span></span></span>`
                     : `<span style="font-size: 11px; color: var(--text-muted); font-family: monospace;">N/A</span>`;
 
                 const deployBtn = isDeployed
-                    ? `<span class="pill pill-target" style="background: rgba(16, 185, 129, 0.2); color: var(--tag-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.4);">✓ Active research model</span>`
+                    ? `<span class="pill pill-target" style="background: rgba(16, 185, 129, 0.2); color: var(--tag-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.4);">✓Active research model</span>`
                     : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="padding: 4px 10px; font-size: 11px; cursor: pointer;" title="Make this the active research model for Steps 5 and 6">Use this model</button>`;
 
                 lbRows += `
@@ -299,7 +299,7 @@ function renderEvaluationDashboard() {
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px;">
                         <div>
                             <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
-                                <span>🏆</span> Benchmark Leaderboard &mdash; ${allResults.length} Tested Models Ranked by ${escapeHtml(rankingMetricLabel(prep.isClassification))}
+                                Benchmark Leaderboard &mdash; ${allResults.length} Tested Models Ranked by ${escapeHtml(rankingMetricLabel(prep.isClassification))}
                             </h3>
                             <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
                                 ${anyCV
@@ -389,8 +389,8 @@ function renderEvaluationDashboard() {
                 }
 
                 const deployBtn = isDeployed
-                    ? `<button class="btn-preset-action" disabled style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: var(--tag-emerald); font-weight: 700; width: 100%;">✓ Active research model (Steps 5 &amp; 6)</button>`
-                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="width: 100%; font-weight: 600; cursor: pointer;">⭐ Use as active research model</button>`;
+                    ? `<button class="btn-preset-action" disabled style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: var(--tag-emerald); font-weight: 700; width: 100%;">✓Active research model (Steps 5 &amp; 6)</button>`
+                    : `<button class="btn-preset-action deploy-model-btn" ${actionAttrs('deployTestedModel', resItem.modelId)} style="width: 100%; font-weight: 600; cursor: pointer;">Use as active research model</button>`;
 
                 cmCardsHtml += `
                     <div class="multi-cm-card ${isDeployed ? 'active-deployed' : ''}">
@@ -403,8 +403,8 @@ function renderEvaluationDashboard() {
                                 </div>
                             </div>
                             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                                ${isChampion ? `<span class="champion-badge">🏆 Top-ranked (${escapeHtml(rankingMetricLabel(prep.isClassification))})</span>` : `<span class="pill" style="font-size: 10.5px;">Rank #${idx + 1}</span>`}
-                                ${isDeployed ? `<span class="pill pill-target" style="font-size: 10px; background: rgba(16, 185, 129, 0.15); color: var(--tag-emerald);">⭐ Active</span>` : ''}
+                                ${isChampion ? `<span class="champion-badge">Top-ranked (${escapeHtml(rankingMetricLabel(prep.isClassification))})</span>` : `<span class="pill" style="font-size: 10.5px;">Rank #${idx + 1}</span>`}
+                                ${isDeployed ? `<span class="pill pill-target" style="font-size: 10px; background: rgba(16, 185, 129, 0.15); color: var(--tag-emerald);">Active</span>` : ''}
                             </div>
                         </div>
 
@@ -425,7 +425,7 @@ function renderEvaluationDashboard() {
 
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border-color);">
                             <div class="cm-seed-card-badge" title="Click to copy reproducibility seed: ${rEval.seed}" ${actionAttrs('copySeedToClipboard', rEval.seed)}>
-                                <span>🌱 Seed:</span> <strong>${rEval.seed !== null && rEval.seed !== undefined ? rEval.seed : 'N/A'}</strong> <span style="font-size: 10px; opacity: 0.8;">📋</span>
+                                <span>Seed:</span> <strong>${rEval.seed !== null && rEval.seed !== undefined ? rEval.seed : 'N/A'}</strong> <span style="font-size: 10px; opacity: 0.8;"><span class="ico ico-clipboard" aria-hidden="true"></span></span>
                             </div>
                             ${rEval.splitSeed ? `<span style="font-size: 10.5px; color: var(--text-muted); font-family: monospace;">Split: ${rEval.splitSeed}</span>` : ''}
                         </div>
@@ -445,7 +445,7 @@ function renderEvaluationDashboard() {
             DOM.multiModelCmContainer.innerHTML = `
                 <div style="margin-bottom: 20px;">
                     <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
-                        <span>📊</span> Confusion Matrix &amp; Diagnostic Accuracy Breakdown &mdash; All Chosen Models
+                        Confusion Matrix &amp; Diagnostic Accuracy Breakdown &mdash; All Chosen Models
                     </h3>
                     <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
                         Individual confusion matrices and test metrics for every model chosen in this benchmark. Each card includes its exact reproducibility seed (click to copy).${isOptionC ? ' <strong>Option C: these matrices are apparent (measured on the patients each model was trained on), not optimism-corrected.</strong>' : ''}
@@ -464,7 +464,7 @@ function renderEvaluationDashboard() {
         if (DOM.metricsSummaryRow) DOM.metricsSummaryRow.style.display = 'grid';
         if (DOM.evaluationDetailContainer) DOM.evaluationDetailContainer.style.display = 'block';
 
-        const activeInfo = MODEL_INFO[AppState.deployedModelId || AppState.selectedModelId] || { name: 'Model', icon: '🧠' };
+        const activeInfo = MODEL_INFO[AppState.deployedModelId || AppState.selectedModelId] || { name: 'Model', icon: '<span class="ico ico-network" aria-hidden="true"></span>' };
         if (DOM.dashboardSingleHeading) {
             DOM.dashboardSingleHeading.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 8px;">
@@ -513,7 +513,7 @@ function renderEvaluationDashboard() {
                 ` : ''}
                 <div class="metric-pill-card" style="cursor: pointer;" ${actionAttrs('copySeedToClipboard', evalRes.seed)} title="Click to copy reproducibility seed: ${evalRes.seed}">
                     <span class="m-title">Reproducibility Seed</span>
-                    <span class="m-val" style="color: var(--accent-purple); font-family: monospace;">🌱 ${evalRes.seed !== null && evalRes.seed !== undefined ? evalRes.seed : 'Auto'} 📋</span>
+                    <span class="m-val" style="color: var(--accent-purple); font-family: monospace;">seed ${evalRes.seed !== null && evalRes.seed !== undefined ? evalRes.seed : 'Auto'} </span>
                 </div>
             `;
 
@@ -523,7 +523,7 @@ function renderEvaluationDashboard() {
             let cmHtml = `
                 <div style="display: flex; flex-direction: column; gap: 16px;">
                     <h3 style="font-size: 15px; color: var(--text-primary);">Confusion Matrix (${isOptionC ? `apparent: the final model on the ${totalCount} patients it was trained on, <em>not</em> optimism-corrected` : cohortDesc})</h3>
-                    ${isOptionC ? '<p class="tune-warn" style="margin: 0;">⚠️ With bootstrap validation no patients are held out, so this matrix and the per-class sensitivity and precision below are measured on the training patients and are optimistic (flexible models can look almost perfect). Only the optimism-corrected measures in the summary and leaderboard (accuracy, balanced accuracy, F1, AUC, Brier, calibration slope) estimate performance on new patients.</p>' : ''}
+                    ${isOptionC ? '<p class="tune-warn" style="margin: 0;">⚠︎ With bootstrap validation no patients are held out, so this matrix and the per-class sensitivity and precision below are measured on the training patients and are optimistic (flexible models can look almost perfect). Only the optimism-corrected measures in the summary and leaderboard (accuracy, balanced accuracy, F1, AUC, Brier, calibration slope) estimate performance on new patients.</p>' : ''}
                     <div class="table-container" style="max-width: 500px;">
                         <table class="cm-table">
                             <thead>
@@ -570,7 +570,7 @@ function renderEvaluationDashboard() {
                 </div>
                 <div class="metric-pill-card" style="cursor: pointer;" ${actionAttrs('copySeedToClipboard', evalRes.seed)} title="Click to copy reproducibility seed: ${evalRes.seed}">
                     <span class="m-title">Reproducibility Seed</span>
-                    <span class="m-val" style="color: var(--accent-purple); font-family: monospace;">🌱 ${evalRes.seed !== null && evalRes.seed !== undefined ? evalRes.seed : 'Auto'} 📋</span>
+                    <span class="m-val" style="color: var(--accent-purple); font-family: monospace;">seed ${evalRes.seed !== null && evalRes.seed !== undefined ? evalRes.seed : 'Auto'} </span>
                 </div>
             `;
 
@@ -582,7 +582,7 @@ function renderEvaluationDashboard() {
                     Model validated on ${cohortDesc} with R² = ${fmtR2(evalRes.r2)} and Mean Absolute Error = ${evalRes.mae}. ${isOptionB ? `Fitted strictly on 100% of Training Dataset (i) (${trainCount} patients).` : (evalRes.retrainOn100 ? `Active model was then retrained on 100% of data (${totalCount} patients); the results shown are from the split-trained model on the test patients, and the retrained model itself has not been tested.` : `Active model maintained strictly on ${trainPct}% training split (${trainCount} patients; 100% retraining declined).`)}
                 </p>
                 <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 6px;">
-                    💡 <em>R², RMSE and MAE are the primary performance measures for a continuous outcome. If the outcome has a prespecified clinical decision threshold, analyse it as a binary outcome (Nominal) instead of relying on the exploratory split above.</em>
+                    <span class="ico ico-bulb" aria-hidden="true"></span> <em>R², RMSE and MAE are the primary performance measures for a continuous outcome. If the outcome has a prespecified clinical decision threshold, analyse it as a binary outcome (Nominal) instead of relying on the exploratory split above.</em>
                 </div>
             `;
         }

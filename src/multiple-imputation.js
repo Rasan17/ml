@@ -69,7 +69,7 @@ function saveImputedData() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    setImputedDataStatus(`💾 Saved ${file.entries.length} set${file.entries.length === 1 ? '' : 's'} of imputed data. The file contains patient data: keep it as securely as the original dataset.`);
+    setImputedDataStatus(`Saved ${file.entries.length} set${file.entries.length === 1 ? '' : 's'} of imputed data. The file contains patient data: keep it as securely as the original dataset.`);
 }
 
 function loadImputedDataFile(file) {
@@ -85,7 +85,7 @@ function loadImputedDataFile(file) {
         });
         while (miCache.size > MI_CACHE_SIZE) miCache.delete(miCache.keys().next().value);
         updateImputedDataButtons();
-        setImputedDataStatus(`📂 Loaded ${added} set${added === 1 ? '' : 's'} of imputed data${data.dataset ? ` (saved for "${data.dataset}")` : ''}. They are used automatically when you train on exactly the same patients with the same variable settings, number of imputations and seed; otherwise the imputation is run as usual.`);
+        setImputedDataStatus(`Loaded ${added} set${added === 1 ? '' : 's'} of imputed data${data.dataset ? ` (saved for "${data.dataset}")` : ''}. They are used automatically when you train on exactly the same patients with the same variable settings, number of imputations and seed; otherwise the imputation is run as usual.`);
     };
     reader.readAsText(file);
 }
@@ -168,7 +168,7 @@ function updateImputationEstimate() {
     const t = s => (s < 10 ? 'a few seconds' : s < 60 ? `about ${Math.round(s / 5) * 5} seconds` : `about ${Math.round(s / 60)} minute${Math.round(s / 60) === 1 ? '' : 's'}`);
     box.style.display = 'block';
     const foldRows = Math.round(rows * 0.8 * 0.8), foldSec = estimateImputationSeconds(foldRows, nPred, m), bootSec = estimateImputationSeconds(rows, nPred, 1);
-    box.innerHTML = `⏱️ For ${rows.toLocaleString('en-GB')} patients and ${nPred} predictors, the imputation takes ${t(est)} for the final models (twice with Option A when they are retrained on all patients), and each selected model is trained ${m} times. When cross-validation is used (tuning, model selection, recalibration) MICE is repeated in each of the 5 folds (${t(foldSec)} each, once for all models); with bootstrap validation (Option C) one MICE run is added to every resample (${t(bootSec)} each, for example ${t(bootSec * 200)} for 200 resamples per model). It runs in the background: the page stays usable and Force Stop works. Keep this window in front while it runs.`;
+    box.innerHTML = `For ${rows.toLocaleString('en-GB')} patients and ${nPred} predictors, the imputation takes ${t(est)} for the final models (twice with Option A when they are retrained on all patients), and each selected model is trained ${m} times. When cross-validation is used (tuning, model selection, recalibration) MICE is repeated in each of the 5 folds (${t(foldSec)} each, once for all models); with bootstrap validation (Option C) one MICE run is added to every resample (${t(bootSec)} each, for example ${t(bootSec * 200)} for 200 resamples per model). It runs in the background: the page stays usable and Force Stop works. Keep this window in front while it runs.`;
 }
 
 export { clearImputationCache, loadImputedDataFile, saveImputedData, updateImputedDataButtons, updateImputationEstimate, readMultipleImputation, prepareMultipleImputation, fitPooledModel, estimateImputationSeconds };

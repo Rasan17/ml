@@ -25,7 +25,7 @@ function renderPipelineStep5() {
     if (smotencRes.applied) {
         contentHtml = `
             <div class="pipeline-alert pipeline-alert-warning" style="margin-bottom: 20px;">
-                <div style="font-size: 20px;">⚠️</div>
+                <div style="font-size: 20px;"><span class="ico ico-warn" aria-hidden="true"></span></div>
                 <div>
                     <strong>Class Imbalance Detected:</strong><br>
                     ${escapeHtml(smotencRes.reason)}<br>
@@ -59,7 +59,7 @@ function renderPipelineStep5() {
     } else {
         contentHtml = `
             <div class="pipeline-alert pipeline-alert-success" style="margin-bottom: 20px;">
-                <div style="font-size: 20px;">✅</div>
+                <div style="font-size: 20px;"><span class="ico ico-check" aria-hidden="true"></span></div>
                 <div>
                     <strong>No Synthetic Resampling Applied:</strong><br>
                     ${escapeHtml(smotencRes.reason || 'No synthetic resampling needed.')}
@@ -206,7 +206,6 @@ function renderRfImportanceChart() {
         if (idx === topCount) {
             chartHtml += `
                 <div class="cutoff-line-notice">
-                    <span>✂️</span>
                     <span><strong>Bottom 30% Cutoff:</strong> Features below this line are removed for k-NN and Naive Bayes only in Step 7 (other models use all surviving features). Click <strong>↩️ Reinstate</strong> to keep a feature for k-NN and Naive Bayes anyway (for example, if it is clinically important). MDI importance is computed on the SMOTENC-balanced training set and can favour features with many distinct values.</span>
                 </div>
             `;
@@ -218,7 +217,7 @@ function renderRfImportanceChart() {
                         ${isPruned ? 'Bottom 30%' : 'Top 70%'}
                     </span>`;
         const action = !isBottomTier ? '' : (isReinstated
-            ? `<button type="button" class="btn btn-outline btn-sm" ${actionAttrs('pipelineToggleReinstateFeature', r.name)} title="Remove this feature again for k-NN and Naive Bayes">✂️ Remove again</button>`
+            ? `<button type="button" class="btn btn-outline btn-sm" ${actionAttrs('pipelineToggleReinstateFeature', r.name)} title="Remove this feature again for k-NN and Naive Bayes">Remove again</button>`
             : `<button type="button" class="btn btn-outline btn-sm" ${actionAttrs('pipelineToggleReinstateFeature', r.name)} title="Keep this feature for k-NN and Naive Bayes in Step 7">↩️ Reinstate</button>`);
 
         chartHtml += `

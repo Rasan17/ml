@@ -482,6 +482,10 @@ test.describe('first visit', () => {
         await page.goto('/index.html');
         await expect(page.locator('#ui-level-select')).toHaveValue('beginner');
         await expect(page.locator('.ui-level-note')).toBeVisible();
+        // A simpler first screen: settings files and the separate pipeline launcher appear from Intermediate
+        await expect(page.locator('#settings-save-btn')).toBeHidden();
+        await expect(page.locator('#pipeline-direct-launch-btn')).toBeHidden();
+        await expect(page.locator('#clear-session-btn')).toBeVisible();
         expect(errors).toEqual([]);
     });
 });

@@ -54,7 +54,7 @@ function renderVariableConfigGrid() {
                 ${a.autoMetaReason && cfg.role === 'meta' ? `<div style="font-size: 11px; color: var(--text-muted);">ℹ️ ${escapeHtml(a.autoMetaReason)}</div>` : ''}
                 ${renderTargetAndOrdinalControls(col, colIdx, a, cfg)}
                 ${cfg.role === 'feature' && cfg.type === 'nominal' && (a.distinctCount > 20 || (a.validCount > 0 && a.distinctCount / a.validCount > 0.5))
-                    ? `<div style="font-size: 11px; color: var(--accent-amber);">⚠️ High cardinality (${a.distinctCount} levels): one-hot encoding adds a column per level, which slows training and invites overfitting. If this is an identifier, set it to Meta / ID; otherwise consider grouping rare levels.</div>`
+                    ? `<div style="font-size: 11px; color: var(--accent-amber);">⚠︎ High cardinality (${a.distinctCount} levels): one-hot encoding adds a column per level, which slows training and invites overfitting. If this is an identifier, set it to Meta / ID; otherwise consider grouping rare levels.</div>`
                     : ''}
             </div>
         `;
@@ -71,7 +71,7 @@ function renderVariableConfigGrid() {
             .sort((x, y) => analysis[y].distinctCount - analysis[x].distinctCount)
             .map(h => `${h} (${analysis[h].distinctCount.toLocaleString('en-GB')})`);
         gridHtml = `<div style="grid-column: 1 / -1; padding: 12px 14px; border-radius: var(--radius-sm); background: rgba(244, 63, 94, 0.12); border: 1px solid var(--accent-rose); color: var(--text-primary); font-size: 13px;">
-            ⚠️ <strong>Too many encoded predictor columns (${encodedWidth.toLocaleString('en-GB')}; limit 2,000).</strong>
+            <span class="ico ico-warn" aria-hidden="true"></span> <strong>Too many encoded predictor columns (${encodedWidth.toLocaleString('en-GB')}; limit 2,000).</strong>
             Categorical predictors are one-hot encoded, one column per category, and this would exceed browser memory.
             ${worst.length ? `Set these to <strong>Meta / ID</strong>: ${escapeHtml(worst.join(', '))}.` : ''}
         </div>` + gridHtml;
@@ -151,8 +151,8 @@ function renderVariableConfigGrid() {
             const hint = document.getElementById(e.target.id + '-hint');
             if (hint) {
                 hint.textContent = unknown.length > 0
-                    ? `⚠️ Not found in the data (ignored): ${unknown.join(', ')}`
-                    : (levels.length > 0 ? '✓ Custom order saved' : 'Using automatic order');
+                    ? `⚠︎ Not found in the data (ignored): ${unknown.join(', ')}`
+                    : (levels.length > 0 ? '✓Custom order saved' : 'Using automatic order');
             }
         });
     });
@@ -243,7 +243,7 @@ function renderTargetAndOrdinalControls(col, colIdx, a, cfg) {
             <div class="var-row-control" style="flex-direction: column; align-items: stretch; gap: 4px;">
                 <label for="var-order-${colIdx}">Level order (lowest &rarr; highest, comma-separated)</label>
                 <input type="text" id="var-order-${colIdx}" class="control-input var-ordinal-order" data-col="${escapeHtml(col)}" value="${escapeHtml(current.join(', '))}">
-                <span id="var-order-${colIdx}-hint" style="font-size: 11px; color: var(--text-muted);">${Array.isArray(cfg.ordinalOrder) && cfg.ordinalOrder.length ? '✓ Custom order saved' : 'Automatic order: please check it matches the clinical order'}</span>
+                <span id="var-order-${colIdx}-hint" style="font-size: 11px; color: var(--text-muted);">${Array.isArray(cfg.ordinalOrder) && cfg.ordinalOrder.length ? '✓Custom order saved' : 'Automatic order: please check it matches the clinical order'}</span>
             </div>
         `;
     }
@@ -286,7 +286,7 @@ function renderCompleteCaseBox(rows, activeCols) {
                         The same rule is applied to the test data.
                     </span>
                     ${heavy ? `<span style="display: block; font-size: 12px; color: var(--accent-amber); margin-top: 4px;">
-                        ⚠️ This removes a large share of the data${remaining < 30 ? ' and leaves very few rows' : ''}. Complete-case analysis is unbiased only if
+                        ⚠︎ This removes a large share of the data${remaining < 30 ? ' and leaves very few rows' : ''}. Complete-case analysis is unbiased only if
                         values are missing completely at random; otherwise imputation is usually preferable.</span>` : ''}
                 </span>
             </label>

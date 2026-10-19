@@ -37,13 +37,13 @@ const AppState = {
 
 // Model Metadata & Lookup
 const MODEL_INFO = {
-    nn: { name: 'Neural Network (MLP)', short: 'Neural Network', tag: 'Neural Network', pillClass: 'pill-target', icon: '🧠' },
-    rf: { name: 'Random Forest', short: 'Random Forest', tag: 'Ensemble Trees', pillClass: 'pill-feature', icon: '🌲' },
-    glm: { name: 'Logistic / Ridge Regression', short: 'GLM / Regression', tag: 'Generalized Linear', pillClass: 'pill-continuous', icon: '📈' },
-    knn: { name: 'k-Nearest Neighbors (k-NN)', short: 'k-NN', tag: 'Instance-Based', pillClass: 'pill-ordinal', icon: '🎯' },
-    nb: { name: 'Naive Bayes (Gaussian + Bernoulli)', short: 'Naive Bayes', tag: 'Probabilistic', pillClass: 'pill-nominal', icon: '🎲' },
-    gbm: { name: 'Gradient-Boosted Trees', short: 'Gradient Boosting', tag: 'Boosting', pillClass: 'pill-continuous', icon: '🌿' },
-    ensemble: { name: 'Voting / Weighted Ensemble', short: 'Ensemble', tag: 'Voting Ensemble', pillClass: 'pill-target', icon: '⚡' }
+    nn: { name: 'Neural Network (MLP)', short: 'Neural Network', tag: 'Neural Network', pillClass: 'pill-target', icon: '<span class="ico ico-network" aria-hidden="true"></span>' },
+    rf: { name: 'Random Forest', short: 'Random Forest', tag: 'Ensemble Trees', pillClass: 'pill-feature', icon: '<span class="ico ico-tree" aria-hidden="true"></span>' },
+    glm: { name: 'Logistic / Ridge Regression', short: 'GLM / Regression', tag: 'Generalized Linear', pillClass: 'pill-continuous', icon: '<span class="ico ico-trend" aria-hidden="true"></span>' },
+    knn: { name: 'k-Nearest Neighbors (k-NN)', short: 'k-NN', tag: 'Instance-Based', pillClass: 'pill-ordinal', icon: '<span class="ico ico-target" aria-hidden="true"></span>' },
+    nb: { name: 'Naive Bayes (Gaussian + Bernoulli)', short: 'Naive Bayes', tag: 'Probabilistic', pillClass: 'pill-nominal', icon: '<span class="ico ico-shuffle" aria-hidden="true"></span>' },
+    gbm: { name: 'Gradient-Boosted Trees', short: 'Gradient Boosting', tag: 'Boosting', pillClass: 'pill-continuous', icon: '<span class="ico ico-layers" aria-hidden="true"></span>' },
+    ensemble: { name: 'Voting / Weighted Ensemble', short: 'Ensemble', tag: 'Voting Ensemble', pillClass: 'pill-target', icon: '<span class="ico ico-merge" aria-hidden="true"></span>' }
 };
 const ALL_MODEL_IDS = ['nn', 'rf', 'gbm', 'glm', 'knn', 'nb', 'ensemble'];
 
@@ -108,7 +108,7 @@ function renderExploratoryCutoffTable(ev, compact) {
                 <span>"Spec" (&lt; cutoff): <strong>${pct(ev.specificity)}</strong></span>
             </div>
             <div style="margin-top: 6px; padding: 6px 8px; background: var(--bg-surface-subtle); border-radius: var(--radius-sm); font-size: 10.5px; color: var(--text-muted); line-height: 1.35;">
-                ⚠️ <em>Exploratory only: the cutoff is the training-data median, not a prespecified clinical threshold, so these are not diagnostic accuracy measures.</em>
+                <span class="ico ico-warn" aria-hidden="true"></span> <em>Exploratory only: the cutoff is the training-data median, not a prespecified clinical threshold, so these are not diagnostic accuracy measures.</em>
             </div>
         </div>
     `;
@@ -130,7 +130,7 @@ function probabilityLabel(type) {
 // Display name for a trained model, flagging a neural network that fell back to a linear model
 function displayModelName(modelId, model) {
     const base = (MODEL_INFO[modelId] && MODEL_INFO[modelId].name) || String(modelId).toUpperCase();
-    return model && model.usedFallback ? `${base} ⚠️ linear fallback (not a neural network)` : base;
+    return model && model.usedFallback ? `${base} ⚠︎ linear fallback (not a neural network)` : base;
 }
 
 // Strict integer seed parsing: parseInt would read "1e6" as 1 and "42.5" as 42, silently using a

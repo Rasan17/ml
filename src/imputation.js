@@ -37,7 +37,7 @@ function renderImputationTable() {
     }
     const mice = !AppState.completeCase && readMultipleImputation() > 0;
     const methodsHint = document.getElementById('impute-methods-hint');
-    if (methodsHint) methodsHint.textContent = mice ? '💡 Multiple imputation: MICE fills every incomplete predictor, in the final models, every cross-validation fold and every bootstrap resample.' : '💡 Continuous: Median, Mean, KNN, Constant • Ordinal: Mode, Median • Nominal: Mode, "Missing" category';
+    if (methodsHint) methodsHint.textContent = mice ? 'Multiple imputation: MICE fills every incomplete predictor, in the final models, every cross-validation fold and every bootstrap resample.' : 'Continuous: Median, Mean, KNN, Constant • Ordinal: Mode, Median • Nominal: Mode, "Missing" category';
 
     let rowsHtml = '';
     let missingColCount = 0;
@@ -127,15 +127,15 @@ function renderImputationTable() {
     if (DOM.applyImputationBtn) {
         const complete = missingColCount === 0;
         DOM.applyImputationBtn.dataset.mode = complete ? 'complete' : 'impute';
-        DOM.applyImputationBtn.textContent = complete ? '✓ Full data | Move Next'
-            : (AppState.completeCase ? '⚡ Remove Incomplete Rows & Validate Dataset' : mice ? '⚡ Continue with Multiple Imputation (MICE)' : '⚡ Apply Imputation & Validate Dataset');
+        DOM.applyImputationBtn.textContent = complete ? '✓Full data | Move Next'
+            : (AppState.completeCase ? 'Remove Incomplete Rows & Validate Dataset' : mice ? 'Continue with Multiple Imputation (MICE)' : 'Apply Imputation & Validate Dataset');
     }
 
     if (missingColCount === 0) {
         DOM.imputeTableBody.innerHTML = `
             <tr>
                 <td colspan="6" style="text-align: center; padding: 28px; color: var(--accent-emerald);">
-                    ✓ No missing data detected in active variables. The dataset is complete and ready for machine learning!
+                    ✓No missing data detected in active variables. The dataset is complete and ready for machine learning!
                 </td>
             </tr>
         `;
@@ -178,7 +178,7 @@ function executeImputation() {
             const cells = res.audit.filter(x => x.type !== 'drop_rows').reduce((a, x) => a + (x.imputedCount || 0), 0);
             DOM.imputeAuditBox.innerHTML = `
             <div style="background: var(--bg-surface-elevated); border: 1px solid var(--accent-emerald); border-radius: var(--radius-md); padding: 16px;">
-                <h4 style="color: var(--accent-emerald);">✓ Multiple imputation selected: ${rows.length} records kept</h4>
+                <h4 style="color: var(--accent-emerald);">✓Multiple imputation selected: ${rows.length} records kept</h4>
                 <p style="margin: 8px 0 0; font-size: 13px; color: var(--text-secondary);">${cells} missing value(s) in ${res.audit.filter(x => x.type !== 'drop_rows').length} predictor(s) will be filled by MICE when the models are trained (${m} completed datasets, each built over 10 rounds), from the training patients only and without the outcome. The same procedure is repeated inside every cross-validation fold and bootstrap resample; no single-imputation method is used.</p>
             </div>`;
             DOM.toStep4Btn.disabled = false;
@@ -189,8 +189,8 @@ function executeImputation() {
             <div style="background: var(--bg-surface-elevated); border: 1px solid var(--accent-emerald); border-radius: var(--radius-md); padding: 16px;">
                 <h4 style="color: var(--accent-emerald); display: flex; align-items: center; gap: 8px;">
                     ${AppState.completeCase
-                        ? `✓ Complete-case dataset ready: ${res.totalRowsAfter} complete records (${rows.length - res.totalRowsAfter} row(s) with an empty cell removed; no imputation)`
-                        : `✓ Imputation Complete: ${res.totalRowsAfter} clean records ready`}
+                        ? `✓Complete-case dataset ready: ${res.totalRowsAfter} complete records (${rows.length - res.totalRowsAfter} row(s) with an empty cell removed; no imputation)`
+                        : `✓Imputation Complete: ${res.totalRowsAfter} clean records ready`}
                 </h4>
                 <ul style="margin: 10px 0 0 20px; font-size: 13px; color: var(--text-secondary);">
                     ${res.audit.length === 0 ? '<li>No missing cells required imputation.</li>' : res.audit.map(a => `

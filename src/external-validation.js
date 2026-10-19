@@ -58,7 +58,7 @@ async function validateOnLabelledCohort(rows, fileName) {
     const test = DataEngine.prepareTestingDataset(rows, prep);
     const name = displayModelName(AppState.deployedModelId || AppState.selectedModelId, model);
     if (test.X.length < 10) {
-        box.innerHTML = `<div class="cal-panel"><div class="tune-title">🧪 Validation on a labelled cohort</div><p class="tune-muted">Only ${test.X.length} patient(s) have a usable value of "${escapeHtml(prep.targetCol)}"; at least 10 are needed (and far more for a meaningful validation).</p></div>`;
+        box.innerHTML = `<div class="cal-panel"><div class="tune-title">Validation on a labelled cohort</div><p class="tune-muted">Only ${test.X.length} patient(s) have a usable value of "${escapeHtml(prep.targetCol)}"; at least 10 are needed (and far more for a meaningful validation).</p></div>`;
         return null;
     }
     const threshold = AppState.evalResults && AppState.evalResults.decisionThreshold;
@@ -73,8 +73,8 @@ async function validateOnLabelledCohort(rows, fileName) {
     box.innerHTML = `
         <div class="cal-panel">
             <div class="cal-head">
-                <div class="tune-title">🧪 Validation of ${escapeHtml(name)} on ${escapeHtml(fileName || 'the uploaded patients')}</div>
-                <button type="button" id="external-validation-report-btn" class="btn btn-secondary btn-sm" title="Readable validation report; print it to PDF from the browser">🖨️ Printable Validation Report</button>
+                <div class="tune-title">Validation of ${escapeHtml(name)} on ${escapeHtml(fileName || 'the uploaded patients')}</div>
+                <button type="button" id="external-validation-report-btn" class="btn btn-secondary btn-sm" title="Readable validation report; print it to PDF from the browser">Printable Validation Report</button>
             </div>
             <p class="tune-muted">The file contains the outcome "${escapeHtml(prep.targetCol)}", so the model was scored on these ${test.X.length} patients exactly as saved: nothing was refitted.
                 ${ev.validationCohort.missingOutcome ? `${ev.validationCohort.missingOutcome} row(s) without a usable outcome were left out. ` : ''}${ev.validationCohort.unknownClass ? `${ev.validationCohort.unknownClass} row(s) with an outcome category the model does not know were left out. ` : ''}${ev.validationCohort.imputedCells ? `${ev.validationCohort.imputedCells} blank or unrecognised predictor value(s) were filled with the model's own missing-data method. ` : ''}

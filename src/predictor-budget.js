@@ -53,7 +53,7 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
     const box = document.getElementById(containerId);
     if (!box) return;
     if (!rows || !rows.length || !targetCol || !columnConfigs[targetCol]) {
-        box.innerHTML = '<div class="cal-panel"><div class="tune-title">📐 How many predictors?</div><p class="tune-muted">Choose the outcome (Target) to see how many predictors the sample can support.</p></div>';
+        box.innerHTML = '<div class="cal-panel"><div class="tune-title">How many predictors?</div><p class="tune-muted">Choose the outcome (Target) to see how many predictors the sample can support.</p></div>';
         return;
     }
     const tcfg = columnConfigs[targetCol];
@@ -103,19 +103,19 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
     const idLike = perCol.filter(c => c.levels && c.levels > 20 && c.levels >= 0.5 * withOutcome.length);
     const counted = candidates !== null && candidates > P ? `the ${candidates} candidate parameters considered` : 'your selection';
     const statusText = {
-        ok: `✓ ${counted === 'your selection' ? 'Your selection meets' : `The ${candidates} candidate parameters considered meet`} these planning criteria for regression models, under the stated assumptions (anticipated R², one record per patient unless patients are grouped). This is a planning guide, not proof that a model will perform well.`,
-        caution: `⚠️ ${counted === 'your selection' ? 'Your selection is' : `The ${candidates} candidate parameters considered are`} above the recommended number but not grossly so: expect some overfitting; penalised (ridge) regression and cross-validated tuning help.`,
-        over: '⚠️ <strong>Too many predictor parameters for this sample</strong>: models are likely to overfit (good results in these patients, worse in new ones). Reduce the number of predictors, group rare categories, or add patients.'
+        ok: `✓${counted === 'your selection' ? 'Your selection meets' : `The ${candidates} candidate parameters considered meet`} these planning criteria for regression models, under the stated assumptions (anticipated R², one record per patient unless patients are grouped). This is a planning guide, not proof that a model will perform well.`,
+        caution: `⚠︎ ${counted === 'your selection' ? 'Your selection is' : `The ${candidates} candidate parameters considered are`} above the recommended number but not grossly so: expect some overfitting; penalised (ridge) regression and cross-validated tuning help.`,
+        over: '⚠︎ <strong>Too many predictor parameters for this sample</strong>: models are likely to overfit (good results in these patients, worse in new ones). Reduce the number of predictors, group rare categories, or add patients.'
     }[status];
 
     box.innerHTML = `
         <div class="cal-panel">
-            <div class="tune-title">📐 How many predictors can this sample support?</div>
+            <div class="tune-title">How many predictors can this sample support?</div>
             <p class="tune-muted" style="margin-top: 4px;">${headline} Your selection: <strong>${featureCols.length}</strong> predictor(s) = <strong>${P}</strong> parameter(s)${candidates !== null && candidates > P ? `, from <strong>${candidates}</strong> candidate parameters considered` : ''}.</p>
             <div class="${status === 'ok' ? 'explain-box' : 'tune-warn'}" style="margin-top: 6px;">${statusText}</div>
             <table class="data-table thr-table budget-table"><thead><tr><th>Guide</th><th>Largest number of parameters</th><th>Comment</th></tr></thead>
                 <tbody>${rows4.map(([g, v, c]) => `<tr><td>${escapeHtml(g)}</td><td><strong>${v}</strong>${Pv > v ? ' <span class="tune-sd">(you have ' + Pv + ')</span>' : ''}</td><td>${escapeHtml(c)}</td></tr>`).join('')}</tbody></table>
-            ${idLike.length ? `<div class="tune-warn">⚠️ <strong>Looks like an identifier:</strong> ${idLike.map(c => `"${escapeHtml(c.col)}" (${c.levels} categories in ${withOutcome.length} records)`).join(', ')}. Untick it (or set it to Meta / ID): identifiers cannot predict new patients, and their values would be stored in exported model files.</div>` : ''}
+            ${idLike.length ? `<div class="tune-warn"><span class="ico ico-warn" aria-hidden="true"></span> <strong>Looks like an identifier:</strong> ${idLike.map(c => `"${escapeHtml(c.col)}" (${c.levels} categories in ${withOutcome.length} records)`).join(', ')}. Untick it (or set it to Meta / ID): identifiers cannot predict new patients, and their values would be stored in exported model files.</div>` : ''}
             ${multi.length ? `<p class="tune-muted">Categorical predictors use one parameter per category beyond the first: ${multi.map(c => `"${escapeHtml(c.col)}" ${c.levels} categories = ${c.df}`).join('; ')}. Grouping rare categories saves parameters.</p>` : ''}
             ${groupOf ? '' : `<p class="tune-muted">${escapeHtml(UNIT_NOTE)}</p>`}
             <p class="tune-muted">A parameter is one number the model estimates: 1 for each numerical or ordered predictor, and (categories − 1) for an unordered categorical one. Choose predictors from clinical knowledge and earlier studies before looking at their association with the outcome: selecting them by p-value in the same patients makes the model look better than it is, and every predictor considered counts towards overfitting, not only those kept. SMOTENC and other balancing add no real patients. Riley et al. (BMJ 2020) with the default anticipated R² (15% of the maximum, as in pmsampsize; Step 4 lets you change it); 20–50 and 200 per parameter: van der Ploeg, Austin and Steyerberg, “Modern modelling techniques are data hungry” (BMC Med Res Methodol 2014;14:137).</p>
@@ -167,14 +167,14 @@ function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, col
         const needed = need.per * P, better = need.better ? need.better * P : null;
         let verdict, cls;
         if (need.kind === 'flexible') {
-            if (E >= needed) { verdict = '✓ Meets this guide (stability still not assured)'; cls = 'ok'; }
-            else if (E >= needed / 4) { verdict = '⚠️ Exploratory only: expect overfitting'; cls = 'warn'; }
-            else { verdict = '✗ Far too little data: results unreliable'; cls = 'bad'; }
+            if (E >= needed) { verdict = '✓Meets this guide (stability still not assured)'; cls = 'ok'; }
+            else if (E >= needed / 4) { verdict = '⚠︎ Exploratory only: expect overfitting'; cls = 'warn'; }
+            else { verdict = '✗Far too little data: results unreliable'; cls = 'bad'; }
         } else {
             const rileyOk = id === 'glm' && riley !== null ? P <= riley : true;
-            if (E >= (better || needed) && rileyOk) { verdict = '✓ Meets these planning criteria'; cls = 'ok'; }
-            else if (E >= needed) { verdict = '⚠️ Borderline: fewer predictors would be safer'; cls = 'warn'; }
-            else { verdict = '✗ Too little data for this many predictors'; cls = 'bad'; }
+            if (E >= (better || needed) && rileyOk) { verdict = '✓Meets these planning criteria'; cls = 'ok'; }
+            else if (E >= needed) { verdict = '⚠︎ Borderline: fewer predictors would be safer'; cls = 'warn'; }
+            else { verdict = '✗Too little data for this many predictors'; cls = 'bad'; }
         }
         const approx = v => { const d = Math.pow(10, Math.max(0, Math.floor(Math.log10(Math.max(1, v))) - 1)); return fmt(Math.round(v / d) * d); }; // 2 significant figures
         const patients = isClass ? ` (≈ ${approx(needed / share)}${better ? `–${approx(better / share)}` : ''} patients)` : '';
@@ -186,7 +186,7 @@ function renderModelSampleGuide(containerId, { rows, featureCols, targetCol, col
     if (!rowsHtml) { box.innerHTML = ''; return; }
     box.innerHTML = `
         <div class="cal-panel">
-            <div class="tune-title">📏 Enough data for each model?</div>
+            <div class="tune-title">Enough data for each model?</div>
             <p class="tune-muted" style="margin-top: 4px;">Training set${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}: <strong>${fmt(nTrain)}</strong> ${units.unit}, <strong>${fmt(E)}</strong> ${isClass ? 'in the smaller outcome group' : 'in all'}; <strong>${P}</strong> predictor parameter(s)${candidateCols ? ' (all candidates considered)' : ''}.${riley !== null ? ` The Riley criteria allow logistic regression up to <strong>${riley}</strong> parameter(s) here.` : ''}</p>
             <table class="data-table thr-table budget-table"><thead><tr><th>Model</th><th>Needed for your ${P} parameter(s)</th><th>Your Training set</th></tr></thead>
                 <tbody>${rowsHtml}</tbody></table>

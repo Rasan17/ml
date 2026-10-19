@@ -456,15 +456,15 @@ function setupEventListeners() {
         refreshModelSampleGuide();
         if (!DOM.trainModelBtn) return;
         // Time-to-event outcome (Step 2): Step 4 fits a Cox model whatever model card was selected before
-        if (AppState.outcomeType === 'survival') { DOM.trainModelBtn.textContent = '⏱️ Fit & Validate Cox Model (time-to-event)'; return; }
+        if (AppState.outcomeType === 'survival') { DOM.trainModelBtn.textContent = 'Fit & Validate Cox Model (time-to-event)'; return; }
         const count = AppState.selectedModelIds.length;
         if (count === 1) {
             const mInfo = MODEL_INFO[AppState.selectedModelIds[0]] || { short: AppState.selectedModelIds[0].toUpperCase() };
-            DOM.trainModelBtn.textContent = `🚀 Train & Test 1 Model (${mInfo.short})`;
+            DOM.trainModelBtn.textContent = `Train & Test 1 Model (${mInfo.short})`;
         } else if (count === ALL_MODEL_IDS.length) {
-            DOM.trainModelBtn.textContent = `🏆 Run Full Tournament (Train & Test All ${ALL_MODEL_IDS.length} Models)`;
+            DOM.trainModelBtn.textContent = `Run Full Tournament (Train & Test All ${ALL_MODEL_IDS.length} Models)`;
         } else {
-            DOM.trainModelBtn.textContent = `🚀 Train & Benchmark ${count} Selected Models`;
+            DOM.trainModelBtn.textContent = `Train & Benchmark ${count} Selected Models`;
         }
     }
 

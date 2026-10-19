@@ -77,13 +77,13 @@ function runSinglePrediction() {
     const prep = AppState.prepMeta;
     const inputWarningHtml = inputIssues.length > 0
         ? `<div style="font-size: 11.5px; color: var(--accent-amber); margin-top: 6px; font-weight: 600;">
-                ⚠️ Blank input(s) filled as in training (the fitted missing-data method); unrecognised values replaced with the most frequent training category / middle rank: ${escapeHtml(inputIssues.map(i => i.column).join(', '))}
+                ⚠︎ Blank input(s) filled as in training (the fitted missing-data method); unrecognised values replaced with the most frequent training category / middle rank: ${escapeHtml(inputIssues.map(i => i.column).join(', '))}
            </div>`
         : '';
     const fmtNum = v => (Math.abs(v) >= 100 ? v.toFixed(0) : Number(v.toPrecision(3)).toString());
     const rangeWarningHtml = outOfRange.length > 0
         ? `<div style="font-size: 11.5px; color: var(--accent-rose); margin-top: 6px; font-weight: 600;">
-                ⚠️ Outside the range of the training patients: ${outOfRange.map(o => `${escapeHtml(o.column)} = ${escapeHtml(fmtNum(o.value))} (training ${escapeHtml(fmtNum(o.min))}–${escapeHtml(fmtNum(o.max))})`).join('; ')}. Check for a typing error; if the value is correct, the prediction is an extrapolation beyond the data the model learned from and may be unreliable.
+                ⚠︎ Outside the range of the training patients: ${outOfRange.map(o => `${escapeHtml(o.column)} = ${escapeHtml(fmtNum(o.value))} (training ${escapeHtml(fmtNum(o.min))}–${escapeHtml(fmtNum(o.max))})`).join('; ')}. Check for a typing error; if the value is correct, the prediction is an extrapolation beyond the data the model learned from and may be unreliable.
            </div>`
         : '';
 
@@ -91,7 +91,7 @@ function runSinglePrediction() {
     const typ = DataEngine.typicality(xVector, prepTypicality(prep));
     const typicalityHtml = typ && typ.level !== 'typical'
         ? `<div style="font-size: 11.5px; color: var(--accent-rose); margin-top: 6px; font-weight: 600;">
-                ⚠️ Unusual patient: this combination of predictor values is ${typ.level === 'very unusual' ? 'more atypical than 99.9%' : 'more atypical than 99%'} of the training patients (Mahalanobis distance), even if each value is within range. The model has seen few patients like this, so the prediction may be unreliable. This is a screening aid, not proof that the prediction is wrong: check the values, and judge the prediction clinically.
+                ⚠︎ Unusual patient: this combination of predictor values is ${typ.level === 'very unusual' ? 'more atypical than 99.9%' : 'more atypical than 99%'} of the training patients (Mahalanobis distance), even if each value is within range. The model has seen few patients like this, so the prediction may be unreliable. This is a screening aid, not proof that the prediction is wrong: check the values, and judge the prediction clinically.
            </div>`
         : '';
 
@@ -112,7 +112,7 @@ function runSinglePrediction() {
     const activeSeed = seedOf(AppState.trainedModel && AppState.trainedModel.seed) ?? seedOf(AppState.evalResults && AppState.evalResults.seed);
 
     const seedSnippet = activeSeed !== null
-        ? ` &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px; cursor: pointer;" ${actionAttrs('copySeedToClipboard', activeSeed)} title="Click to copy reproducibility seed">🌱 ${activeSeed} 📋</code>`
+        ? ` &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px; cursor: pointer;" ${actionAttrs('copySeedToClipboard', activeSeed)} title="Click to copy reproducibility seed">seed ${activeSeed} </code>`
         : '';
 
     if (prep.isClassification) {

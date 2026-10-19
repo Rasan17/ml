@@ -131,7 +131,7 @@ function start() {
         // The file dialog opens straight away (a dialog box first would block it in some browsers); the steps are shown below
         document.getElementById('model-import-btn')?.click();
         const hint = document.getElementById('task-hint');
-        if (hint) { hint.style.display = 'block'; hint.textContent = 'Validating a shared model: 1) choose the model file in the window that opened (or click "📥 Import trained model"); 2) in Step 6, upload a CSV of your patients that includes the outcome column. You get discrimination, calibration and clinical usefulness on your patients, with a printable validation report; no patient data leave your computer.'; }
+        if (hint) { hint.style.display = 'block'; hint.textContent = 'Validating a shared model: 1) choose the model file in the window that opened (or click "Import trained model"); 2) in Step 6, upload a CSV of your patients that includes the outcome column. You get discrimination, calibration and clinical usefulness on your patients, with a printable validation report; no patient data leave your computer.'; }
     });
     document.getElementById('task-demo')?.addEventListener('click', () => document.getElementById('sample-shunt-large-btn')?.click());
     // Clear session: stops background work and reloads the page, which discards every dataset, result, model and

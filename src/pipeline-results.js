@@ -113,13 +113,13 @@ function renderTooGoodToBeTrueCheck(sorted, isClassification) {
     const checks = [];
     checks.push(`<strong>Data leakage:</strong> make sure no predictor was recorded after the outcome, or restates it (e.g. a post-operative score used to predict shunt response)${separators.length ? `; look especially at ${separators.slice(0, 3).map(s => `<strong>${escapeHtml(s.col)}</strong>`).join(', ')}` : ''}. If in doubt, exclude the variable (Step 4) and re-run: a large drop in performance suggests it was leaking the answer.${separators.length > 2 ? ' Here several predictors each separate the groups on their own, so removing one will change little; that pattern is more typical of very clean or simulated data (such as the sample cohorts) than of leakage through a single variable.' : ''}`);
     checks.push(repeated > 0
-        ? `<strong>Repeated patients:</strong> ⚠️ ${repeated} test patient(s) have exactly the same predictor values as a training patient. If these are the same people (e.g. repeat visits), the test is not independent; keep each patient in one set only.`
-        : `<strong>Repeated patients:</strong> ✓ no test patient has exactly the same predictor values as a training patient.`);
+        ? `<strong>Repeated patients:</strong> ⚠︎ ${repeated} test patient(s) have exactly the same predictor values as a training patient. If these are the same people (e.g. repeat visits), the test is not independent; keep each patient in one set only.`
+        : `<strong>Repeated patients:</strong> ✓no test patient has exactly the same predictor values as a training patient.`);
     checks.push(`<strong>Independent confirmation:</strong> test the model on a separate cohort (Option B: separate test file), ideally from another time period or hospital, before relying on it clinically.`);
 
     return `
         <div class="too-good-box" role="note">
-            <div class="too-good-title">🔎 Too good to be true? Near-perfect test performance (best model, ${escapeHtml(best.name)}: ${metrics.join(', ')})</div>
+            <div class="too-good-title">Too good to be true? Near-perfect test performance (best model, ${escapeHtml(best.name)}: ${metrics.join(', ')})</div>
             <p>Near-perfect results are uncommon with real clinical data, but they are <strong>not necessarily wrong</strong>. In this analysis they are plausible because:</p>
             <ul>${reasons.map(r => `<li>${r}</li>`).join('')}</ul>
             <p>Before relying on the result, check:</p>
@@ -294,7 +294,7 @@ function deployPipelineModel(modelId, showNotice = true, skipRerender = false) {
     }
 
     if (showNotice) {
-        showSeedToast(`✓ "${targetItem.name}" is now the active research model for Steps 5 & 6`);
+        showSeedToast(`✓"${targetItem.name}" is now the active research model for Steps 5 & 6`);
     }
 }
 window.deployPipelineModel = deployPipelineModel;
@@ -348,7 +348,7 @@ function updatePredictionProvenanceBar() {
         const m = AppState.importedModelInfo;
         contentHtml = `
             <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="font-size: 22px;">📥</span>
+                <span style="font-size: 22px;"><span class="ico ico-download" aria-hidden="true"></span></span>
                 <div>
                     <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-cyan);">Active research model: ${escapeHtml(m.name)} &bull; Imported model file</div>
                     <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">Trained on ${escapeHtml(m.dataset || 'an unnamed dataset')}; exported ${escapeHtml((m.exportedAt || '').slice(0, 10))} with app version ${escapeHtml(m.version || '?')}. Uses the preprocessing fitted during training.</div>
@@ -365,7 +365,7 @@ function updatePredictionProvenanceBar() {
         const featCount = AppState.prepMeta ? AppState.prepMeta.featureCols.length : (AppState.pipeline.top70Features?.length || 'Optimal');
         contentHtml = `
             <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="font-size: 22px;">🔬</span>
+                <span style="font-size: 22px;"><span class="ico ico-search" aria-hidden="true"></span></span>
                 <div>
                     <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-emerald);">
                         Active research model: ${escapeHtml(m.name)} &bull; Trained via 7-Step Clinical Pipeline
@@ -376,8 +376,8 @@ function updatePredictionProvenanceBar() {
                 </div>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
-                ${hasBaseline ? `<button class="btn btn-secondary btn-sm" ${actionAttrs('switchToBaselineModel')}>🔄 Switch to Baseline Model</button>` : ''}
-                <button class="btn btn-secondary btn-sm" ${actionAttrs('goToStep', 'pipeline')}>🔬 View 7-Step Pipeline</button>
+                ${hasBaseline ? `<button class="btn btn-secondary btn-sm" ${actionAttrs('switchToBaselineModel')}>Switch to Baseline Model</button>` : ''}
+                <button class="btn btn-secondary btn-sm" ${actionAttrs('goToStep', 'pipeline')}>View 7-Step Pipeline</button>
             </div>
         `;
         if (singleBar) {
@@ -395,7 +395,7 @@ function updatePredictionProvenanceBar() {
         const featCount = AppState.prepMeta ? AppState.prepMeta.featureCols.length : 'All';
         contentHtml = `
             <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="font-size: 22px;">📋</span>
+                <span style="font-size: 22px;"><span class="ico ico-clipboard" aria-hidden="true"></span></span>
                 <div>
                     <div style="font-size: 13.5px; font-weight: 700; color: var(--accent-cyan);">
                         Active research model: ${mInfo.name} &bull; Trained via Pre-existing Standard Workflow
@@ -406,7 +406,7 @@ function updatePredictionProvenanceBar() {
                 </div>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
-                ${hasPipeline ? `<button class="btn btn-emerald btn-sm" ${actionAttrs('switchToPipelineModel')}>🔬 Switch to 7-Step Pipeline Model</button>` : `<button class="btn btn-emerald btn-sm" ${actionAttrs('goToStep', 'pipeline')}>🔬 Test 7-Step Pipeline to Compare</button>`}
+                ${hasPipeline ? `<button class="btn btn-emerald btn-sm" ${actionAttrs('switchToPipelineModel')}>Switch to 7-Step Pipeline Model</button>` : `<button class="btn btn-emerald btn-sm" ${actionAttrs('goToStep', 'pipeline')}>Test 7-Step Pipeline to Compare</button>`}
             </div>
         `;
         if (singleBar) {
@@ -471,10 +471,10 @@ function showComparisonOverlay() {
         overlay.innerHTML = `
             <div class="comparison-overlay-card">
                 <div class="comparison-overlay-spinner" aria-hidden="true"></div>
-                <div id="comparison-overlay-title" class="comparison-overlay-title">⚖️ Comparison is underway</div>
+                <div id="comparison-overlay-title" class="comparison-overlay-title">Comparison is underway</div>
                 <p class="comparison-overlay-text">The standard baseline is being trained so it can be compared with the 7-step pipeline. Please do not click other buttons until it finishes; you will be taken to the comparison automatically.</p>
                 <div id="comparison-overlay-progress" class="comparison-overlay-progress" aria-live="polite"></div>
-                <button type="button" id="comparison-overlay-stop" class="btn btn-secondary btn-sm" style="color: var(--accent-rose); border-color: rgba(244,63,94,0.4);">🛑 Stop comparison</button>
+                <button type="button" id="comparison-overlay-stop" class="btn btn-secondary btn-sm" style="color: var(--accent-rose); border-color: rgba(244,63,94,0.4);">Stop comparison</button>
             </div>`;
         document.body.appendChild(overlay);
         overlay.querySelector('#comparison-overlay-stop').addEventListener('click', () => {
@@ -533,7 +533,7 @@ window.trainStandardBaselineFromPipeline = async function () {
     const keepPipelineDeployment = AppState.deployedSource === '7step' ? AppState.deployedModelId : null;
     goToStep(4);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">⚖️ Training the standard baseline for the comparison (same ${pct}/${100 - pct} split and seed ${seed} as the pipeline). You will be returned to the comparison when it finishes...</span>`;
+    DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">Training the standard baseline for the comparison (same ${pct}/${100 - pct} split and seed ${seed} as the pipeline). You will be returned to the comparison when it finishes...</span>`;
 
     showComparisonOverlay();
     const shownAt = Date.now();
@@ -544,7 +544,7 @@ window.trainStandardBaselineFromPipeline = async function () {
         const remaining = 1500 - (Date.now() - shownAt);
         if (ok && remaining > 0) {
             const progress = document.getElementById('comparison-overlay-progress');
-            if (progress) progress.textContent = '✓ Baseline trained. Opening the comparison...';
+            if (progress) progress.textContent = '✓Baseline trained. Opening the comparison...';
             await new Promise(r => setTimeout(r, remaining));
         }
     } finally {
@@ -562,7 +562,7 @@ window.trainStandardBaselineFromPipeline = async function () {
     renderPipelineVsBaselineComparison();
     AppState.baselineJustTrained = false;
     setTimeout(() => { if (DOM.pipelineVsBaselinePanel) DOM.pipelineVsBaselinePanel.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 200);
-    showSeedToast(`✓ Standard baseline trained; comparison updated.${keepPipelineDeployment ? ' The pipeline model remains the active predictor.' : ''}`);
+    showSeedToast(`✓Standard baseline trained; comparison updated.${keepPipelineDeployment ? ' The pipeline model remains the active predictor.' : ''}`);
 };
 
 export { TOO_GOOD_THRESHOLD, SINGLE_PREDICTOR_THRESHOLD, singlePredictorSeparation, countRepeatedPatients, renderTooGoodToBeTrueCheck, renderPipelineBenchmarkResults, deployPipelineModel, autoDeployBestPipelineModel, updatePipelineActiveDeploymentStatus, pipelineProvenanceSummary, updatePredictionProvenanceBar, togglePipelineBaselineComparison, showComparisonOverlay, hideComparisonOverlay };

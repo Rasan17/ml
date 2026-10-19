@@ -6,11 +6,11 @@ Conceived, designed and directed by **Dr G Narenthiran MB ChB BSc(MedSci)(Hons) 
 
 **&copy; 2026 Dr G Narenthiran. All rights reserved.**
 
-> ⚠️ **Clinical & Research Disclaimer:** The Universal Medical ML/NeuralNet Predictor is designed as an interactive scientific computing and educational tool for clinical medical research across healthcare disciplines. It must not be utilized as the sole determinant for treatment or clinical interventions without independent medical evaluation and validation.
+> **Clinical & Research Disclaimer:** The Universal Medical ML/NeuralNet Predictor is designed as an interactive scientific computing and educational tool for clinical medical research across healthcare disciplines. It must not be utilized as the sole determinant for treatment or clinical interventions without independent medical evaluation and validation.
 
 ---
 
-## 🔬 Universal Clinical Scope & Purpose
+## Universal Clinical Scope & Purpose
 
 Translational medicine, clinical research, and electronic health record (EHR) analytics often involve heterogeneous multimodal datasets spanning:
 - **Demographics & Physiological Vitals:** Age, BMI, Systolic/Diastolic BP, Heart Rate, Respiratory Rate.
@@ -22,14 +22,14 @@ The **Universal Medical ML/NeuralNet Predictor** provides clinical researchers, 
 
 ---
 
-## ⚙️ Core System Architecture & Workflow
+## Core System Architecture & Workflow
 
 ### 1. Local processing: patient data stay in the browser
 - Runs locally in modern browsers via HTML5, Vanilla JavaScript, and TensorFlow.js.
 - Patient health records and uploaded CSVs are processed solely in client memory—**zero data is transmitted to external servers**.
 - A Content-Security-Policy in the page lets the browser contact only the app's own files (`connect-src 'self'`), so data cannot be sent to any other server. It keeps `'unsafe-eval'` for scripts because TensorFlow.js needs it to start (without it the neural network silently falls back to a linear model; confirmed by removing it). Imported model and settings files are read as plain data only, so this does not let a file run code. Inline styles are still allowed; moving the interface's inline styles into CSS classes, so that this allowance can be removed, is planned.
 - Checked on the deployed site (October 2026): during a full analysis every network request went to the app's own address, all to fetch its own files and sample data; nothing was sent out, and no third-party scripts, fonts or analytics are loaded.
-- Files you choose to export can contain patient values, and say so before saving: models using k-NN (model or missing-value filling) or multiple imputation, and the "Save imputed data" file. Settings files and reports contain no patient values. **🧹 Clear session and patient data** discards everything held by the page.
+- Files you choose to export can contain patient values, and say so before saving: models using k-NN (model or missing-value filling) or multiple imputation, and the "Save imputed data" file. Settings files and reports contain no patient values. **Clear session and patient data** discards everything held by the page.
 - Batch predictions (Step 6) are downloaded as a CSV that contains the uploaded patient rows. Reports and model cards contain summary statistics (counts, ranges, performance) but no individual rows.
 - Local processing reduces risk but is **not proof of GDPR or HIPAA compliance**, and it does not protect against everything. Remaining risks include browser extensions that can read web pages, compromised or shared computers, identifiers left in uploaded or exported files, exported files stored or sent insecurely, and changes to the hosting or to the bundled libraries. Compliance depends on the deployment, the data, the lawful basis, institutional governance and security controls, and how exported files are handled.
 - Use de-identified data wherever possible. Obtain a professional security review and your institution's approval before using the app with identifiable patient data.
@@ -138,8 +138,8 @@ Clinicians and researchers can choose the exact scope of models to train and ben
 Reproducibility is a fundamental prerequisite in scientific and clinical research. The platform provides full deterministic random seed control and provenance tracking:
 
 - **Per-Model Seed Input & Randomization:**
-  - Every machine learning and neural network model includes a **Random Seed (Reproducibility)** input control equipped with a 🎲 dice randomizer button.
-  - Researchers can enter a custom integer seed (e.g. `42`, `1007`) or click the 🎲 dice button to generate a random seed.
+  - Every machine learning and neural network model includes a **Random Seed (Reproducibility)** input control equipped with a dice randomizer button.
+  - Researchers can enter a custom integer seed (e.g. `42`, `1007`) or click the dice button to generate a random seed.
   - If left blank, the system automatically generates a high-entropy seed and immediately populates the input field so the user always has a visible reference.
 - **Option A Data Split Seed:**
   - An optional **Split Seed** control governs deterministic train/test cohort partitioning, guaranteeing identical patient allocations across validation experiments.
@@ -153,7 +153,7 @@ Reproducibility is a fundamental prerequisite in scientific and clinical researc
     - k-NN neighbor distance tie-breaking.
 - **Prominent Output of Reproducibility Seeds for Future Reference:**
   - **Results Status Banner:** Displays the deployed model's exact seed.
-  - **Benchmark Leaderboard:** Features a dedicated **Seed (Ref)** column with one-click clipboard copy (`🌱 [seed] 📋`).
+  - **Benchmark Leaderboard:** Features a dedicated **Seed (Ref)** column with one-click clipboard copy (`[seed] `).
   - **Multi-Model Confusion Matrix Cards:** Displays a seed badge with one-click copy on every tested model card.
   - **Single Model Metrics Summary:** Prominently presents a Reproducibility Seed metric card.
   - **Single Patient Case Predictor:** Highlights the active model seed within the outcome banner.
@@ -199,21 +199,21 @@ Reproducibility is a fundamental prerequisite in scientific and clinical researc
 - **Safeguards:** values outside the training range are flagged in single and batch predictions (possible typing error or extrapolation); cross-validation uses no more folds than there are patients in the smaller outcome group; near-constant predictors are not rescaled; a one-line data summary on loading (missing values, columns excluded automatically); Youden's J threshold from cross-validated training predictions shown for information; a "research use only, not a medical device" notice on every exported file.
 - **Security:** no inline event handlers; the Content-Security-Policy allows inline scripts only by hash and lets the page contact nothing but its own files.
 
-## 📁 Pre-Loaded Sample Medical Cohorts
+## Pre-Loaded Sample Medical Cohorts
 
 The suite includes built-in clinical datasets for instant experimentation:
-0. **🧠 iNPH Shunt Response Cohort, simulated (`medical_shunt_cohort_large.csv`, 420 patients from three hospitals):** the recommended starting point. Same predictors as the mini demo below plus the hospital, with clinically plausible effect sizes (a positive tap test, DESH, a narrow callosal angle, high outflow resistance and shorter symptoms favour response; about two thirds respond) and realistic missing values (infusion-test results missing together when no infusion study was done). Models reach realistic discrimination (AUC about 0.75), not near-perfect scores. A separate simulated cohort of 150 patients from a fourth hospital (`medical_shunt_validation_cohort.csv`) is offered for external validation (Option B). Generated reproducibly by `tools/make_shunt_cohort.py`; the patients are not real.
-1. **🫀 Cardiometabolic Risk Cohort (`universal_medical_cohort.csv`, 30 patients, plus 8 in `universal_medical_test_cohort.csv`):** one-year cardiovascular event from age, sex, BMI, blood pressure, creatinine, HbA1c, NYHA class, smoking, ECG ischaemia and comorbidity, with a few missing cells. Each predictor has a modest effect (true-risk AUC about 0.72). Generated by `tools/make_cardio_cohort.py`; simulated.
-2. **🧠 Shunt Response mini demo (`medical_shunt_cohort.csv`, 40 patients):** the same simulated model as the 420-patient cohort, but only 40 patients (9 non-responders). Use it to see what a small cohort does: wide confidence intervals, results that change with the split seed, warnings about too few events per predictor, and flexible models doing no better than logistic regression.
-2a. **⚠️ Leakage teaching example (`medical_shunt_cohort_leakage.csv`):** the 420-patient cohort plus one plausible-looking column measured *after* shunting, gait improvement at 6 months, which largely defines response. Training with it gives a near-perfect AUC; the app warns about possible leakage before training. Excluding it gives the honest result. The question to ask of every predictor: would it be known when the prediction is made?
-3. **📈 Functional Recovery Score Cohort (`medical_recovery_score.csv`):** Continuous regression dataset predicting post-operative clinical improvement points.
-4. **📂 Unseen Batch Cases (`medical_batch_unseen_cases.csv`):** 10 further simulated patients (same model, a few blank values) for batch prediction.
-5. **🎗️ Breast Cancer Wisconsin Diagnostic (`breast_cancer_wisconsin.csv`):** the public UCI dataset (569 patients, 30 continuous predictors, benign vs malignant). Large enough to show stable performance estimates and meaningful calibration; the small sample cohorts above (30–40 patients) give imprecise, unstable estimates.
-6. **⏱️ Shunt Revision Time-to-Event Cohort (`medical_shunt_revision_survival.csv`):** simulated cohort of 320 patients with time to shunt revision or censoring; opens Step 2 with the time-to-event outcome chosen.
+0. **iNPH Shunt Response Cohort, simulated (`medical_shunt_cohort_large.csv`, 420 patients from three hospitals):** the recommended starting point. Same predictors as the mini demo below plus the hospital, with clinically plausible effect sizes (a positive tap test, DESH, a narrow callosal angle, high outflow resistance and shorter symptoms favour response; about two thirds respond) and realistic missing values (infusion-test results missing together when no infusion study was done). Models reach realistic discrimination (AUC about 0.75), not near-perfect scores. A separate simulated cohort of 150 patients from a fourth hospital (`medical_shunt_validation_cohort.csv`) is offered for external validation (Option B). Generated reproducibly by `tools/make_shunt_cohort.py`; the patients are not real.
+1. **Cardiometabolic Risk Cohort (`universal_medical_cohort.csv`, 30 patients, plus 8 in `universal_medical_test_cohort.csv`):** one-year cardiovascular event from age, sex, BMI, blood pressure, creatinine, HbA1c, NYHA class, smoking, ECG ischaemia and comorbidity, with a few missing cells. Each predictor has a modest effect (true-risk AUC about 0.72). Generated by `tools/make_cardio_cohort.py`; simulated.
+2. **Shunt Response mini demo (`medical_shunt_cohort.csv`, 40 patients):** the same simulated model as the 420-patient cohort, but only 40 patients (9 non-responders). Use it to see what a small cohort does: wide confidence intervals, results that change with the split seed, warnings about too few events per predictor, and flexible models doing no better than logistic regression.
+2a. **Leakage teaching example (`medical_shunt_cohort_leakage.csv`):** the 420-patient cohort plus one plausible-looking column measured *after* shunting, gait improvement at 6 months, which largely defines response. Training with it gives a near-perfect AUC; the app warns about possible leakage before training. Excluding it gives the honest result. The question to ask of every predictor: would it be known when the prediction is made?
+3. **Functional Recovery Score Cohort (`medical_recovery_score.csv`):** Continuous regression dataset predicting post-operative clinical improvement points.
+4. **Unseen Batch Cases (`medical_batch_unseen_cases.csv`):** 10 further simulated patients (same model, a few blank values) for batch prediction.
+5. **Breast Cancer Wisconsin Diagnostic (`breast_cancer_wisconsin.csv`):** the public UCI dataset (569 patients, 30 continuous predictors, benign vs malignant). Large enough to show stable performance estimates and meaningful calibration; the small sample cohorts above (30–40 patients) give imprecise, unstable estimates.
+6. **Shunt Revision Time-to-Event Cohort (`medical_shunt_revision_survival.csv`):** simulated cohort of 320 patients with time to shunt revision or censoring; opens Step 2 with the time-to-event outcome chosen.
 
 ---
 
-## ⚠️ Known Limitations & Statistical Notes
+## Known Limitations & Statistical Notes
 
 - **Single train/test split.** Final performance is estimated on one held-out split. With cross-validated model selection (default) the winner's test score is not selection-biased, but it is still imprecise for small test sets; if selection by Testing-set results is chosen, the winner's score is optimistic. Confirm the chosen model on an independent cohort (Option B) before reporting.
 - **Splitting design.** Random, patient-grouped and date-based splits are built in; multicentre (site-based) validation needs a separate cohort (Option B). With a date-based split, cross-validation inside the training period uses folds that are not time-ordered.
@@ -222,6 +222,7 @@ The suite includes built-in clinical datasets for instant experimentation:
 - **Bootstrap confidence intervals** on the leaderboard resample the Testing patients with each model held fixed: they describe the precision of that test estimate, not the variation from refitting the model. For a headline result in a small cohort, use Option C or an external cohort (Option B).
 - **Shapley values** compare each predictor with values from real training patients, which can create unlikely combinations when predictors are strongly correlated; boosted-tree contributions are exact on the log-odds scale and shared out in percentage points.
 - **Probabilities:** Random Forest and hard voting give vote shares, k-NN gives neighbour shares. Calibration is assessed (plot, slope, intercept, Brier score) and optional Platt/isotonic recalibration is available; calibration estimates are imprecise with fewer than about 100 patients with and without the outcome.
+- **Competing risks are not modelled.** A patient who dies before a shunt revision can never be revised, but the Cox model treats such a death as censoring, so predicted revision risks are overestimated when deaths are common. Competing-risk methods (cumulative incidence, Fine–Gray) are not implemented; with appreciable mortality, report this as a limitation or analyse death as part of a combined outcome.
 - **Survival model:** assumes proportional hazards (check that Kaplan-Meier curves do not cross); calibration is assessed at one horizon by grouped Kaplan-Meier estimates.
 - **Exploratory 2×2 for continuous outcomes.** Cut at the training-data median, not a clinical threshold; these are not diagnostic accuracy measures.
 - **Feature importance (MDI)** ranks predictors for this model and data; it is not evidence of causal or clinical effect, and it can favour features with many distinct values.
@@ -237,11 +238,19 @@ The suite includes built-in clinical datasets for instant experimentation:
 - **Small samples.** Bootstrap confidence intervals and calibration estimates are unreliable with fewer than about 50 patients in the smaller outcome group; the app warns, and asks for confirmation before training when there are fewer than 5 events per predictor parameter.
 - **Code structure.** `models.js` and `data-engine.js` are large single files, and the interface still uses inline styles (so the security policy allows inline styles). Both are planned clean-ups; they do not affect results, which are protected by the golden-value, reference and regression checks.
 
-## 🏛️ For ethics committees
+## For ethics committees
 
 [`docs/ethics-committee-information-pack.html`](docs/ethics-committee-information-pack.html) describes, for research ethics and data-protection review, how patient data are handled (processed only in the browser, never transmitted; offline use), the intended use and regulatory status, what each export contains, and the accuracy and verification evidence. Open it in a browser and print it to PDF to submit it, or use the editable Word version [`docs/ethics-committee-information-pack.docx`](docs/ethics-committee-information-pack.docx).
 
-## ✅ Verification Tests
+## Release archives
+
+Build a release zip from the tracked files only (no `node_modules/`, `.git/`, Office lock files, videos or the workflow guide, which are attached to GitHub Releases separately):
+
+```bash
+git archive --format=zip --prefix=universal-medical-ml-predictor/ -o universal-medical-ml-predictor.zip HEAD
+```
+
+## Verification Tests
 
 From the project folder (Node.js; the reference check also needs Python 3.12 with SciPy, scikit-learn, statsmodels, scikit-survival and pmsampsize):
 
@@ -271,7 +280,7 @@ The benchmark runs the app's own engine (with the real TensorFlow.js network) on
 
 **Browsers.** The automated browser tests run in Chromium (Chrome, Edge, Brave), Firefox and WebKit, the engine of Safari, on every push. Chrome or Edge on a computer is recommended; Safari itself (on a Mac or iPad) is covered only through WebKit on Linux, which is close but not identical.
 
-## 🚀 How to Run
+## How to Run
 
 **Online:** open **https://rasan17.github.io/ml/** in any modern browser (Safari, Chrome, Edge, Firefox). Everything runs in your browser; uploaded data never leaves your computer.
 
@@ -287,7 +296,7 @@ The benchmark runs the app's own engine (with the real TensorFlow.js network) on
 
 ---
 
-## 👨‍⚕️ Author & Copyright Attribution
+## Author & Copyright Attribution
 
 - **Conception, Design & Direction:** **Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)**
 - **Email:** [g_narenthiran@hotmail.com](mailto:g_narenthiran@hotmail.com)

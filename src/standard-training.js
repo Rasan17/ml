@@ -43,7 +43,7 @@ async function trainSurvivalStep4(spec) {
         const card = document.getElementById('model-card-btn');
         if (card) { card.disabled = false; card.title = 'One-page summary of the Cox model: intended use, population, performance and limitations'; }
     } catch (err) {
-        DOM.trainStatus.innerHTML = `<span style="color: var(--accent-rose);">⚠️ ${escapeHtml(err.message || String(err))}</span>`;
+        DOM.trainStatus.innerHTML = `<span style="color: var(--accent-rose);">⚠︎ ${escapeHtml(err.message || String(err))}</span>`;
     } finally {
         DOM.trainModelBtn.disabled = false;
     }
@@ -69,7 +69,7 @@ async function startModelTraining() {
 
     try {
         DOM.trainModelBtn.disabled = true;
-        DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan); display: inline-flex; align-items: center; gap: 6px;">⚙️ Initializing multi-model tournament and data partitions...</span>`;
+        DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan); display: inline-flex; align-items: center; gap: 6px;">Initializing multi-model tournament and data partitions...</span>`;
 
         // Prepare features and target from training cohort
         let prep = DataEngine.prepareFeaturesAndTarget(AppState.imputedData.imputedRows, AppState.columnConfigs);
@@ -109,7 +109,7 @@ async function startModelTraining() {
             watchdog.start(`Initializing tournament for ${modelsToTest.length} model(s)...`, modelsToTest.length, (reason) => {
                 console.warn("Step 4 Model Training stopped:", reason);
                 DOM.trainModelBtn.disabled = false;
-                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-rose);">⚠️ Model training stopped: ${escapeHtml(reason || 'cancelled')}</span>`;
+                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-rose);">⚠︎ Model training stopped: ${escapeHtml(reason || 'cancelled')}</span>`;
             });
         }
 
@@ -133,15 +133,15 @@ async function startModelTraining() {
             const est = estimateImputationSeconds(nRows, prep.featureCols.length, m);
             const t0 = Date.now();
             const say = msg => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">${msg}</span>`; if (watchdog) watchdog.tick(1, msg); };
-            say(`🧩 Multiple imputation of ${what}: ${nRows.toLocaleString('en-GB')} patients, ${m} imputations${est >= 10 ? ` (about ${est < 60 ? `${Math.max(10, Math.round(est / 5) * 5)} s` : `${Math.round(est / 60)} min`})` : ''}...`);
+            say(`Multiple imputation of ${what}: ${nRows.toLocaleString('en-GB')} patients, ${m} imputations${est >= 10 ? ` (about ${est < 60 ? `${Math.max(10, Math.round(est / 5) * 5)} s` : `${Math.round(est / 60)} min`})` : ''}...`);
             return {
                 isAborted: () => Boolean(watchdog && watchdog.aborted),
-                onReuse: () => say(`🧩 Multiple imputation of ${what}: already done for these patients and settings, reusing the imputed datasets...`),
+                onReuse: () => say(`Multiple imputation of ${what}: already done for these patients and settings, reusing the imputed datasets...`),
                 onProgress: (l, mm, it, iters, parallel = 1) => {
                     const done = ((l - 1) * iters + it) / (mm * iters);
                     const left = done > 0 ? ((Date.now() - t0) / done) * (1 - done) / 1000 : null;
                     const where = parallel > 1 ? `${Math.round(done * 100)}% of rounds done (${parallel} imputations at a time)` : `imputation ${l}/${mm}, round ${it}/${iters}`;
-                    say(`🧩 Multiple imputation of ${what}: ${where}${left !== null && left >= 5 ? ` (about ${left < 60 ? `${Math.round(left / 5) * 5} s` : `${Math.round(left / 60)} min`} left)` : ''}...`);
+                    say(`Multiple imputation of ${what}: ${where}${left !== null && left >= 5 ? ` (about ${left < 60 ? `${Math.round(left / 5) * 5} s` : `${Math.round(left / 60)} min`} left)` : ''}...`);
                 }
             };
         };
@@ -152,7 +152,7 @@ async function startModelTraining() {
             if (!foldCache[k]) {
                 const miFolds = !AppState.completeCase && readMultipleImputation() && !miceQuickApproximation();
                 foldCache[k] = await buildStandardRowFolds(rawTrainRows, k, prep.isClassification, splitSeedForCV(), (f, nf) => {
-                    const msg = `🎯 Preparing ${nf} cross-validation folds (${miFolds ? 'multiple imputation (MICE)' : 'imputation'} and scaling refitted inside each fold): fold ${f}/${nf}...`;
+                    const msg = `Preparing ${nf} cross-validation folds (${miFolds ? 'multiple imputation (MICE)' : 'imputation'} and scaling refitted inside each fold): fold ${f}/${nf}...`;
                     DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">${msg}</span>`;
                     if (watchdog) watchdog.tick(i + 1, msg);
                 }, () => Boolean(watchdog && watchdog.aborted));
@@ -169,7 +169,7 @@ async function startModelTraining() {
             const t = await runTuningOnFolds(mId, hyperparams, fd, prep.isClassification, numClasses, watchdog,
                 (c, nc, f, nf, eta) => {
                     const what = doTune ? `Tuning ${mInfo.name}: combination ${c}/${nc}, fold ${f}/${nf}` : `Cross-validating ${mInfo.name}: fold ${f}/${nf}`;
-                    const msg = `🎯 [${i + 1}/${modelsToTest.length}] ${what}${(eta || '').replace(/&middot;/g, '·')} (Training set only)...`;
+                    const msg = `[${i + 1}/${modelsToTest.length}] ${what}${(eta || '').replace(/&middot;/g, '·')} (Training set only)...`;
                     DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">${msg}</span>`;
                     if (watchdog) watchdog.tick(i + 1, msg);
                 }, !doTune);
@@ -225,13 +225,13 @@ async function startModelTraining() {
             for (let i = 0; i < modelsToTest.length; i++) {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
                 const mId = modelsToTest[i];
-                const mInfo = MODEL_INFO[mId] || { name: mId.toUpperCase(), icon: '⚙️' };
+                const mInfo = MODEL_INFO[mId] || { name: mId.toUpperCase(), icon: '<span class="ico ico-gear" aria-hidden="true"></span>' };
                 const baseHp = getHyperparamsForModel(mId, prep); // the user's own settings, before any tuning
                 const tuned = await tuneIfRequested(mId, baseHp, allRaw, prep.targetClasses.length || 2, i);
                 const hp = tuned.hp;
                 const isAborted = () => Boolean(watchdog && watchdog.aborted);
                 const heartbeat = (a, b) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training on all ${prep.X.length} patients...`); };
-                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">🚀 [${i + 1}/${modelsToTest.length}] Training ${mInfo.name} on all ${prep.X.length} patients...</span>`;
+                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">[${i + 1}/${modelsToTest.length}] Training ${mInfo.name} on all ${prep.X.length} patients...</span>`;
                 const model = miAll
                     ? await fitPooledModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, miAll.sets, { isAborted, onProgress: heartbeat })
                     : await fitModel(mId, prep.isClassification, prep.targetClasses.length || 2, hp, prep.X, prep.y, { isAborted, onProgress: heartbeat });
@@ -254,7 +254,7 @@ async function startModelTraining() {
                 const Bm = slowModel(mId) ? Math.min(B, 50) : B;
                 const what = tuneInside ? ' (tuning repeated inside each resample)' : (inner ? ' (cross-validation repeated inside each resample)' : '');
                 const say = msg => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-emerald);">${msg}</span>`; if (watchdog) watchdog.tick(i + 1, msg); };
-                say(`🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample 1/${Bm}${what}...`);
+                say(`[${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample 1/${Bm}${what}...`);
                 // The whole loop runs in the background worker (on the page if workers are unavailable)
                 const run = await bootstrapRun({
                     rows: allRaw, boots, maxResamples: Bm, analysis: AppState.columnAnalysis,
@@ -266,7 +266,7 @@ async function startModelTraining() {
                     onInnerProgress: (b, n, c, nc, f, nf) => { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: resample ${b}/${n}, ${tuneInside ? `combination ${c}/${nc}, ` : ''}fold ${f}/${nf}`); },
                     onResample: (b, n, t0) => {
                         const left = ((Date.now() - t0) / b) * (n - b) / 1000;
-                        say(`🔁 [${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample ${Math.min(b + 1, n)}/${n}${what} (about ${left < 60 ? Math.max(5, Math.round(left / 5) * 5) + ' s' : Math.round(left / 60) + ' min'} left)...`);
+                        say(`[${i + 1}/${modelsToTest.length}] ${mInfo.name}: bootstrap resample ${Math.min(b + 1, n)}/${n}${what} (about ${left < 60 ? Math.max(5, Math.round(left / 5) * 5) + ' s' : Math.round(left / 60) + ' min'} left)...`);
                     }
                 });
                 const apparent = {}, corrected = {}, harrell = {}, est632 = {};
@@ -405,7 +405,7 @@ async function startModelTraining() {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
 
                 const mId = modelsToTest[i];
-                const mInfo = MODEL_INFO[mId] || { name: mId.toUpperCase(), icon: '⚙️' };
+                const mInfo = MODEL_INFO[mId] || { name: mId.toUpperCase(), icon: '<span class="ico ico-gear" aria-hidden="true"></span>' };
                 const tuned = await tuneIfRequested(mId, getHyperparamsForModel(mId, prep), rowSplit.trainX, splitPrep.targetClasses.length || 2, i);
                 const hyperparams = tuned.hp;
 
@@ -413,7 +413,7 @@ async function startModelTraining() {
                     watchdog.tick(i + 1, `Fitting ${mInfo.name} on ${Math.round(trainRatio * 100)}% split (${split.trainX.length} cases)...`);
                 }
 
-                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">🚀 [${i + 1}/${modelsToTest.length}] Training ${mInfo.name} on ${Math.round(trainRatio * 100)}% split (${split.trainX.length} cases &bull; Seed: ${hyperparams.seed})...</span>`;
+                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">[${i + 1}/${modelsToTest.length}] Training ${mInfo.name} on ${Math.round(trainRatio * 100)}% split (${split.trainX.length} cases &bull; Seed: ${hyperparams.seed})...</span>`;
                 await new Promise(r => setTimeout(r, 40));
 
                 if (modelsToTest.length === 1 && mId === 'nn') {
@@ -421,7 +421,7 @@ async function startModelTraining() {
                 }
 
                 let valModel = await (miSplit ? fitPooledModel : fitModel)(mId, prep.isClassification, splitPrep.targetClasses.length || 2, hyperparams, miSplit ? miSplit.sets : split.trainX, ...(miSplit ? [] : [split.trainY]), {
-                    onImputation: (l) => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">🚀 [${i + 1}/${modelsToTest.length}] Training ${mInfo.name}${miLabel(l)}...</span>`; if (watchdog) watchdog.tick(i + 1, `${mInfo.name}${miLabel(l)}`); },
+                    onImputation: (l) => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-cyan);">[${i + 1}/${modelsToTest.length}] Training ${mInfo.name}${miLabel(l)}...</span>`; if (watchdog) watchdog.tick(i + 1, `${mInfo.name}${miLabel(l)}`); },
                     isAborted: () => Boolean(watchdog && watchdog.aborted),
                     onProgress: (a, b, c) => {
                         if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -493,7 +493,7 @@ async function startModelTraining() {
                     if (watchdog) {
                         watchdog.tick(i + 1, `Retraining ${mInfo.name} on 100% of cohort (N=${prep.X.length})...`);
                     }
-                    DOM.trainStatus.innerHTML = `<span style="color: var(--accent-amber); font-weight: 600;">✓ [${i + 1}/${modelsToTest.length}] ${mInfo.name} benchmarked. Retraining on 100% of cohort (N=${prep.X.length})...</span>`;
+                    DOM.trainStatus.innerHTML = `<span style="color: var(--accent-amber); font-weight: 600;">✓[${i + 1}/${modelsToTest.length}] ${mInfo.name} benchmarked. Retraining on 100% of cohort (N=${prep.X.length})...</span>`;
                     await new Promise(r => setTimeout(r, 40));
 
                     const fullModel = await (miFull ? fitPooledModel : fitModel)(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, miFull ? miFull.sets : prep.X, ...(miFull ? [] : [prep.y]), {
@@ -543,7 +543,7 @@ async function startModelTraining() {
             // OPTION B: SEPARATE TRAINING (i) AND TESTING (ii) DATASETS
             // =============================================================
             if (!AppState.separateTestRawRows || AppState.separateTestRawRows.length === 0) {
-                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-amber);">⚠️ Option B requires a separate testing cohort (Dataset ii). Please upload a test CSV or click 'Load Built-In Validation Cohort'.</span>`;
+                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-amber);">⚠︎ Option B requires a separate testing cohort (Dataset ii). Please upload a test CSV or click 'Load Built-In Validation Cohort'.</span>`;
                 DOM.trainModelBtn.disabled = false;
                 if (watchdog) watchdog.forceAbort("Missing external test cohort.");
                 alert("Option B requires a separate testing cohort (Dataset ii). Please upload a test CSV or load the built-in validation cohort in the Option B card.");
@@ -585,7 +585,7 @@ async function startModelTraining() {
                 if (watchdog && watchdog.aborted) throw new Error("Training aborted by user.");
 
                 const mId = modelsToTest[i];
-                const mInfo = MODEL_INFO[mId] || { name: mId.toUpperCase(), icon: '⚙️' };
+                const mInfo = MODEL_INFO[mId] || { name: mId.toUpperCase(), icon: '<span class="ico ico-gear" aria-hidden="true"></span>' };
                 const tuned = await tuneIfRequested(mId, getHyperparamsForModel(mId, prep), optionBTrainRawRows(prep), prep.targetClasses.length || 2, i);
                 const hyperparams = tuned.hp;
 
@@ -593,7 +593,7 @@ async function startModelTraining() {
                     watchdog.tick(i + 1, `Fitting ${mInfo.name} on 100% of Dataset (i) (${prep.X.length} cases)...`);
                 }
 
-                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">🚀 [${i + 1}/${modelsToTest.length}] Fitting ${mInfo.name} on 100% of Training Dataset (i) (${prep.X.length} cases &bull; Seed: ${hyperparams.seed})...</span>`;
+                DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">[${i + 1}/${modelsToTest.length}] Fitting ${mInfo.name} on 100% of Training Dataset (i) (${prep.X.length} cases &bull; Seed: ${hyperparams.seed})...</span>`;
                 await new Promise(r => setTimeout(r, 40));
 
                 if (modelsToTest.length === 1 && mId === 'nn') {
@@ -601,7 +601,7 @@ async function startModelTraining() {
                 }
 
                 let model = await (miB ? fitPooledModel : fitModel)(mId, prep.isClassification, prep.targetClasses.length || 2, hyperparams, miB ? miB.sets : prep.X, ...(miB ? [] : [prep.y]), {
-                    onImputation: (l) => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">🚀 [${i + 1}/${modelsToTest.length}] Fitting ${mInfo.name} (imputed dataset ${l}/${miMB})...</span>`; if (watchdog) watchdog.tick(i + 1, `${mInfo.name} (imputed dataset ${l}/${miMB})`); },
+                    onImputation: (l) => { DOM.trainStatus.innerHTML = `<span style="color: var(--accent-purple);">[${i + 1}/${modelsToTest.length}] Fitting ${mInfo.name} (imputed dataset ${l}/${miMB})...</span>`; if (watchdog) watchdog.tick(i + 1, `${mInfo.name} (imputed dataset ${l}/${miMB})`); },
                     isAborted: () => Boolean(watchdog && watchdog.aborted),
                     onProgress: (a, b, c) => {
                         if (a === 'tick') { if (watchdog) watchdog.tick(i + 1, `${mInfo.name}: training...`); return; }
@@ -715,10 +715,10 @@ async function startModelTraining() {
             DOM.trainStatus.innerHTML = `
                 <div style="display: flex; flex-direction: column; gap: 3px;">
                     <span style="color: var(--accent-emerald); font-weight: 700;">
-                        ✓ Evaluation Complete: ${champion.info.name} is the active research model
+                        ✓Evaluation Complete: ${champion.info.name} is the active research model
                     </span>
                     <span style="font-size: 11.5px; color: var(--text-secondary);">
-                        Reported Benchmark: <strong>${accText}</strong> &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px;">🌱 ${champion.evalRes.seed !== null ? champion.evalRes.seed : 'Auto'}</code> &bull; Active research model: <strong>${champion.info.name} (${champion.retrained ? '100% Cohort Retrained' : (isOptionA ? `${singleRes.trainPct}% Split Model` : 'Dataset i Fitted')})</strong>
+                        Reported Benchmark: <strong>${accText}</strong> &bull; Reproducibility Seed: <code style="color: var(--accent-purple); font-weight: 700; background: rgba(168,85,247,0.12); padding: 1px 6px; border-radius: 4px;">seed ${champion.evalRes.seed !== null ? champion.evalRes.seed : 'Auto'}</code> &bull; Active research model: <strong>${champion.info.name} (${champion.retrained ? '100% Cohort Retrained' : (isOptionA ? `${singleRes.trainPct}% Split Model` : 'Dataset i Fitted')})</strong>
                     </span>
                 </div>
             `;
@@ -729,15 +729,15 @@ async function startModelTraining() {
             DOM.trainStatus.innerHTML = `
                 <div style="display: flex; flex-direction: column; gap: 3px;">
                     <span style="color: var(--accent-emerald); font-weight: 700;">
-                        🏆 Tournament Complete: Tested &amp; Evaluated ${testedResults.length} Models!
+                        Tournament Complete: Tested &amp; Evaluated ${testedResults.length} Models!
                     </span>
                     <span style="font-size: 11.5px; color: var(--text-secondary);">
-                        Top-ranked on ${escapeHtml(rankingMetricLabel(prep.isClassification))}: <strong>${champion.info.name}</strong> [${topAccText} &bull; Seed: <code style="color: var(--accent-purple); font-weight: 700;">🌱 ${champion.evalRes.seed !== null ? champion.evalRes.seed : 'Auto'}</code>] &bull; All model seeds are listed below.
+                        Top-ranked on ${escapeHtml(rankingMetricLabel(prep.isClassification))}: <strong>${champion.info.name}</strong> [${topAccText} &bull; Seed: <code style="color: var(--accent-purple); font-weight: 700;">seed ${champion.evalRes.seed !== null ? champion.evalRes.seed : 'Auto'}</code>] &bull; All model seeds are listed below.
                     </span>
                     <span style="font-size: 11px; color: var(--accent-amber);">
                         ${champion.evalRes.cv
-                            ? '✓ The leader was chosen by cross-validation inside the Training set, so its Testing-set score is an honest estimate. Confirm it on an independent cohort (Option B) before clinical use.'
-                            : '⚠️ The leader was chosen using the same test cases it is scored on, so its test score is optimistically biased. Choose by cross-validation (option above) or confirm the chosen model on an independent cohort (Option B).'}
+                            ? '✓The leader was chosen by cross-validation inside the Training set, so its Testing-set score is an honest estimate. Confirm it on an independent cohort (Option B) before clinical use.'
+                            : '⚠︎ The leader was chosen using the same test cases it is scored on, so its test score is optimistically biased. Choose by cross-validation (option above) or confirm the chosen model on an independent cohort (Option B).'}
                     </span>
                 </div>
             `;

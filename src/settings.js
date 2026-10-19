@@ -227,7 +227,7 @@ function offerStoredSettings(headers) {
     const when = new Date(stored.savedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
     banner.innerHTML = `
         <div class="settings-banner-box">
-            <div>📂 Settings from a previous session with this dataset are available (saved ${escapeHtml(when)}${stored.dataset.fileName ? `, file "${escapeHtml(stored.dataset.fileName)}"` : ''}).</div>
+            <div>Settings from a previous session with this dataset are available (saved ${escapeHtml(when)}${stored.dataset.fileName ? `, file "${escapeHtml(stored.dataset.fileName)}"` : ''}).</div>
             <div class="settings-banner-actions">
                 <button type="button" class="btn btn-primary btn-sm" id="settings-apply-stored">Apply these settings</button>
                 <button type="button" class="btn btn-secondary btn-sm" id="settings-dismiss">Dismiss</button>
@@ -315,8 +315,8 @@ function applySettings(settings) {
     if (banner) {
         banner.innerHTML = `
             <div class="settings-banner-box">
-                <div>✓ Settings applied (saved ${escapeHtml(when)}). Every step is filled in; review anything you like, or reproduce the analysis now:</div>
-                ${warnings.map(w => `<div class="settings-warn">⚠️ ${escapeHtml(w)}</div>`).join('')}
+                <div>✓Settings applied (saved ${escapeHtml(when)}). Every step is filled in; review anything you like, or reproduce the analysis now:</div>
+                ${warnings.map(w => `<div class="settings-warn">⚠︎ ${escapeHtml(w)}</div>`).join('')}
                 <div class="settings-banner-actions">
                     <button type="button" class="btn ${settings.used && settings.used.standard ? 'btn-primary' : 'btn-secondary'} btn-sm" id="settings-run-standard">▶ Run standard workflow</button>
                     <button type="button" class="btn ${settings.used && settings.used.pipeline ? 'btn-primary' : 'btn-secondary'} btn-sm" id="settings-run-pipeline">▶ Run 7-step pipeline</button>
@@ -371,7 +371,7 @@ function handleUnexpectedError(err) {
     console.error('Unexpected error:', err);
     if (DOM.trainModelBtn) DOM.trainModelBtn.disabled = false;
     if (DOM.pipelineTrainModelsBtn) DOM.pipelineTrainModelsBtn.disabled = false;
-    try { showSeedToast(`⚠️ Unexpected error: ${msg}. Please check your data/settings and retry.`); } catch (e) { /* ignore */ }
+    try { showSeedToast(`⚠︎ Unexpected error: ${msg}. Please check your data/settings and retry.`); } catch (e) { /* ignore */ }
 }
 
 export { forgetStoredSettings, SETTINGS_SCHEMA, SETTINGS_APP, SETTINGS_KEY_PREFIX, SETTINGS_MAX_STORED, VARIABLE_FIELDS, datasetSignature, isRememberedControl, collectFormState, applyFormState, collectSettings, saveSettingsToBrowser, readStoredSettings, downloadSettings, loadSettingsFile, offerStoredSettings, applySettings, runStandardWithSettings, runPipelineWithSettings, handleUnexpectedError };

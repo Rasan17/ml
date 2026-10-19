@@ -122,7 +122,7 @@ async function exportTrainedModel() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        showSeedToast(`✓ Exported "${name}"${containsPatientData ? ' (contains training patients\' predictor values)' : ''}`);
+        showSeedToast(`✓Exported "${name}"${containsPatientData ? ' (contains training patients\' predictor values)' : ''}`);
     } catch (e) {
         alert(`The model could not be exported: ${e.message || e}`);
     } finally {
@@ -263,7 +263,7 @@ async function importTrainedModel(file) {
         renderSinglePredictionForm();
         updatePredictionProvenanceBar();
         goToStep(5);
-        showSeedToast(`✓ Imported "${AppState.importedModelInfo.name}" — ready for single and batch predictions`);
+        showSeedToast(`✓Imported "${AppState.importedModelInfo.name}" — ready for single and batch predictions`);
     } catch (e) {
         alert(`The model could not be imported: ${e.message || e}`);
     }

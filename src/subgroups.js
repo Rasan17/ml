@@ -85,7 +85,7 @@ function renderSubgroupPanel(containerId, items, rows, isClassification, labelRo
     const usable = (items || []).filter(it => it.model && it.prep && typeof it.model.predictSingle === 'function');
     if (!usable.length || !rows || !rows.length) { box.innerHTML = ''; return; }
     if (rows.length < 20) {
-        box.innerHTML = `<div class="cal-panel"><div class="tune-title">⚖️ Does the model work equally well in subgroups?</div><p class="tune-muted">Only ${rows.length} Testing patients: too few to compare subgroups. Use a larger cohort or an external validation cohort (Option B).</p></div>`;
+        box.innerHTML = `<div class="cal-panel"><div class="tune-title">Does the model work equally well in subgroups?</div><p class="tune-muted">Only ${rows.length} Testing patients: too few to compare subgroups. Use a larger cohort or an external validation cohort (Option B).</p></div>`;
         return;
     }
     const targetCol = usable[0].prep.targetCol;
@@ -95,7 +95,7 @@ function renderSubgroupPanel(containerId, items, rows, isClassification, labelRo
     box.innerHTML = `
         <div class="cal-panel">
             <div class="cal-head">
-                <div class="tune-title">⚖️ Does the model work equally well in subgroups? (Testing set)</div>
+                <div class="tune-title">Does the model work equally well in subgroups? (Testing set)</div>
                 <span>
                     <select id="${containerId}-model" class="control-select" aria-label="Model for the subgroup analysis" style="width: auto; display: inline-block;">${usable.map((it, i) => `<option value="${i}"${i === 0 ? ' selected' : ''}>${escapeHtml(it.name)}</option>`).join('')}</select>
                     <select id="${containerId}-col" class="control-select" aria-label="Column that defines the subgroups" style="width: auto; display: inline-block;">${cols.map((c, i) => `<option value="${escapeHtml(c)}"${i === 0 ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('')}</select>
@@ -151,7 +151,7 @@ function runSubgroupAnalysis(containerId) {
         }
         const anyFlag = res.some(r => flag(r.m)), anySmall = res.some(r => small(r.m));
         out.innerHTML = `
-            ${it.inSample ? '<div class="tune-warn">⚠️ This model was retrained on all patients, including these Testing patients, so its figures here are optimistic. Compare the groups with each other rather than reading the values at face value; for an honest check, train without retraining (Option A) or use an external cohort (Option B).</div>' : ''}
+            ${it.inSample ? '<div class="tune-warn">⚠︎ This model was retrained on all patients, including these Testing patients, so its figures here are optimistic. Compare the groups with each other rather than reading the values at face value; for an honest check, train without retraining (Option A) or use an external cohort (Option B).</div>' : ''}
             <div class="table-container" tabindex="0" role="region" aria-label="Subgroup results table">
                 <table class="data-table thr-table">
                 <thead><tr>${head}</tr></thead>
@@ -160,7 +160,7 @@ function runSubgroupAnalysis(containerId) {
                     ${res.map(r => `<tr${flag(r.m) ? ' class="subgroup-flag"' : small(r.m) ? ' class="subgroup-small"' : ''}>${row(r.g, r.m)}</tr>`).join('')}
                 </tbody>
             </table></div>
-            <p class="tune-muted">${binary ? `Sensitivity, specificity and net benefit use the decision threshold of ${(threshold * 100).toFixed(0)}%. ` : ''}${anyFlag ? '⚠️ Highlighted groups differ noticeably from the whole Testing set (AUC by more than 0.10, or O:E outside 0.8–1.25). ' : ''}${anySmall ? `Greyed groups have fewer than ${SUBGROUP_MIN_N} patients${binary ? ` or fewer than ${SUBGROUP_MIN_EVENTS} patients with or without the outcome` : ''}: their figures are too uncertain to judge. ` : ''}Differences between subgroups can arise by chance, especially in small Testing sets; treat them as a prompt to look further (for example in an external cohort), not as proof of unfairness.</p>`;
+            <p class="tune-muted">${binary ? `Sensitivity, specificity and net benefit use the decision threshold of ${(threshold * 100).toFixed(0)}%. ` : ''}${anyFlag ? '⚠︎ Highlighted groups differ noticeably from the whole Testing set (AUC by more than 0.10, or O:E outside 0.8–1.25). ' : ''}${anySmall ? `Greyed groups have fewer than ${SUBGROUP_MIN_N} patients${binary ? ` or fewer than ${SUBGROUP_MIN_EVENTS} patients with or without the outcome` : ''}: their figures are too uncertain to judge. ` : ''}Differences between subgroups can arise by chance, especially in small Testing sets; treat them as a prompt to look further (for example in an external cohort), not as proof of unfairness.</p>`;
     } catch (e) {
         out.innerHTML = `<p class="tune-muted">Subgroup analysis failed: ${escapeHtml(e.message || String(e))}</p>`;
     }

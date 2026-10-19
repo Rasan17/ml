@@ -75,11 +75,11 @@ function calibrationBody(item, positiveLabel) {
     const rc = ev.recalibration;
     const f2 = v => (typeof v === 'number' ? v.toFixed(2) : 'n/a');
     const recalNote = rc
-        ? `<div class="explain-box" style="margin-top: 8px;"><strong>📐 Recalibrated</strong> with ${rc.method === 'prior-shift' ? 'a prior-shift correction (undoing the SMOTENC balancing) based on' : rc.method === 'platt' ? 'Platt scaling fitted on' : 'isotonic regression fitted on'} ${escapeHtml(rc.fittedOn)}. Before recalibration on these test patients: slope ${f2(rc.before.slope)}, intercept ${f2(rc.before.intercept)}, Brier ${typeof rc.before.brierScore === 'number' ? rc.before.brierScore.toFixed(3) : 'n/a'}${typeof rc.before.rocAuc === 'number' ? `, AUC ${rc.before.rocAuc.toFixed(3)}` : ''}. The values above are after recalibration.</div>`
+        ? `<div class="explain-box" style="margin-top: 8px;"><strong>Recalibrated</strong> with ${rc.method === 'prior-shift' ? 'a prior-shift correction (undoing the SMOTENC balancing) based on' : rc.method === 'platt' ? 'Platt scaling fitted on' : 'isotonic regression fitted on'} ${escapeHtml(rc.fittedOn)}. Before recalibration on these test patients: slope ${f2(rc.before.slope)}, intercept ${f2(rc.before.intercept)}, Brier ${typeof rc.before.brierScore === 'number' ? rc.before.brierScore.toFixed(3) : 'n/a'}${typeof rc.before.rocAuc === 'number' ? `, AUC ${rc.before.rocAuc.toFixed(3)}` : ''}. The values above are after recalibration.</div>`
         : (ev.recalibrationSkipped ? `<div class="tune-muted" style="margin-top: 6px;">${escapeHtml(ev.recalibrationSkipped)}</div>`
             // Miscalibrated (the slope's 95% CI excludes 1) and not recalibrated: say how to correct it
             : (ev.ci && ev.ci.calibrationSlope && (ev.ci.calibrationSlope[0] > 1 || ev.ci.calibrationSlope[1] < 1)
-                ? `<div class="tune-warn" style="margin-top: 6px;">⚠️ The calibration slope differs from 1 beyond chance (95% CI ${f2(ev.ci.calibrationSlope[0])}–${f2(ev.ci.calibrationSlope[1])}), so the predicted percentages should not be read as patients' risks. Recalibration (the "Recalibrate two-outcome probabilities" option before training: Platt scaling or isotonic regression, fitted on the Training set only) can correct this; confirm the result on new patients.</div>` : ''));
+                ? `<div class="tune-warn" style="margin-top: 6px;">⚠︎ The calibration slope differs from 1 beyond chance (95% CI ${f2(ev.ci.calibrationSlope[0])}–${f2(ev.ci.calibrationSlope[1])}), so the predicted percentages should not be read as patients' risks. Recalibration (the "Recalibrate two-outcome probabilities" option before training: Platt scaling or isotonic regression, fitted on the Training set only) can correct this; confirm the result on new patients.</div>` : ''));
     const probNote = ev.probabilityType && ev.probabilityType !== 'model' && ev.probabilityType !== 'recalibrated' ? ' This model\'s "probabilities" are vote or neighbour shares, which are often poorly calibrated.' : '';
     return `
         <div class="cal-grid">
@@ -95,7 +95,7 @@ function calibrationBody(item, positiveLabel) {
             </div>
         </div>
         ${recalNote}
-        ${small ? `<div class="tune-warn">⚠️ Calibration needs many patients: with fewer than about 100 patients with and 100 without the outcome in the Testing set, these values are very imprecise.${probNote}</div>` : (probNote ? `<div class="tune-warn">⚠️${probNote}</div>` : '')}
+        ${small ? `<div class="tune-warn">⚠︎ Calibration needs many patients: with fewer than about 100 patients with and 100 without the outcome in the Testing set, these values are very imprecise.${probNote}</div>` : (probNote ? `<div class="tune-warn">⚠︎${probNote}</div>` : '')}
         <div class="cal-thr">
             <div class="cmp-guide-title" style="font-size: 13px;">Sensitivity and specificity at different thresholds (Testing set)</div>
             ${thresholdTable(ev)}
@@ -163,7 +163,7 @@ function discriminationSection(items, positiveLabel) {
             <div>${lineChartSvg({ series: [...prs, { name: 'Prevalence (no skill)', colour: 'var(--text-muted)', dashed: true, width: 1, points: [{ x: 0, y: prev }, { x: 1, y: prev }] }], xLabel: 'Recall (sensitivity)', yLabel: 'Precision (PPV)', aria: 'Precision-recall curves' })}</div>
         </div>
         <table class="data-table thr-table"><thead><tr><th>Model</th><th>ROC-AUC (95% CI)</th><th>Average precision</th><th>AUC difference vs top model: DeLong p</th></tr></thead><tbody>${rows}</tbody></table>
-        <p class="tune-muted"><strong>ROC curve</strong>: the closer to the top-left corner, the better (the diagonal is chance). <strong>Precision-recall curve</strong>: more informative when the outcome is uncommon; the dashed line is the prevalence (${(prev * 100).toFixed(0)}%), which is what a useless model would achieve. The <strong>DeLong test</strong> asks whether a model's AUC differs from the top-ranked model's on these same patients; p ≥ 0.05 means the difference could easily be chance (✱ marks p &lt; 0.05). With small test sets most differences are not significant.</p>`;
+        <p class="tune-muted"><strong>ROC curve</strong>: the closer to the top-left corner, the better (the diagonal is chance). <strong>Precision-recall curve</strong>: more informative when the outcome is uncommon; the dashed line is the prevalence (${(prev * 100).toFixed(0)}%), which is what a useless model would achieve. The <strong>DeLong test</strong> asks whether a model's AUC differs from the top-ranked model's on these same patients; p ≥ 0.05 means the difference could easily be chance (✱marks p &lt; 0.05). With small test sets most differences are not significant.</p>`;
 }
 
 // Decision curve analysis for one model
@@ -232,7 +232,7 @@ function renderCalibrationPanel(containerId, items, isClassification) {
         calibrationItems[containerId] = { items: all, regression: true, target };
         box.innerHTML = `
             <div class="cal-panel">
-                <div class="cal-head"><div class="tune-title">📈 Prediction errors (Testing set)</div>${select()}</div>
+                <div class="cal-head"><div class="tune-title">Prediction errors (Testing set)</div>${select()}</div>
                 <div id="${containerId}-body">${residualSection(all[0].ev, target)}</div>
             </div>`;
         return;
@@ -243,7 +243,7 @@ function renderCalibrationPanel(containerId, items, isClassification) {
     calibrationItems[containerId] = { items: usable, positiveLabel };
     box.innerHTML = `
         <div class="cal-panel">
-            <div class="tune-title">📈 Discrimination, calibration &amp; clinical usefulness (Testing set)</div>
+            <div class="tune-title">Discrimination, calibration &amp; clinical usefulness (Testing set)</div>
             ${discriminationSection(usable, positiveLabel)}
             <div class="cal-head" style="margin-top: 14px;">
                 <div class="cmp-guide-title" style="font-size: 13px;">Calibration, thresholds and decision curve for one model</div>
@@ -361,7 +361,7 @@ function renderPatientExplanation(model, x, prep, inputRow) {
         let sh = null;
         try { sh = shapleyExplanation(model, x, prep, ex.classIdx); } catch (e) { sh = null; }
         if (!sh) {
-            return `<div class="explain-box"><strong>🔍 Why this prediction?</strong> The predictors that moved this patient's result most (quick view):${quickHtml}${quickNote}
+            return `<div class="explain-box"><strong>Why this prediction?</strong> The predictors that moved this patient's result most (quick view):${quickHtml}${quickNote}
                 <div class="tune-muted">Shapley values need the training data, which are not available for a model loaded from a file. The explanation describes how the model behaves, not what causes the outcome.</div></div>`;
         }
         const fs = fmtOf(sh);
@@ -373,7 +373,7 @@ function renderPatientExplanation(model, x, prep, inputRow) {
             ? `Exact Shapley values for the trees (interventional TreeSHAP)${sh.converted ? ', calculated on the model\'s log-odds scale and shown in percentage points' : ''}`
             : `Shapley values estimated from ${sh.orderings} random orderings of the predictors (small random error)`;
         return `<div class="explain-box">
-            <strong>🔍 Why this prediction?</strong> Starting from the average ${what} for ${sh.background} training patients (<strong>${level(sh.base)}</strong>), these predictors moved this patient to <strong>${level(sh.value)}</strong>:
+            <strong>Why this prediction?</strong> Starting from the average ${what} for ${sh.background} training patients (<strong>${level(sh.base)}</strong>), these predictors moved this patient to <strong>${level(sh.value)}</strong>:
             ${items}
             <div class="tune-muted">${method}. The contributions of all predictors add up to the difference between this patient and the average, and interactions are shared fairly between the predictors involved. Each predictor's effect is judged by replacing it with values from real training patients, which can create unlikely combinations when predictors are strongly correlated. It describes how the model behaves, not what causes the outcome.</div>
             <details class="explain-quick"><summary>Quick view: one predictor at a time</summary>${quickHtml}${quickNote}</details>
@@ -442,7 +442,7 @@ function renderOddsRatioPanel(containerId, prep) {
                 ${nMissing > 0 ? `<div class="explain-box"><strong>Missing data:</strong> ${nMissing} of ${raw.length} training patients had at least one missing predictor value, filled once (single imputation), which makes the confidence intervals too narrow. <button type="button" class="btn btn-outline btn-sm" id="${containerId}-mice-btn" ${actionAttrs('runMiceOddsRatios', containerId)}>Re-estimate with multiple imputation (MICE)</button><div id="${containerId}-mice"></div></div>` : ''}`;
         }
     }
-    box.innerHTML = `<div class="cal-panel"><div class="tune-title">📋 Odds ratios (logistic regression, training data)</div>${body}</div>`;
+    box.innerHTML = `<div class="cal-panel"><div class="tune-title">Odds ratios (logistic regression, training data)</div>${body}</div>`;
 }
 
 window.runMiceOddsRatios = async function (containerId) {
@@ -539,7 +539,7 @@ window.runPermutationImportance = async function (containerId) {
                     <span class="perm-track"><span class="perm-bar ${r.mean < 0 ? 'neg' : ''}" style="width: ${Math.max(1, Math.round(Math.abs(r.mean) / max * 100))}%"></span></span>
                     <span class="perm-val">${r.mean >= 0 ? '' : '−'}${Math.abs(r.mean).toFixed(3)} <span class="tune-sd">± ${r.sd.toFixed(3)}</span></span></div>`).join('')}
             </div>
-            ${it.inSample ? '<div class="tune-warn">⚠️ This model was retrained on all patients (including these test patients), so this importance is computed on data the model has seen; the ranking is still informative, but the sizes are optimistic.</div>' : ''}`;
+            ${it.inSample ? '<div class="tune-warn">⚠︎ This model was retrained on all patients (including these test patients), so this importance is computed on data the model has seen; the ranking is still informative, but the sizes are optimistic.</div>' : ''}`;
     } catch (e) {
         out.innerHTML = `<p class="tune-muted">Could not compute permutation importance: ${escapeHtml(e.message || String(e))}</p>`;
     } finally {
@@ -556,7 +556,7 @@ function renderExplainPanel(containerId, items, rows, isClassification) {
     box.innerHTML = `
         <div class="cal-panel">
             <div class="cal-head">
-                <div class="tune-title">🔍 Which predictors matter? (permutation importance, Testing set)</div>
+                <div class="tune-title">Which predictors matter? (permutation importance, Testing set)</div>
                 <span>
                     <select id="${containerId}-select" class="control-select" aria-label="Model for permutation importance" style="width: auto; display: inline-block;">${usable.map((it, i) => `<option${i === 0 ? ' selected' : ''}>${escapeHtml(it.name)}</option>`).join('')}</select>
                     <button type="button" id="${containerId}-btn" class="btn btn-outline btn-sm" ${actionAttrs('runPermutationImportance', containerId)}>Compute</button>
@@ -590,7 +590,7 @@ function renderMiceDiagnostics(containerId, mi) {
     const box = document.getElementById(containerId);
     if (!box) return;
     const emptyNote = mi && Array.isArray(mi.allMissing) && mi.allMissing.length
-        ? `<div class="cal-panel"><div class="tune-warn">⚠️ No observed values among the training patients for: ${mi.allMissing.map(c => `"${escapeHtml(String(c))}"`).join(', ')}. Multiple imputation cannot impute a predictor that is never recorded, so it was filled with a constant and carries no information. Exclude it in Step 2.</div></div>` : '';
+        ? `<div class="cal-panel"><div class="tune-warn">⚠︎ No observed values among the training patients for: ${mi.allMissing.map(c => `"${escapeHtml(String(c))}"`).join(', ')}. Multiple imputation cannot impute a predictor that is never recorded, so it was filled with a constant and carries no information. Exclude it in Step 2.</div></div>` : '';
     if (!mi || !Array.isArray(mi.trace) || !mi.trace.length) { box.innerHTML = emptyNote; return; }
     const cols = Object.keys(mi.trace[0] || {}).slice(0, 6);
     if (!cols.length) { box.innerHTML = emptyNote; return; }
@@ -607,12 +607,12 @@ function renderMiceDiagnostics(containerId, mi) {
     });
     box.innerHTML = emptyNote + `
         <div class="cal-panel">
-            <div class="tune-title">🧩 Did the multiple imputation converge? (MICE diagnostics)</div>
+            <div class="tune-title">Did the multiple imputation converge? (MICE diagnostics)</div>
             <p class="tune-muted">For each numerical predictor with missing values, the mean of its imputed values after each of the ${(mi.trace[0][cols[0]] || []).length} rounds, one line per imputation (${mi.trace.length}). Converged imputations level off after the first few rounds and mix around the same level; lines that keep rising or falling at the end suggest the chains needed more rounds.${Object.keys(mi.trace[0]).length > cols.length ? ` First ${cols.length} predictors shown.` : ''}</p>
             <div class="mice-diag-grid">${charts.join('')}</div>
             ${mi.trace.length < 2 ? '' : drifting.length
-                ? `<div class="tune-warn">⚠️ Possible non-convergence: ${drifting.map(escapeHtml).join(', ')}. The imputations differ more between chains than within them after the first 2 rounds (Gelman–Rubin R̂ above 1.3; approximate with 10 rounds). Treat the imputations of these predictors with caution; consider more rounds, or whether the variable can be predicted from the others.</div>`
-                : `<div class="explain-box">✓ No sign of non-convergence: after the first 2 rounds the chains vary as much within as between them (Gelman–Rubin R̂ ${rhats.filter(v => v !== null).length ? `${Math.min(...rhats.filter(v => v !== null)).toFixed(2)}–${Math.max(...rhats.filter(v => v !== null)).toFixed(2)}` : 'n/a'}; below 1.3 for every predictor shown; approximate with 10 rounds). Round-to-round wiggles are expected: each round draws new donor values.</div>`}
+                ? `<div class="tune-warn">⚠︎ Possible non-convergence: ${drifting.map(escapeHtml).join(', ')}. The imputations differ more between chains than within them after the first 2 rounds (Gelman–Rubin R̂ above 1.3; approximate with 10 rounds). Treat the imputations of these predictors with caution; consider more rounds, or whether the variable can be predicted from the others.</div>`
+                : `<div class="explain-box">✓No sign of non-convergence: after the first 2 rounds the chains vary as much within as between them (Gelman–Rubin R̂ ${rhats.filter(v => v !== null).length ? `${Math.min(...rhats.filter(v => v !== null)).toFixed(2)}–${Math.max(...rhats.filter(v => v !== null)).toFixed(2)}` : 'n/a'}; below 1.3 for every predictor shown; approximate with 10 rounds). Round-to-round wiggles are expected: each round draws new donor values.</div>`}
             ${chartLegend(mi.trace.map((_, l) => ({ label: `Imputation ${l + 1}`, colour: CURVE_COLOURS[l % CURVE_COLOURS.length] })))}
         </div>`;
 }
@@ -631,7 +631,7 @@ function renderSampleSizePanel() {
     if (!prep || !prep.X || !prep.X.length) { box.innerHTML = ''; return; }
     const binary = prep.isClassification && (prep.targetClasses || []).length === 2;
     if (prep.isClassification && !binary) {
-        box.innerHTML = `<div class="cal-panel"><div class="tune-title">📏 Is the sample large enough?</div><p class="tune-muted">Formal minimum sample-size criteria (Riley et al.) are available for two-outcome and numerical outcomes; for ${prep.targetClasses.length} outcome groups, aim for at least 10–20 patients in the smallest group per predictor parameter.</p></div>`;
+        box.innerHTML = `<div class="cal-panel"><div class="tune-title">Is the sample large enough?</div><p class="tune-muted">Formal minimum sample-size criteria (Riley et al.) are available for two-outcome and numerical outcomes; for ${prep.targetClasses.length} outcome groups, aim for at least 10–20 patients in the smallest group per predictor parameter.</p></div>`;
         return;
     }
     // Parameters: one per numerical or ordered predictor, (categories − 1) per unordered categorical one
@@ -648,13 +648,13 @@ function renderSampleSizePanel() {
     box.innerHTML = `
         <div class="cal-panel">
             <div class="cal-head">
-                <div class="tune-title">📏 Is the sample large enough? (minimum sample size, Riley et al.)</div>
+                <div class="tune-title">Is the sample large enough? (minimum sample size, Riley et al.)</div>
                 <label class="autotune-folds-label" title="The R² you expect a model to achieve; leave blank for the conservative default">Anticipated ${binary ? 'Cox-Snell ' : ''}R²:
                     <input type="number" id="sample-size-r2" class="control-input" style="width: 90px; display: inline-block;" min="0.01" max="0.99" step="0.01" placeholder="${res.r2.toFixed(3)}" value="${isFinite(r2Input) ? r2Input : ''}">
                 </label>
             </div>
             <div class="${enough ? 'explain-box' : 'tune-warn'}" style="margin-top: 6px;">
-                ${enough ? '✓' : '⚠️'} The Training set has <strong>${nTrain}</strong> patients${binary ? ` (about ${Math.round(nTrain * prev)} with "${posLabel}")` : ''}; the criteria below require at least <strong>${res.n}</strong>${binary ? ` (${res.events} with "${posLabel}")` : ''} for ${p} predictor parameter(s).
+                ${enough ? '✓' : '⚠︎'} The Training set has <strong>${nTrain}</strong> patients${binary ? ` (about ${Math.round(nTrain * prev)} with "${posLabel}")` : ''}; the criteria below require at least <strong>${res.n}</strong>${binary ? ` (${res.events} with "${posLabel}")` : ''} for ${p} predictor parameter(s).
                 ${enough ? 'The sample meets these criteria.' : 'The sample is <strong>smaller than recommended</strong>: expect overfitting and unstable estimates; consider fewer predictors (or grouping categories), or more patients, and treat results as exploratory.'}
             </div>
             <table class="data-table thr-table"><thead><tr><th>Criterion</th><th>Patients needed</th></tr></thead>
@@ -678,9 +678,9 @@ function renderOptimismPanel(containerId, results) {
     const tuningNote = oc => {
         if (oc.tuning === 'repeated') {
             const share = typeof oc.sameSettingsShare === 'number' ? ` The resamples chose the same settings as the full data in ${Math.round(oc.sameSettingsShare * 100)}% of cases${oc.sameSettingsShare < 0.5 ? ', so the tuned settings are not very stable' : ''}.` : '';
-            return `<p class="tune-muted">✓ The automatic tuning was repeated inside every resample (${oc.innerFolds}-fold cross-validation), so the corrected figures include the optimism that tuning adds.${share}</p>`;
+            return `<p class="tune-muted">✓The automatic tuning was repeated inside every resample (${oc.innerFolds}-fold cross-validation), so the corrected figures include the optimism that tuning adds.${share}</p>`;
         }
-        if (oc.tuning === 'once') return `<p class="tune-muted">⚠️ The settings were tuned once on all patients and not again inside each resample (too slow for this model), so the corrected figures leave out the optimism that tuning adds and are somewhat too high.</p>`;
+        if (oc.tuning === 'once') return `<p class="tune-muted">⚠︎ The settings were tuned once on all patients and not again inside each resample (too slow for this model), so the corrected figures leave out the optimism that tuning adds and are somewhat too high.</p>`;
         return '';
     };
     const blocks = items.map(r => {
@@ -718,11 +718,11 @@ function renderOptimismPanel(containerId, results) {
                 return `<tr><td>${labels[k] || k}</td><td>${fmt(k, oc.apparent[k])}</td><td>${oc.method === '632plus' ? `out-of-bag ${fmt(k, sel.oobMean && sel.oobMean[k])}` : fmtOpt(k, o)}</td><td><strong>${fmt(k, v)}</strong></td></tr>`;
             }).join('')}</tbody></table></div>`;
     } else if (sel && !sel.repeated) {
-        selBlock = `<p class="tune-muted">⚠️ ${sel.nModels} models were compared. Choosing the best one adds a small optimistic bias (the winner's curse) that is not corrected here${sel.reason === 'slow' ? ', because the neural network and the ensemble are too slow to cross-validate inside every resample' : ', because the choice is not made by cross-validation (choose "Cross-validation" for model selection to correct it)'}. Treat small differences between models as ties.</p>`;
+        selBlock = `<p class="tune-muted">⚠︎ ${sel.nModels} models were compared. Choosing the best one adds a small optimistic bias (the winner's curse) that is not corrected here${sel.reason === 'slow' ? ', because the neural network and the ensemble are too slow to cross-validate inside every resample' : ', because the choice is not made by cross-validation (choose "Cross-validation" for model selection to correct it)'}. Treat small differences between models as ties.</p>`;
     }
     const anyRepeated = items.some(r => r.evalRes.optimismCorrection.tuning === 'repeated');
     box.innerHTML = `<div class="cal-panel">
-        <div class="tune-title">🔁 Bootstrap internal validation (Option C)</div>
+        <div class="tune-title">Bootstrap internal validation (Option C)</div>
         <p class="tune-muted"><strong>Apparent</strong> performance is measured on the same patients the model learned from, so it is too optimistic. Each bootstrap resample draws patients with replacement and repeats the modelling steps on them: imputation (MICE when multiple imputation is chosen), encoding and scaling are refitted${anyRepeated ? ', and the automatic tuning is run again' : ''}. The refitted model is scored on its resample and on the original patients, and the average difference is the <strong>optimism</strong>. Subtracting it gives the <strong>optimism-corrected</strong> estimate of how the model would perform on new patients from the same population. Models that can memorise their training patients (Random Forest, boosted trees, k-NN, neural networks) are instead reported with the <strong>.632+</strong> estimate, which scores each bootstrap model only on the patients it did not see (Efron &amp; Tibshirani, 1997); Harrell's correction is too small for them. Choices you made by hand (which predictors to include, how to encode them) are not repeated. The corrected calibration slope estimates how much the predictions should be shrunk (values below 1 mean overfitting).</p>
         ${blocks}
         ${selBlock}

@@ -47,7 +47,7 @@ function renderAnalysisSummary() {
         const rows = target ? pd.rows.filter(r => !DataEngine.isMissing(r[target])) : pd.rows;
         const groupCol = val('split-method') === 'group' ? val('split-group-col') : (document.querySelector('input[name="validation-mode"]:checked')?.value === 'bootstrap' ? val('bootstrap-group-col') : '');
         const patients = groupCol ? new Set(rows.map(r => String(r[groupCol] ?? '').trim())).size : null;
-        items.push(['📄 Data', `${AppState.fileName || 'dataset'}: ${rows.length.toLocaleString('en-GB')} records${target ? ' with an outcome' : ''}${patients !== null ? ` from ${patients.toLocaleString('en-GB')} patients` : ''}${target && pd.rows.length > rows.length ? ` (${pd.rows.length - rows.length} without outcome excluded)` : ''}`]);
+        items.push(['Data', `${AppState.fileName || 'dataset'}: ${rows.length.toLocaleString('en-GB')} records${target ? ' with an outcome' : ''}${patients !== null ? ` from ${patients.toLocaleString('en-GB')} patients` : ''}${target && pd.rows.length > rows.length ? ` (${pd.rows.length - rows.length} without outcome excluded)` : ''}`]);
         if (target) {
             const c = cfgs[target];
             let outcome = `${target} (${c.type === 'continuous' ? 'numerical' : 'categories'})`;
@@ -56,18 +56,18 @@ function renderAnalysisSummary() {
                 const positive = c.positiveClass !== undefined && levels.includes(String(c.positiveClass)) ? String(c.positiveClass) : [...levels].sort()[1];
                 outcome = `${target}, positive class "${positive}"`;
             }
-            items.push(['🎯 Outcome', outcome]);
+            items.push(['Outcome', outcome]);
         } else {
-            items.push(['🎯 Outcome', 'not chosen yet (Step 2)']);
+            items.push(['Outcome', 'not chosen yet (Step 2)']);
         }
-        items.push(['🧮 Predictors', String(pd.headers.filter(h => cfgs[h] && cfgs[h].role === 'feature').length)]);
-        items.push(['✂️ Validation', validationText()]);
+        items.push(['Predictors', String(pd.headers.filter(h => cfgs[h] && cfgs[h].role === 'feature').length)]);
+        items.push(['Validation', validationText()]);
         const mi = val('mi-select');
-        items.push(['🧩 Missing data', AppState.completeCase ? 'complete cases only' : mi === 'mice5' ? 'multiple imputation (5)' : mi === 'mice10' ? 'multiple imputation (10)' : 'single imputation (Step 3)']);
+        items.push(['Missing data', AppState.completeCase ? 'complete cases only' : mi === 'mice5' ? 'multiple imputation (5)' : mi === 'mice10' ? 'multiple imputation (10)' : 'single imputation (Step 3)']);
         const recal = val('recalibration-select');
-        if (recal && recal !== 'none') items.push(['📏 Recalibration', recal === 'platt' ? 'Platt scaling' : 'isotonic regression']);
+        if (recal && recal !== 'none') items.push(['Recalibration', recal === 'platt' ? 'Platt scaling' : 'isotonic regression']);
     }
-    items.push(['🤖 Active research model', model || 'none yet']);
+    items.push(['Active research model', model || 'none yet']);
     box.hidden = false;
     box.innerHTML = `<span class="analysis-summary-title">Analysis</span>${items.map(([k, v]) => `<span class="analysis-summary-item"><span class="k">${k}:</span> ${escapeHtml(v)}</span>`).join('')}`;
 }

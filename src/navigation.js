@@ -120,12 +120,12 @@ function refreshOptionBSummaries() {
                 const testHeaders = Object.keys(AppState.separateTestRawRows[0] || {});
                 const hasTarget = testHeaders.includes(targetCol);
                 targetStatus = hasTarget 
-                    ? `<span style="color: var(--accent-emerald); font-weight: 600;">✓ Target '${escapeHtml(targetCol)}' found</span>`
-                    : `<span style="color: var(--accent-amber); font-weight: 600;">⚠️ Target '${escapeHtml(targetCol)}' not in header!</span>`;
+                    ? `<span style="color: var(--accent-emerald); font-weight: 600;">✓Target '${escapeHtml(targetCol)}' found</span>`
+                    : `<span style="color: var(--accent-amber); font-weight: 600;">⚠︎ Target '${escapeHtml(targetCol)}' not in header!</span>`;
                 const predictors = Object.keys(AppState.columnConfigs).filter(c => AppState.columnConfigs[c].role === 'feature');
                 const missingPredictors = predictors.filter(c => !testHeaders.includes(c));
                 if (missingPredictors.length > 0) {
-                    targetStatus += `<br><span style="color: var(--accent-amber); font-weight: 600;">⚠️ Predictor column(s) missing from the testing file (would be filled from training statistics for every row): ${escapeHtml(missingPredictors.join(', '))}</span>`;
+                    targetStatus += `<br><span style="color: var(--accent-amber); font-weight: 600;">⚠︎ Predictor column(s) missing from the testing file (would be filled from training statistics for every row): ${escapeHtml(missingPredictors.join(', '))}</span>`;
                 }
             }
         }
@@ -135,7 +135,7 @@ function refreshOptionBSummaries() {
             DOM.optBTestBadge.style.background = 'rgba(168, 85, 247, 0.15)';
             DOM.optBTestBadge.style.color = 'var(--accent-purple)';
             DOM.optBTestBadge.style.borderColor = 'rgba(168, 85, 247, 0.4)';
-            DOM.optBTestBadge.innerText = `✓ Ready (${testValidCount} cases)`;
+            DOM.optBTestBadge.innerText = `✓Ready (${testValidCount} cases)`;
         }
 
         if (DOM.optBTestSummary) {
@@ -145,7 +145,7 @@ function refreshOptionBSummaries() {
                     <div><strong>Total Test Cases:</strong> ${testValidCount} external patients</div>
                     <div><strong>Target Verification:</strong> ${targetStatus}</div>
                     <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
-                        🔒 Test data are encoded and scaled using training-cohort parameters only. Rows with a missing outcome are excluded; missing predictor values are filled from training statistics.
+                        Test data are encoded and scaled using training-cohort parameters only. Rows with a missing outcome are excluded; missing predictor values are filled from training statistics.
                     </div>
                 </div>
             `;
@@ -169,7 +169,7 @@ function refreshOptionBSummaries() {
 function toggleTheme() {
     AppState.theme = AppState.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', AppState.theme);
-    DOM.themeToggle.innerHTML = AppState.theme === 'dark' ? '☀️ Light' : '🌙 Dark';
+    DOM.themeToggle.innerHTML = AppState.theme === 'dark' ? 'Light' : 'Dark';
     // Re-apply the theme palette to the existing chart (colours are set per option, not via CSS)
     if (AppState.charts.loss) {
         const isDark = AppState.theme === 'dark';

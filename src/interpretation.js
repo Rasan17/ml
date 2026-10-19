@@ -77,7 +77,7 @@ function renderInterpretation(containerId, { ev, prep, name, design, dataset }) 
 
     box.innerHTML = `
         <div class="cal-panel interpretation-panel">
-            <div class="tune-title">🩺 In plain language: ${escapeHtml(name || 'the active model')}</div>
+            <div class="tune-title">In plain language: ${escapeHtml(name || 'the active model')}</div>
             <dl class="interp-list">${items.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${v}</dd>`).join('')}</dl>
         </div>`;
 }

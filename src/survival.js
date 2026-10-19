@@ -264,7 +264,7 @@ function renderSurvivalResults() {
     const who = r.validation === 'bootstrap' ? 'all patients' : r.validation === 'separate' ? 'validation-cohort patients' : 'test patients';
     box.innerHTML = `
         <div class="cal-panel">
-            <div class="tune-title">⏱️ Cox proportional-hazards model: ${escapeHtml(r.ec)} = "${escapeHtml(r.ev)}" over ${escapeHtml(r.tc)}</div>
+            <div class="tune-title">Cox proportional-hazards model: ${escapeHtml(r.ec)} = "${escapeHtml(r.ev)}" over ${escapeHtml(r.tc)}</div>
             <p class="tune-muted">${r.validation === 'bootstrap' ? `Fitted on all ${r.nTrain} patients (${r.eventsTrain} events); validated by bootstrap internal validation (Option C, ${r.optimism.B} resamples)`
                 : r.validation === 'separate' ? `Fitted on all ${r.nTrain} patients of Dataset (i) (${r.eventsTrain} events); validated on ${r.nTest} patients of the separate cohort, Dataset (ii) (${r.eventsTest} events)${r.externalExcluded ? `, after excluding ${r.externalExcluded} of its row(s) without a usable time or event` : ''}`
                 : `${r.nTrain} training patients (${r.eventsTrain} events) and ${r.nTest} test patients (${r.eventsTest} events), ${Math.round(r.ratio * 100)}/${Math.round((1 - r.ratio) * 100)} ${escapeHtml(r.splitText)} (seed ${r.seed})`}${r.excluded ? `; ${r.excluded} row(s) without a usable time or event were excluded` : ''}${r.droppedBlank ? `; ${r.droppedBlank} evaluated patient(s) were removed by the "drop rows" missing-data choice` : ''}.${r.penalised ? ' <strong>The unpenalised model did not converge, so a small ridge penalty (0.1) was applied.</strong>' : ''}${epp < 10 ? ` <strong>Caution:</strong> only ${epp.toFixed(1)} events per model parameter; the estimates are unstable.` : ''}
@@ -274,19 +274,19 @@ function renderSurvivalResults() {
             <p class="tune-muted">A hazard ratio above 1 means the event tends to happen sooner (higher instantaneous risk); below 1, later. Each is adjusted for the other predictors; categorical predictors are compared with their most common category. The Cox model assumes the hazard ratios stay constant over follow-up (proportional hazards); check this clinically, e.g. whether the Kaplan-Meier curves below cross. Associations, not causation.</p>
         </div>
         <div class="cal-panel">
-            ${r.optimism ? `<div class="tune-title">🔁 Bootstrap internal validation (optimism-corrected)</div>
+            ${r.optimism ? `<div class="tune-title">Bootstrap internal validation (optimism-corrected)</div>
             <table class="data-table thr-table"><thead><tr><th>Measure</th><th>Apparent (all patients)</th><th>Optimism</th><th>Corrected</th></tr></thead><tbody>
                 <tr><td>Harrell's C-index</td><td>${r.cIndex !== null ? r.cIndex.toFixed(3) : 'N/A'}</td><td>${r.optimism.cOptimism !== null ? r.optimism.cOptimism.toFixed(3) : 'N/A'}</td><td><strong>${r.optimism.cCorrected !== null ? r.optimism.cCorrected.toFixed(3) : 'N/A'}</strong></td></tr>
                 <tr><td>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</td><td>${typeof r.tdAuc === 'number' ? r.tdAuc.toFixed(3) : 'N/A'}</td><td>${r.optimism.tdOptimism !== null ? r.optimism.tdOptimism.toFixed(3) : 'N/A'}</td><td><strong>${r.optimism.tdCorrected !== null ? r.optimism.tdCorrected.toFixed(3) : 'N/A'}</strong></td></tr>
                 <tr><td>Calibration slope (ideal 1)</td><td>— (reference: 1)</td><td>${r.optimism.slope !== null ? (1 - r.optimism.slope).toFixed(3) : 'N/A'}</td><td><strong>${r.optimism.slope !== null ? r.optimism.slope.toFixed(3) : 'N/A'}</strong>${r.optimism.slopeCI ? ` <span class="tune-sd">(middle 95% of resamples ${r.optimism.slopeCI[0].toFixed(2)}–${r.optimism.slopeCI[1].toFixed(2)})</span>` : ''}</td></tr>
             </tbody></table>
             <p class="tune-muted">Each of the ${r.optimism.used} usable resamples${r.optimism.skipped ? ` (${r.optimism.skipped} skipped: too few events or no comparable pairs)` : ''} repeated the whole process (${r.optimism.quickPlain ? 'with the quick approximation: a plain median / most-frequent fill instead of MICE inside the resamples' : r.miInfo ? 'MICE' : 'single imputation'}, encoding and the Cox fit) on patients drawn with replacement${r.optimism.grouped ? ` (whole patients by "${escapeHtml(r.optimism.groupCol)}")` : ''}. The optimism is the average amount by which a model scores better on its own resample than on the original patients; it is subtracted from the apparent performance. A corrected calibration slope below 1 means the predictions are too extreme and would need shrinking (${r.optimism.seconds} s).${r.optimism.used < 50 ? ' <strong>Few usable resamples: the correction is imprecise.</strong>' : ''}</p>
-            <div class="tune-title" style="margin-top: 12px;">📊 Apparent performance on all patients (before correction)</div>
-            <p class="tune-muted">The panels below score the final model on the same patients it was fitted to, so they are optimistic; use the corrected values above when reporting.</p>` : `<div class="tune-title">📊 Performance on the ${r.validation === 'separate' ? 'validation cohort (Dataset ii)' : 'test patients'}</div>`}
+            <div class="tune-title" style="margin-top: 12px;">Apparent performance on all patients (before correction)</div>
+            <p class="tune-muted">The panels below score the final model on the same patients it was fitted to, so they are optimistic; use the corrected values above when reporting.</p>` : `<div class="tune-title">Performance on the ${r.validation === 'separate' ? 'validation cohort (Dataset ii)' : 'test patients'}</div>`}
             <div class="cal-stats"><div><strong>Harrell's C-index</strong>: ${r.cIndex !== null ? r.cIndex.toFixed(3) : 'N/A'}${r.cCI && r.validation !== 'bootstrap' ? ` <span class="tune-sd">(95% CI ${r.cCI[0].toFixed(3)}–${r.cCI[1].toFixed(3)}${r.ciGroupCol ? `, patients resampled whole by "${escapeHtml(r.ciGroupCol)}"` : ''})</span>` : ''} &mdash; the probability that, of two comparable patients, the one with the event first had the higher predicted risk (0.5 = chance, 1 = perfect).</div>
             <div><strong>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.tdAuc === 'number' ? r.tdAuc.toFixed(3) : 'N/A'}${r.tdCI && r.validation !== 'bootstrap' ? ` <span class="tune-sd">(95% CI ${r.tdCI[0].toFixed(3)}–${r.tdCI[1].toFixed(3)})</span>` : ''} &mdash; of a patient who had the event by ${escapeHtml(String(r.horizon))} and one still event-free after it, how often the first had the higher predicted risk.</div>
             <div><strong>Brier score at ${escapeHtml(String(r.horizon))}</strong>: ${typeof r.brier === 'number' ? r.brier.toFixed(3) : 'not estimable (too little follow-up to weight the patients at this horizon; choose an earlier horizon)'} (lower is better; giving everyone the overall Kaplan-Meier risk scores ${typeof r.brierNull === 'number' ? r.brierNull.toFixed(3) : 'N/A'})${typeof r.scaledBrier === 'number' ? `; <strong>scaled Brier</strong> ${(r.scaledBrier * 100).toFixed(1)}% (share of that error the model removes; 0% = no better than the overall risk)` : ''}.</div>
-            ${r.horizon > r.lastEvent ? `<div class="tune-warn">⚠️ The horizon (${escapeHtml(String(r.horizon))}) is beyond the last event in the training patients (${escapeHtml(String(r.lastEvent))}): the model cannot learn risk after that time, so predicted risks at this horizon are underestimated. Choose a horizon within the follow-up of the training data.</div>` : ''}
+            ${r.horizon > r.lastEvent ? `<div class="tune-warn">⚠︎ The horizon (${escapeHtml(String(r.horizon))}) is beyond the last event in the training patients (${escapeHtml(String(r.lastEvent))}): the model cannot learn risk after that time, so predicted risks at this horizon are underestimated. Choose a horizon within the follow-up of the training data.</div>` : ''}
             <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pctTxt(r.meanPred)} vs observed ${pctTxt(r.obsAll)}${r.obsAllCI ? ` <span class="tune-sd">(95% CI ${pctTxt(r.obsAllCI[0])}–${pctTxt(r.obsAllCI[1])})</span>` : ''} (Kaplan-Meier).</div>
             <div class="tune-muted">The time-dependent AUC and Brier score weight each patient for censoring (inverse probability of censoring weights, with the censoring pattern estimated from the training patients), so patients lost to follow-up before ${escapeHtml(String(r.horizon))} do not bias them.</div></div>
             <div class="cal-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
@@ -299,8 +299,8 @@ function renderSurvivalResults() {
                     ${chartLegend(tertNames.map((n, g) => ({ colour: tertCols[g], label: n })))}
                     <p class="tune-muted">${who.charAt(0).toUpperCase() + who.slice(1)} split into thirds by predicted risk. Well-separated curves show the model distinguishes patients with early and late events.</p></div>
             </div>
-            ${r.nTest < 100 || r.eventsTest < 50 ? `<div class="tune-warn">⚠️ Few ${who} or events: these performance estimates are imprecise.</div>` : ''}
-            <button type="button" class="btn btn-secondary btn-sm" id="surv-report-btn">📄 Download Survival Analysis Report (.JSON)</button>
+            ${r.nTest < 100 || r.eventsTest < 50 ? `<div class="tune-warn">⚠︎ Few ${who} or events: these performance estimates are imprecise.</div>` : ''}
+            <button type="button" class="btn btn-secondary btn-sm" id="surv-report-btn">Download Survival Analysis Report (.JSON)</button>
         </div>
         <p class="tune-muted">Predicted event-free probabilities for one patient: Step 5. For a file of patients (and validation on it if it contains the follow-up time and event): Step 6.</p>`;
     document.getElementById('surv-report-btn').addEventListener('click', downloadSurvivalReport);
@@ -313,7 +313,7 @@ function renderSurvivalSinglePrediction(boxId) {
     if (!r) { box.innerHTML = '<div class="cal-panel"><p class="tune-muted">Fit the Cox model in Step 4 first.</p></div>'; return; }
     box.innerHTML = `
         <div class="cal-panel">
-            <div class="tune-title">🔮 Predicted event-free probability for one patient</div>
+            <div class="tune-title">Predicted event-free probability for one patient</div>
             <div class="predict-form-grid" id="surv-predict-form">${r.prep.featureCols.map((col, i) => {
                 const m = r.prep.featureMetadata[col];
                 if (m.type === 'nominal') return `<label class="form-field"><span>${escapeHtml(col)}</span><select class="control-select surv-in" data-col="${escapeHtml(col)}">${m.categories.map(c => `<option${c === m.mode ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('')}</select></label>`;
@@ -367,12 +367,12 @@ function survivalBatch(rows, headers) {
 
 function survivalValidationHtml(v, fileName) {
     const r = SURV.result, f = x => (typeof x === 'number' ? x.toFixed(3) : 'N/A'), pc = x => `${(x * 100).toFixed(1)}%`;
-    return `<div class="cal-panel"><div class="tune-title">✅ Validation of the Cox model on "${escapeHtml(fileName || 'the uploaded file')}"</div>
+    return `<div class="cal-panel"><div class="tune-title">✓Validation of the Cox model on "${escapeHtml(fileName || 'the uploaded file')}"</div>
         <p class="tune-muted">${v.n} patients with a usable follow-up time and event status (${v.events} events)${v.excluded ? `; ${v.excluded} row(s) excluded` : ''}. Horizon ${escapeHtml(String(r.horizon))}.</p>
         <div class="cal-stats"><div><strong>Harrell's C-index</strong>: ${f(v.cIndex)}</div><div><strong>Time-dependent AUC at ${escapeHtml(String(r.horizon))}</strong>: ${f(v.tdAuc)}</div>
         <div><strong>Brier score</strong>: ${typeof v.brier === 'number' ? f(v.brier) : 'not estimable at this horizon'} (overall Kaplan-Meier risk for everyone: ${f(v.brierNull)})</div>
         <div><strong>Overall risk by ${escapeHtml(String(r.horizon))}</strong>: predicted ${pc(v.meanPred)} vs observed ${pc(v.observed)} (Kaplan-Meier)</div></div>
-        ${v.n < 100 || v.events < 50 ? '<div class="tune-warn">⚠️ Fewer than 100 patients or 50 events: these estimates are imprecise.</div>' : ''}</div>`;
+        ${v.n < 100 || v.events < 50 ? '<div class="tune-warn">⚠︎ Fewer than 100 patients or 50 events: these estimates are imprecise.</div>' : ''}</div>`;
 }
 
 function predictOne() {

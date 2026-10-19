@@ -79,7 +79,7 @@ class ExecutionWatchdog {
         const mins = Math.floor(elapsed / 60);
         const secs = Math.floor(elapsed % 60);
         const tenths = Math.floor((elapsed * 10) % 10);
-        const timerStr = `⏱️ ${mins < 10 ? '0' + mins : mins}:${secs < 10 ? '0' + secs : secs}.${tenths}s`;
+        const timerStr = `${mins < 10 ? '0' + mins : mins}:${secs < 10 ? '0' + secs : secs}.${tenths}s`;
 
         if (this.timerText) this.timerText.innerText = timerStr;
 
@@ -92,7 +92,7 @@ class ExecutionWatchdog {
         if (gap > 12) {
             // Potential stall warning
             if (this.badge) this.badge.className = 'monitor-status-badge stalled';
-            if (this.stateText) this.stateText.innerText = '⚠️ HEAVY LOAD / POSSIBLE STALL';
+            if (this.stateText) this.stateText.innerText = '⚠︎ HEAVY LOAD / POSSIBLE STALL';
             if (this.threadStatus) {
                 this.threadStatus.style.color = 'var(--accent-rose)';
                 this.threadStatus.innerText = 'High Latency';
@@ -104,7 +104,7 @@ class ExecutionWatchdog {
         } else if (gap > 5) {
             // Elevated compute
             if (this.badge) this.badge.className = 'monitor-status-badge warning';
-            if (this.stateText) this.stateText.innerText = '⚙️ BUSY COMPUTING';
+            if (this.stateText) this.stateText.innerText = 'BUSY COMPUTING';
             if (this.threadStatus) {
                 this.threadStatus.style.color = 'var(--accent-amber)';
                 this.threadStatus.innerText = 'Heavy Math';
@@ -147,7 +147,7 @@ class ExecutionWatchdog {
         if (this.consecutiveRepeats >= 50) {
             this.loopCount++;
             if (this.loopStatus) this.loopStatus.className = 'monitor-loop-status loop-detected';
-            if (this.loopText) this.loopText.innerText = `⚠️ Progress message unchanged for ${this.consecutiveRepeats} updates (still running)`;
+            if (this.loopText) this.loopText.innerText = `⚠︎ Progress message unchanged for ${this.consecutiveRepeats} updates (still running)`;
         } else {
             if (this.loopStatus) this.loopStatus.className = 'monitor-loop-status';
             if (this.loopText) this.loopText.innerText = 'Loop Guard: Normal (bounded iterations)';
@@ -170,7 +170,7 @@ class ExecutionWatchdog {
         this.timerInterval = null;
 
         if (this.badge) this.badge.className = 'monitor-status-badge completed';
-        if (this.stateText) this.stateText.innerText = '✓ COMPLETED';
+        if (this.stateText) this.stateText.innerText = '✓COMPLETED';
         if (this.progressBar) {
             this.progressBar.style.width = '100%';
             this.progressBar.setAttribute('aria-valuenow', '100');
@@ -194,7 +194,7 @@ class ExecutionWatchdog {
         this.timerInterval = null;
 
         if (this.badge) this.badge.className = 'monitor-status-badge stalled';
-        if (this.stateText) this.stateText.innerText = '🛑 ABORTED';
+        if (this.stateText) this.stateText.innerText = 'ABORTED';
         if (this.taskName) this.taskName.innerText = reason;
         if (this.stuckHint) {
             this.stuckHint.style.color = 'var(--accent-rose)';

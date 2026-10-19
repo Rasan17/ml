@@ -31,3 +31,24 @@ on every push.
 - ~~A persistent analysis-summary bar.~~ **Done:** a bar under the step tabs shows the dataset, outcome and positive class, records and patients, predictors, validation design, missing-data handling, recalibration and the active research model (browser test).
 
 An independent statistical and security review of the corrected workflows remains advisable before high-stakes use, as the audit recommends.
+
+## Second Genspark review (October 2026)
+
+Several points repeat the first review and had already been fixed. The reviewer most likely examined the old version-1 repository, `Rasan17/ai`; the current software is in `Rasan17/ml`.
+
+| Point | Status |
+|---|---|
+| Conflicting URLs (/ai vs /ml) | Already consistent in this repository: README, CITATION.cff and the app all point to `rasan17.github.io/ml` and `github.com/Rasan17/ml`. The /ai links belong to the old version-1 repository. |
+| Licence | Kept as "All rights reserved" by the author's decision. |
+| Zip clutter | `.gitignore` already excludes Office lock files, videos, PowerPoint files and the workflow guide. The README now gives the `git archive` command for a release zip containing tracked files only. |
+| Emoji | **Done.** About 400 emoji were removed from the interface and generated reports: <ul><li>icon-only places (brand mark, upload boxes, random-seed buttons, model types, pipeline cards) use a small, consistent set of line icons drawn for the app, which follow the theme colours;</li><li>decorative emoji in text were removed;</li><li>where an emoji stood for a word (the seed symbol), the word is used;</li><li>warnings keep a monochrome ⚠ text symbol and ticks keep ✓.</li></ul> README headings were cleaned the same way. |
+| Credentials and AI credits in header and footer | **Done.** The header now shows the title, tagline, the author's name and the privacy badge. Qualifications, contact and AI-tool credits are in the footer only. |
+| Too many entry points on the first screen | **Done.** At the Beginner level (the default for first visits), the settings Save/Load buttons and the separate 7-step-pipeline launcher are hidden. Model import/export and Clear session remain, because the "Validate an existing model" path needs them. |
+| Beginner default | Already the default (since the first review). |
+| Survival as a separate tab | Already changed: time-to-event is an outcome type chosen in Step 2. |
+| Model card; confirmation before single-patient prediction | Already in place. |
+| Contrast | The axe-core scan (WCAG 2.1 AA, including colour contrast) passes on every main screen in both themes. |
+| Competing risks | Not implemented. A limitation is added to the README: death before revision is treated as censoring, so revision risk is overestimated when deaths are common. |
+| Large files, inline styles, `unsafe-eval`, innerHTML | Deferred, as in the DeepSeek response. `unsafe-eval` is required by TensorFlow.js and documented (confirmed by removing it). Text from data reaching `innerHTML` is escaped, and this has been fuzz-tested in two security reviews. |
+| Subgroup CIs, clustered DeLong, random survival forests | Remain listed as known gaps (feature freeze). |
+| Human statistician review; software paper | Agreed. They need the author, not code. |

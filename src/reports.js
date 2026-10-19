@@ -32,14 +32,14 @@ function renderPipelineVsBaselineComparison() {
 
         DOM.pipelineVsBaselineContent.innerHTML = `
             <div class="pipeline-alert pipeline-alert-info">
-                <div style="font-size: 20px;">💡</div>
+                <div style="font-size: 20px;"><span class="ico ico-bulb" aria-hidden="true"></span></div>
                 <div>
                     <strong>Baseline Benchmark Not Run Yet:</strong><br>
                     You have successfully completed the 7-Step Pipeline with <strong>${escapeHtml(pipeBest.name)}</strong> (${metricSummary}).<br>
                     To see whether the 7-Step Pipeline predicts better than the standard workflow on this cohort, click below:
                     <div style="margin-top: 10px;">
                         <button class="btn btn-primary btn-sm" ${actionAttrs('trainStandardBaselineFromPipeline')}>
-                            ⚖️ Train Standard Baseline &amp; Compare
+                            Train Standard Baseline &amp; Compare
                         </button>
                         <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 6px;">Uses your Step 4 model choices and the same train/test split as the pipeline, then brings you straight back here with the comparison.</div>
                     </div>
@@ -176,7 +176,7 @@ function renderPipelineVsBaselineComparison() {
     const compHtml = `
         <div class="cmp-baseline-note">
             <span>${AppState.baselineJustTrained
-                ? `✓ Standard baseline trained just now${trainedAt ? ` (${trainedAt})` : ''} with the same train/test split as the pipeline.`
+                ? `✓Standard baseline trained just now${trainedAt ? ` (${trainedAt})` : ''} with the same train/test split as the pipeline.`
                 : `ℹ️ This comparison uses the standard-workflow (Step 4) results already trained${trainedAt ? ` at ${trainedAt}` : ''}, so no new training was needed. If you have since changed settings, re-run it to compare like with like.`}</span>
             <button type="button" class="btn btn-outline btn-sm" ${actionAttrs('trainStandardBaselineFromPipeline')}>↻ Re-run baseline &amp; compare</button>
         </div>
@@ -189,7 +189,7 @@ function renderPipelineVsBaselineComparison() {
                 <tr>
                     <th>Measure &amp; what it means</th>
                     <th style="color: var(--accent-cyan);">Step 4 Standard Workflow</th>
-                    <th style="color: var(--accent-emerald);">🔬 7-Step Pipeline</th>
+                    <th style="color: var(--accent-emerald);">7-Step Pipeline</th>
                     <th>Difference (pipeline vs standard)</th>
                 </tr>
             </thead>
@@ -207,19 +207,19 @@ function renderPipelineVsBaselineComparison() {
         </table></div>
 
         <div class="cmp-guide">
-            <div class="cmp-guide-title">📖 How to read this comparison</div>
+            <div class="cmp-guide-title">How to read this comparison</div>
             <ul>${guide.map(g => `<li>${g}</li>`).join('')}
                 <li>In the <strong>Difference</strong> column, green means the pipeline did better on that measure and red means it did worse.</li>
             </ul>
         </div>
 
         <div class="cmp-cautions">
-            <div class="cmp-cautions-title">⚠️ Cautions before drawing conclusions</div>
+            <div class="cmp-cautions-title">⚠︎ Cautions before drawing conclusions</div>
             <ul>${cautions.map(c => `<li>${c}</li>`).join('')}</ul>
         </div>
 
         <div class="pipeline-alert pipeline-alert-info" style="margin-top: 10px;">
-            <div style="font-size: 20px;">🔬</div>
+            <div style="font-size: 20px;"><span class="ico ico-search" aria-hidden="true"></span></div>
             <div>
                 <strong>Summary:</strong> ${headline} Because of the cautions above, this is <strong>not proof</strong> that one workflow is better. To establish a genuine difference, test both on the <strong>same, larger group of patients</strong>, ideally an independent validation cohort.
             </div>

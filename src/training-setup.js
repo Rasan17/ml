@@ -189,7 +189,7 @@ function setupSeedManagement() {
                 if (cInp) cInp.value = randSeed;
                 if (hInp) hInp.value = randSeed;
             });
-            showSeedToast('All models assigned individual random seeds 🎲');
+            showSeedToast('All models assigned individual random seeds ');
         });
     }
 }

@@ -160,13 +160,13 @@ async function executePipelineStep7() {
                 const key = `${k}|${inFold ? 'sel' : ''}|${cols.join('␟')}`;
                 if (!foldCache[key]) {
                     foldCache[key] = await buildPipelineFolds(AppState.pipeline.trainRows, cols, k, evalSeed, (f, nf) => {
-                        if (watchdog) watchdog.tick(stepOf(stepId), `🎯 Preparing cross-validation folds for ${label}: fold ${f}/${nf} (imputation, SMOTENC, scaling${inFold ? ' and top-70% selection' : ''} inside each fold)...`);
+                        if (watchdog) watchdog.tick(stepOf(stepId), `Preparing cross-validation folds for ${label}: fold ${f}/${nf} (imputation, SMOTENC, scaling${inFold ? ' and top-70% selection' : ''} inside each fold)...`);
                     }, inFold);
                 }
                 return foldCache[key];
             };
             const plan = (pipeSelectCV || recalPipe !== 'none') ? plannedModels.slice() : plannedModels.filter(id => id !== 'ensemble');
-            if (watchdog) watchdog.tick(1, `🎯 ${pipeTune ? 'Automatic tuning' : 'Cross-validation'} of ${plan.length} models on ${Math.min(nTrainReal, TUNE_MAX_ROWS).toLocaleString('en-GB')} training patients: this takes several times longer than training alone (the neural network is slowest). A time estimate appears once each model's first trial has run.`);
+            if (watchdog) watchdog.tick(1, `${pipeTune ? 'Automatic tuning' : 'Cross-validation'} of ${plan.length} models on ${Math.min(nTrainReal, TUNE_MAX_ROWS).toLocaleString('en-GB')} training patients: this takes several times longer than training alone (the neural network is slowest). A time estimate appears once each model's first trial has run.`);
             await ModelEngine.yieldToBrowser();
             for (let t = 0; t < plan.length; t++) {
                 const id = plan[t];
@@ -180,7 +180,7 @@ async function executePipelineStep7() {
                 if (fdModel.screening) pipeTuningReport.screening = fdModel.screening;
                 const res = await runTuningOnFolds(id, pHp[id], fdModel, isClassification, numClasses, watchdog, (c, nc, f, nf, eta) => {
                     const what = doTune ? `Tuning ${label} (${t + 1}/${plan.length}): combination ${c}/${nc}, fold ${f}/${nf}` : `Cross-validating ${label} (${t + 1}/${plan.length}): fold ${f}/${nf}`;
-                    if (watchdog) watchdog.tick(stepOf(id), `🎯 ${what}${(eta || '').replace(/&middot;/g, '·')} (Training set only)...`);
+                    if (watchdog) watchdog.tick(stepOf(id), `${what}${(eta || '').replace(/&middot;/g, '·')} (Training set only)...`);
                 }, !doTune);
                 pHp[id] = res.bestHp;
                 if (doTune) pipeTuningReport.models.push(res);
@@ -253,7 +253,7 @@ async function executePipelineStep7() {
         const dnnEval = await ModelEngine.evaluateAsync(dnn, fullTestTrans.X, fullTestTrans.y, isClassification, fullPrep.targetClasses, pipeEvalOptions, evalAbortOpts(watchdog));
         dnnEval.featuresUsed = `All Surviving (${activeCols.length} features)`;
         dnnEval.constraintNote = dnn.usedFallback
-            ? `⚠️ TensorFlow.js failed (${dnn.fallbackReason}); a linear fallback model was trained instead of a neural network.`
+            ? `⚠︎ TensorFlow.js failed (${dnn.fallbackReason}); a linear fallback model was trained instead of a neural network.`
             : `L2 weight decay (${pHp.nn.l2Reg}) and dropout (${pHp.nn.dropoutRate}); ${dnn.trainingInfo ? describeNNTraining(dnn.trainingInfo) : ''}` + tunedTag('nn');
         benchmarkList.push({ id: 'nn', name: displayModelName('nn', dnn), model: dnn, prep: fullPrep, eval: dnnEval });
 
@@ -425,7 +425,7 @@ function renderPipelineLeaderboardOnly() {
                 <td style="text-align: right;">
                     ${isDeployed ? `
                         <span class="pill" style="background: rgba(16, 185, 129, 0.15); color: var(--tag-emerald); font-weight: 700; border-color: rgba(16, 185, 129, 0.3);">
-                            ✓ Active
+                            ✓Active
                         </span>
                     ` : `
                         <button class="btn btn-secondary btn-sm" ${actionAttrs('deployPipelineModel', item.id)} title="Make this the active research model for Steps 5 and 6">
@@ -441,7 +441,7 @@ function renderPipelineLeaderboardOnly() {
     const caveats = new Set();
     sorted.forEach(item => {
         summariseHeldOutSet(item.eval).forEach(n => caveats.add(n));
-        if (item.eval.fallbackNote) caveats.add(`⚠️ ${escapeHtml(item.eval.fallbackNote)}`);
+        if (item.eval.fallbackNote) caveats.add(`⚠︎ ${escapeHtml(item.eval.fallbackNote)}`);
     });
     if (sorted[0] && sorted[0].eval.cv) {
         const scrn = AppState.pipeline.cvScreening;
@@ -471,7 +471,7 @@ function renderPipelineLeaderboardOnly() {
         const minority = Math.min(...Object.values(counts));
         const nPred = (AppState.pipeline.featureCols || []).filter(c => !AppState.pipeline.droppedFeatures.has(c)).length;
         if (nPred > 0 && minority / nPred < 10) {
-            caveats.add(`⚠️ Small sample for the number of predictors: the smaller outcome group has ${minority} real training patient(s) for ${nPred} predictor(s) (${(minority / nPred).toFixed(1)} per predictor; at least 10–20 is a common rule of thumb). SMOTENC does not add real information, so treat the results as exploratory.`);
+            caveats.add(`⚠︎ Small sample for the number of predictors: the smaller outcome group has ${minority} real training patient(s) for ${nPred} predictor(s) (${(minority / nPred).toFixed(1)} per predictor; at least 10–20 is a common rule of thumb). SMOTENC does not add real information, so treat the results as exploratory.`);
         }
     }
     if (isClassification && sorted[0] && sorted[0].eval.positiveClass !== null && sorted[0].eval.positiveClass !== undefined) {

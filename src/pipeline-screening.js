@@ -56,7 +56,7 @@ function renderPipelineStep2() {
                 <td><strong style="color: ${norm.isNormal ? 'var(--accent-emerald)' : 'var(--accent-amber)'};">${norm.skewness}</strong></td>
                 <td>
                     <span class="pill" style="${norm.isNormal ? 'background: rgba(16, 185, 129, 0.15); color: var(--tag-emerald); border-color: rgba(16, 185, 129, 0.4);' : 'background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.4);'}">
-                        ${norm.isNormal ? '✓ Approx. symmetric (|G₁| ≤ 1.0)' : '⚠️ Skewed (|G₁| > 1.0)'}
+                        ${norm.isNormal ? '✓Approx. symmetric (|G₁| ≤ 1.0)' : '⚠︎ Skewed (|G₁| > 1.0)'}
                     </span>
                 </td>
                 <td style="font-size: 12px; color: var(--text-secondary);">
@@ -77,7 +77,7 @@ function renderPipelineStep2() {
     if (highPairs.length === 0) {
         DOM.pipelineCorrPairsContainer.innerHTML = `
             <div class="pipeline-alert pipeline-alert-success">
-                <div style="font-size: 18px;">✅</div>
+                <div style="font-size: 18px;"><span class="ico ico-check" aria-hidden="true"></span></div>
                 <div>
                     <strong>No Excessive Pairwise Collinearity Detected:</strong> All continuous variable pairs have |correlation| &lt; 0.80. No automatic dropping is strictly required; you may proceed to Step 3.
                 </div>
@@ -104,13 +104,13 @@ function renderPipelineStep2() {
                     </div>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                         <button class="btn btn-rose btn-sm" ${actionAttrs('pipelineDropFeature', p.var1)} ${var1Dropped ? 'disabled' : ''}>
-                            ${var1Dropped ? `✓ Dropped ${escapeHtml(p.var1)}` : `🗑️ Drop ${escapeHtml(p.var1)}`}
+                            ${var1Dropped ? `✓Dropped ${escapeHtml(p.var1)}` : `Drop ${escapeHtml(p.var1)}`}
                         </button>
                         <button class="btn btn-rose btn-sm" ${actionAttrs('pipelineDropFeature', p.var2)} ${var2Dropped ? 'disabled' : ''}>
-                            ${var2Dropped ? `✓ Dropped ${escapeHtml(p.var2)}` : `🗑️ Drop ${escapeHtml(p.var2)}`}
+                            ${var2Dropped ? `✓Dropped ${escapeHtml(p.var2)}` : `Drop ${escapeHtml(p.var2)}`}
                         </button>
                         <button class="btn btn-secondary btn-sm" ${actionAttrs('pipelineKeepBothPairs', p.var1, p.var2)}>
-                            🤝 Keep Both
+                            Keep Both
                         </button>
                     </div>
                 </div>
@@ -143,7 +143,7 @@ function renderPipelineStep3() {
         vifResults = DataEngine.calculateVIF(AppState.pipeline.trainRows, activeCols, AppState.pipeline.columnConfigs);
     } catch (err) {
         if (DOM.pipelineVifTableContainer) {
-            DOM.pipelineVifTableContainer.innerHTML = `<div class="pipeline-alert pipeline-alert-warning"><div>⚠️</div><div>${escapeHtml(err.message)}</div></div>`;
+            DOM.pipelineVifTableContainer.innerHTML = `<div class="pipeline-alert pipeline-alert-warning"><div><span class="ico ico-warn" aria-hidden="true"></span></div><div>${escapeHtml(err.message)}</div></div>`;
         }
         if (DOM.pipelineDropVifBtn) DOM.pipelineDropVifBtn.disabled = true;
         return;
@@ -185,7 +185,7 @@ function renderPipelineStep3() {
                 <td><strong style="color: ${isHigh ? 'var(--accent-rose)' : 'var(--accent-emerald)'}; font-size: 13.5px;">${item.vif >= 999 ? '≥ 999 (≈ perfect collinearity)' : item.vif}</strong>${item.dummyCount > 1 && item.vif < 999 ? `<div style="font-size: 10.5px; color: var(--text-muted);">GVIF ${item.gvif}; GVIF<sup>1/(2·df)</sup> ${item.adjustedGVIF}</div>` : ''}</td>
                 <td>
                     <span class="${isHigh ? 'vif-badge-danger' : 'vif-badge-ok'}">
-                        ${isHigh ? '⚠️ VIF > 5.0 (High Multicollinearity)' : '✓ VIF ≤ 5.0 (Acceptable)'}
+                        ${isHigh ? '⚠︎ VIF > 5.0 (High Multicollinearity)' : '✓VIF ≤ 5.0 (Acceptable)'}
                     </span>
                 </td>
             </tr>
@@ -313,13 +313,13 @@ function renderPipelineStep4() {
                         </button>
                     ` : `
                         <button class="btn btn-rose btn-sm" ${actionAttrs('pipelineDropFeatureStep4', r.feature)} title="Exclude this variable from modeling">
-                            🗑️ Exclude
+                            Exclude
                         </button>
                     `}
                 </td>
                 <td>
                     <span class="pill" style="${isSig ? 'background: rgba(16, 185, 129, 0.15); color: var(--tag-emerald); border-color: rgba(16, 185, 129, 0.4);' : 'background: rgba(100, 116, 139, 0.15); color: var(--text-muted);'}">
-                        ${isSig ? '✓ p < 0.05 (Sig)' : 'p ≥ 0.05 (Non-Sig)'}
+                        ${isSig ? '✓p < 0.05 (Sig)' : 'p ≥ 0.05 (Non-Sig)'}
                     </span>
                 </td>
                 <td><span class="pill pill-${r.scale.toLowerCase().includes('nominal') ? 'nominal' : 'continuous'}">${r.scale}</span></td>
@@ -373,7 +373,7 @@ function updateUnivSelectionSummary() {
     if (DOM.pipelineUnivSelectedSummary) {
         DOM.pipelineUnivSelectedSummary.innerHTML = `
             Checked for Inclusion: <strong>${checkedCount} / ${cbs.length}</strong> features. 
-            Click <strong>"🗑️ Exclude Unchecked Features"</strong> to apply changes to subsequent pipeline steps.
+            Click <strong>"Exclude Unchecked Features"</strong> to apply changes to subsequent pipeline steps.
         `;
     }
 }
@@ -391,7 +391,7 @@ function filterSignificantUnivariateFeatures() {
         }
     });
     updateUnivSelectionSummary();
-    alert(`Unchecked ${uncheckCount} non-significant feature(s) (p ≥ 0.05). Click "🗑️ Exclude Unchecked Features" to finalize.`);
+    alert(`Unchecked ${uncheckCount} non-significant feature(s) (p ≥ 0.05). Click "Exclude Unchecked Features" to finalize.`);
 }
 
 function selectAllUnivariateFeatures() {

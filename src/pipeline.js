@@ -33,7 +33,7 @@ function updatePipelineCompleteCaseInfo() {
     const heavy = incomplete / rows.length > 0.2 || remaining < 30;
     info.textContent = `${incomplete} of ${rows.length} rows (${(100 * incomplete / rows.length).toFixed(1)}%) have an empty predictor cell ` +
         `(Meta / ID columns ignored); ${remaining} complete rows would remain.` +
-        (heavy ? ' ⚠️ This removes a large share of the data; complete-case analysis is unbiased only if values are missing completely at random, otherwise imputation is usually preferable.' : '');
+        (heavy ? ' ⚠︎ This removes a large share of the data; complete-case analysis is unbiased only if values are missing completely at random, otherwise imputation is usually preferable.' : '');
     info.style.color = heavy ? 'var(--accent-amber)' : 'var(--text-muted)';
 }
 

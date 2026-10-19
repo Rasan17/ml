@@ -156,7 +156,7 @@ function deployTestedModel(modelId) {
         renderSinglePredictionForm();
     }
 
-    showSeedToast(`✓ "${displayModelName(modelId, targetItem.model)}" is now the active research model for Steps 5 & 6`);
+    showSeedToast(`✓"${displayModelName(modelId, targetItem.model)}" is now the active research model for Steps 5 & 6`);
 }
 
 // A Step 4 (standard workflow) model is now active: record that, and restore the encoding it was
@@ -179,7 +179,7 @@ function showSeedToast(msg) {
     const toast = document.createElement('div');
     toast.className = 'seed-toast';
     toast.setAttribute('role', 'status');
-    toast.innerHTML = '<span>📋</span> <span></span>';
+    toast.innerHTML = '<span></span>';
     toast.lastElementChild.textContent = msg;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 2600);

@@ -8,11 +8,11 @@
          import map and the file:// loader), so injected scripts and inline event handlers are blocked. Inline styles are
          still permitted (the interface uses them). 'unsafe-eval' is needed because TensorFlow.js evaluates
          Function("return this") at start-up; without it the neural network silently falls back to a linear model. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-PbVRhYFCMVMDydGD9MttLrpr3+Llq4fDkjII4IzsucI=' 'sha256-dcvmDuIEkzY2iblgHOFlvrUw6d48JwHGLLgUp5A4PnA=' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-BMP9alkN1kDcQK6ZVbGuWSgHg4ImGw0e7mb7nzWsHq4=' 'sha256-dcvmDuIEkzY2iblgHOFlvrUw6d48JwHGLLgUp5A4PnA=' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
     <title>Universal Medical ML/NeuralNet Predictor | Clinical Machine Learning & Neural Networks</title>
     <meta name="description" content="Universal in-browser client-side Machine Learning and Neural Network Predictor for Clinical Medicine. Features automated variable typing, multi-strategy missing data imputation, neural networks, random forests, single & batch inference.">
     <meta name="author" content="Dr G Narenthiran MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN)">
-    <link rel="stylesheet" href="style.css?h=b48eefd11e">
+    <link rel="stylesheet" href="style.css?h=c03df3f74a">
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -24,15 +24,11 @@
              =================================================================== -->
         <header class="app-header">
             <div class="brand-section">
-                <div class="brand-icon">🩺</div>
+                <div class="brand-icon"><span class="ico ico-pulse" aria-hidden="true"></span></div>
                 <div class="brand-details">
                     <h1>Universal Medical ML/NeuralNet Predictor</h1>
                     <div class="subtitle">Universal Clinical Machine Learning & Neural Network Inference Suite</div>
-                    <div class="attribution">
-                        Conceived, designed and directed by <strong>Dr G Narenthiran</strong> MB ChB BSc(MedSci)(Hons) FEBNS FRCS(SN) &bull; <a href="mailto:g_narenthiran@hotmail.com" style="color: var(--accent-cyan); text-decoration: underline; text-underline-offset: 2px;">g_narenthiran@hotmail.com</a><br>
-                        Neurosurgery Research Listserv, UK &bull; <em>Implemented with AI pair programming (Google Antigravity &amp; Anthropic Claude Code)</em><br>
-                        <span style="font-size: 11px; opacity: 0.9;">&copy; 2026 Dr G Narenthiran. All rights reserved.</span>
-                    </div>
+                    <div class="attribution">By <strong>Dr G Narenthiran</strong> &bull; for research and education (full credits and contact at the foot of the page)</div>
                 </div>
             </div>
 
@@ -41,7 +37,7 @@
                     ● Runs in your browser · no data sent
                 </span>
                 <button id="theme-toggle" class="btn btn-secondary btn-sm" aria-label="Toggle Theme">
-                    ☀️ Light
+                    Light
                 </button>
             </div>
         </header>
@@ -75,7 +71,7 @@
                 <span>Batch Prediction</span>
             </button>
             <button class="step-tab" data-step="pipeline" id="tab-step-pipeline" style="border: 1px solid rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.08);">
-                <span class="badge" style="background: linear-gradient(135deg, #10b981, #06b6d4); color: white;">🔬</span>
+                <span class="badge" style="background: linear-gradient(135deg, #10b981, #06b6d4); color: white;"><span class="ico ico-search" aria-hidden="true"></span></span>
                 <span style="font-weight: 700; color: var(--accent-emerald);">7-Step Pipeline</span>
             </button>
         </nav>
@@ -85,20 +81,20 @@
         <div class="settings-bar" id="settings-bar">
             <div class="settings-bar-row">
                 <div class="settings-bar-text">
-                    <strong>⚙️ Analysis settings</strong>
-                    <span>Save all your choices for this dataset and restore them another day, then re-run in one click. Settings files contain choices and column names only, never patient values. Settings remembered automatically are kept only in this browser, until you clear them (🧹 Clear session).</span>
+                    <strong>Analysis settings</strong>
+                    <span data-level="intermediate">Save all your choices for this dataset and restore them another day, then re-run in one click. Settings files contain choices and column names only, never patient values. Settings remembered automatically are kept only in this browser, until you clear them (Clear session).</span>
                 </div>
                 <div class="settings-bar-actions">
-                    <button type="button" id="settings-save-btn" class="btn btn-secondary btn-sm" disabled title="Load a dataset first">💾 Save settings</button>
-                    <button type="button" id="settings-load-btn" class="btn btn-secondary btn-sm">📂 Load settings</button>
+                    <button type="button" id="settings-save-btn" data-level="intermediate" class="btn btn-secondary btn-sm" disabled title="Load a dataset first">Save settings</button>
+                    <button type="button" id="settings-load-btn" data-level="intermediate" class="btn btn-secondary btn-sm">Load settings</button>
                     <input type="file" id="settings-file-input" accept=".json,application/json" style="display: none;" aria-label="Settings file">
-                    <span class="settings-bar-sep" aria-hidden="true"></span>
-                    <button type="button" id="model-export-btn" class="btn btn-secondary btn-sm" disabled title="Train or deploy a model first">📦 Export trained model</button>
-                    <button type="button" id="model-card-btn" class="btn btn-secondary btn-sm" disabled title="Train or deploy a model first">📝 Model card</button>
-                    <button type="button" id="model-import-btn" class="btn btn-secondary btn-sm" title="Load a model exported from this app, to make predictions or validate it on new patients">📥 Import trained model</button>
+                    <span class="settings-bar-sep" aria-hidden="true" data-level="intermediate"></span>
+                    <button type="button" id="model-export-btn" class="btn btn-secondary btn-sm" disabled title="Train or deploy a model first">Export trained model</button>
+                    <button type="button" id="model-card-btn" class="btn btn-secondary btn-sm" disabled title="Train or deploy a model first">Model card</button>
+                    <button type="button" id="model-import-btn" class="btn btn-secondary btn-sm" title="Load a model exported from this app, to make predictions or validate it on new patients">Import trained model</button>
                     <input type="file" id="model-file-input" accept=".json,application/json" style="display: none;" aria-label="Trained model file">
                     <span class="settings-bar-sep" aria-hidden="true"></span>
-                    <button type="button" id="clear-session-btn" class="btn btn-secondary btn-sm" title="Remove every dataset, result, model and cached imputation from this page">🧹 Clear session and patient data</button>
+                    <button type="button" id="clear-session-btn" class="btn btn-secondary btn-sm" title="Remove every dataset, result, model and cached imputation from this page">Clear session and patient data</button>
                 </div>
             </div>
             <div id="settings-banner" aria-live="polite"></div>
@@ -119,48 +115,48 @@
                             </select>
                         </label>
                     </span>
-                    <button type="button" class="task-choice" id="task-develop"><strong>🛠️ Develop a model</strong><span>from my own data: upload a CSV below, then follow Steps 2–4</span></button>
-                    <button type="button" class="task-choice" id="task-validate"><strong>🧪 Validate an existing model</strong><span>import a model file, then score a labelled cohort in Step 6</span></button>
-                    <button type="button" class="task-choice" id="task-demo"><strong>🧠 Explore a demo</strong><span>load the simulated 420-patient iNPH shunt cohort</span></button>
+                    <button type="button" class="task-choice" id="task-develop"><strong>Develop a model</strong><span>from my own data: upload a CSV below, then follow Steps 2–4</span></button>
+                    <button type="button" class="task-choice" id="task-validate"><strong>Validate an existing model</strong><span>import a model file, then score a labelled cohort in Step 6</span></button>
+                    <button type="button" class="task-choice" id="task-demo"><strong>Explore a demo</strong><span>load the simulated 420-patient iNPH shunt cohort</span></button>
                     <p class="autotune-hint ui-level-note" style="width: 100%; margin: 0;">Simplified view: expert settings (model hyperparameters, automatic tuning, custom seeds and, for Beginner, the decision threshold, recalibration, ranking metric and model-selection method) are hidden and use their recommended defaults: cross-validated model selection, threshold 0.5, no recalibration, default seed 42. Choose "Advanced" to see and change them.</p>
                     <p id="task-hint" class="autotune-hint" style="display: none; width: 100%; margin: 0;" aria-live="polite"></p>
-                    <p class="autotune-hint" style="width: 100%; margin: 0;">🔒 Use real patient data only as your approvals allow, on a managed computer (ideally encrypted and offline, see the ethics pack); not on shared or public computers. Remove identifiers before loading, store any exported file that contains patient values like the original data, and use <strong>🧹 Clear session</strong> or close the tab when finished.</p>
+                    <p class="autotune-hint" style="width: 100%; margin: 0;">Use real patient data only as your approvals allow, on a managed computer (ideally encrypted and offline, see the ethics pack); not on shared or public computers. Remove identifiers before loading, store any exported file that contains patient values like the original data, and use <strong>Clear session</strong> or close the tab when finished.</p>
                 </div>
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title-group">
-                            <h2>📁 Upload Clinical Dataset (.csv)</h2>
+                            <h2>Upload Clinical Dataset (.csv)</h2>
                             <p>Upload your clinical, laboratory, imaging, or physiological dataset or explore with pre-loaded medical cohorts.</p>
                         </div>
                         <div class="dataset-pills">
                             <span style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Sample Medical Cohorts:</span>
                             <button id="sample-shunt-large-btn" class="dataset-pill" title="Simulated iNPH cohort of 420 patients from three hospitals, with realistic effect sizes and missing values; a separate 150-patient cohort from a fourth hospital is available for external validation (Option B)">
-                                🧠 iNPH Shunt Response (420 patients, simulated)
+                                iNPH Shunt Response (420 patients, simulated)
                             </button>
                             <button id="sample-cardio-btn" class="dataset-pill">
-                                🫀 Cardiometabolic Risk (Binary)
+                                Cardiometabolic Risk (Binary)
                             </button>
                             <button id="sample-cohort-btn" class="dataset-pill">
-                                🧠 Shunt Response (40-patient mini demo)
+                                Shunt Response (40-patient mini demo)
                             </button>
                             <button id="sample-leakage-btn" class="dataset-pill" title="Teaching example: the 420-patient iNPH cohort plus a column measured after shunting (gait improvement at 6 months). It looks like a predictor but is almost the outcome itself; see how the app flags it and what it does to the results.">
-                                ⚠️ Leakage example (iNPH + a post-operative column)
+                                ⚠︎ Leakage example (iNPH + a post-operative column)
                             </button>
                             <button id="sample-regression-btn" class="dataset-pill">
-                                📈 Functional Recovery Score (Continuous)
+                                Functional Recovery Score (Continuous)
                             </button>
                             <button id="sample-breast-btn" class="dataset-pill" title="Public Breast Cancer Wisconsin (Diagnostic) data, UCI Machine Learning Repository (CC BY 4.0): large enough for stable results and meaningful calibration">
-                                🎗️ Breast Cancer Diagnosis (569 patients, public data)
+                                Breast Cancer Diagnosis (569 patients, public data)
                             </button>
                             <button id="sample-survival-btn" class="dataset-pill" title="Simulated cohort with a time-to-event outcome: time to shunt revision with censoring (opens Step 2 with the time-to-event outcome chosen)">
-                                ⏱️ Shunt Revision (time-to-event, simulated)
+                                Shunt Revision (time-to-event, simulated)
                             </button>
                         </div>
                     </div>
 
                     <div id="upload-dropzone" class="upload-dropzone">
                         <input type="file" id="csv-file-input" accept=".csv" style="display: none;">
-                        <div class="upload-icon-circle">📂</div>
+                        <div class="upload-icon-circle"><span class="ico ico-folder" aria-hidden="true"></span></div>
                         <div>
                             <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary);">
                                 Drag & drop your clinical .csv file here, or click to browse
@@ -187,8 +183,8 @@
                         <button id="to-step-2-btn" class="btn btn-secondary">
                             Standard Workflow: Variable Roles (Step 2) &rarr;
                         </button>
-                        <button id="pipeline-direct-launch-btn" class="btn btn-emerald" data-action="launch7StepPipeline" data-args="[]">
-                            🔬 Launch 7-Step Clinical Pipeline &rarr;
+                        <button id="pipeline-direct-launch-btn" data-level="intermediate" class="btn btn-emerald" data-action="launch7StepPipeline" data-args="[]">
+                            Launch 7-Step Clinical Pipeline &rarr;
                         </button>
                     </div>
                 </div>
@@ -201,7 +197,7 @@
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title-group">
-                            <h2>🏷️ Variable Role & Measurement Scale Configuration</h2>
+                            <h2>Variable Role & Measurement Scale Configuration</h2>
                             <p>Specify the analytical role (Meta, Feature, Target) and clinical measurement scale (Continuous, Ordinal, Nominal) for each column.</p>
                         </div>
                         <div style="display: flex; gap: 8px;">
@@ -213,11 +209,11 @@
 
                     <div id="outcome-type-container"></div>
                     <div class="var-include-bar">
-                        <span class="var-include-bar-text">☑️ Tick a variable to <strong>include</strong> it in the analysis; untick to <strong>exclude</strong> it.
+                        <span class="var-include-bar-text">Tick a variable to <strong>include</strong> it in the analysis; untick to <strong>exclude</strong> it.
                             <span id="var-include-summary" class="var-include-summary" aria-live="polite"></span></span>
                         <span class="var-include-bar-actions">
-                            <button type="button" id="var-include-all-btn" class="btn btn-secondary btn-sm" title="Include every variable (columns detected as identifiers or dates stay unticked)">☑ Include all</button>
-                            <button type="button" id="var-exclude-all-btn" class="btn btn-secondary btn-sm" title="Exclude every predictor (the outcome stays included)">☐ Exclude all</button>
+                            <button type="button" id="var-include-all-btn" class="btn btn-secondary btn-sm" title="Include every variable (columns detected as identifiers or dates stay unticked)">Include all</button>
+                            <button type="button" id="var-exclude-all-btn" class="btn btn-secondary btn-sm" title="Exclude every predictor (the outcome stays included)">☐Exclude all</button>
                         </span>
                     </div>
                     <div id="predictor-budget-container"></div>
@@ -241,13 +237,13 @@
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title-group">
-                            <h2>🧹 Clinical Missing Data Detection & Imputation</h2>
+                            <h2>Clinical Missing Data Detection & Imputation</h2>
                             <p>Choose tailored mathematical imputation strategies based on whether variables are continuous, ordinal, or nominal.</p>
                         </div>
                     </div>
 
                             <div class="threshold-row imputation-choice">
-                                <label for="mi-select" class="autotune-folds-label">🧩 How should missing predictor values be handled?
+                                <label for="mi-select" class="autotune-folds-label">How should missing predictor values be handled?
                                     <select id="mi-select" class="control-select" style="width: auto; display: inline-block;">
                                         <option value="single" selected>Single imputation (the Step 3 choices)</option>
                                         <option value="mice5">Multiple imputation (MICE, 5 imputations, pooled predictions)</option>
@@ -258,8 +254,8 @@
                                 <label class="autotune-label" data-level="advanced" id="mi-quick-cv-row" style="display: none; margin: 0; font-weight: 400; font-size: 12.5px;"><input type="checkbox" id="mi-quick-cv"> Quick approximation for very large datasets: use a plain fill (median / most frequent) instead of MICE inside cross-validation folds and bootstrap resamples. The final models still use MICE. Off by default, because the validation then no longer assesses exactly the final procedure.</label>
                                 <span id="mi-estimate" class="autotune-hint" style="margin: 0; display: none;" aria-live="polite"></span>
                                 <span class="mi-file-actions">
-                                    <button type="button" id="mi-save-btn" class="btn btn-secondary btn-sm" disabled>💾 Save imputed data</button>
-                                    <button type="button" id="mi-load-btn" class="btn btn-secondary btn-sm" title="Load imputed data saved earlier, to skip the imputation">📂 Load imputed data</button>
+                                    <button type="button" id="mi-save-btn" class="btn btn-secondary btn-sm" disabled>Save imputed data</button>
+                                    <button type="button" id="mi-load-btn" class="btn btn-secondary btn-sm" title="Load imputed data saved earlier, to skip the imputation">Load imputed data</button>
                                     <input type="file" id="mi-file-input" accept=".json,application/json" style="display: none;" aria-label="Imputed data file">
                                 </span>
                                 <span id="mi-file-status" class="autotune-hint" style="margin: 0; display: none;" aria-live="polite"></span>
@@ -290,10 +286,10 @@
 
                     <div class="impute-action-bar">
                         <div style="font-size: 12.5px; color: var(--text-secondary);">
-                            <span id="impute-methods-hint">💡 Continuous: Median, Mean, KNN, Constant &bull; Ordinal: Mode, Median &bull; Nominal: Mode, "Missing" category</span>
+                            <span id="impute-methods-hint">Continuous: Median, Mean, KNN, Constant &bull; Ordinal: Mode, Median &bull; Nominal: Mode, "Missing" category</span>
                         </div>
                         <button id="apply-imputation-btn" class="btn btn-emerald">
-                            ⚡ Apply Imputation & Validate Dataset
+                            Apply Imputation & Validate Dataset
                         </button>
                     </div>
 
@@ -314,7 +310,7 @@
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title-group">
-                            <h2>🧠 Machine Learning & Neural Network Models</h2>
+                            <h2>Machine Learning & Neural Network Models</h2>
                             <p>Select from a multilayer perceptron neural network and classic machine learning algorithms for clinical prediction.</p>
                         </div>
                     </div>
@@ -327,7 +323,7 @@
                         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
                             <div>
                                 <h4 style="font-size: 13.5px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
-                                    <span>🎯</span> Model Testing Scope &amp; Tournament Selection
+                                    Model Testing Scope &amp; Tournament Selection
                                 </h4>
                                 <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
                                     Choose whether to train and benchmark a single algorithm, a custom subset of models, or all available models simultaneously.
@@ -336,19 +332,19 @@
                             <!-- Quick action presets -->
                             <div style="display: flex; gap: 6px; flex-wrap: wrap;">
                                 <button type="button" id="btn-select-all-models" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 4px 10px;">
-                                    ⚡ Select All Models
+                                    Select All Models
                                 </button>
                                 <button type="button" id="btn-select-top-models" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 4px 10px;">
-                                    ✨ NN + Ensemble + RF
+                                    NN + Ensemble + RF
                                 </button>
                                 <button type="button" id="btn-clear-model-selection" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 4px 10px;">
                                     Reset Selection
                                 </button>
                                 <button type="button" id="btn-all-default-seed" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 4px 10px;" title="Set all models to default seed 42">
-                                    🌱 All Default Seeds (42)
+                                    All Default Seeds (42)
                                 </button>
                                 <button type="button" id="btn-all-random-seed" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 4px 10px;" title="Assign distinct random seeds to all models">
-                                    🎲 Randomize All
+                                    Randomize All
                                 </button>
                             </div>
                         </div>
@@ -398,7 +394,7 @@
                         </div>
                     </div>
 
-                    <div class="survival-step4-note cal-panel">⏱️ <strong>Time-to-event outcome</strong> (chosen in Step 2): Step 4 fits a <strong>Cox proportional-hazards model</strong> (penalised automatically if it does not converge) with the predictors from Step 2 and the missing-data handling from Step 3 (single imputation or MICE), using the validation design chosen below. The model choice and the yes/no settings (threshold, recalibration, ranking metric) do not apply.</div>
+                    <div class="survival-step4-note cal-panel"><span class="ico ico-clock" aria-hidden="true"></span> <strong>Time-to-event outcome</strong> (chosen in Step 2): Step 4 fits a <strong>Cox proportional-hazards model</strong> (penalised automatically if it does not converge) with the predictors from Step 2 and the missing-data handling from Step 3 (single imputation or MICE), using the validation design chosen below. The model choice and the yes/no settings (threshold, recalibration, ranking metric) do not apply.</div>
                     <!-- Model Cards Grid -->
                     <div class="model-cards-grid">
                         <div class="model-card selected" data-model-id="nn">
@@ -415,7 +411,7 @@
                             <!-- Model Seed Control -->
                             <div class="model-seed-box" data-model="nn" data-stop-click>
                                 <div class="model-seed-header">
-                                    <span class="model-seed-title">🌱 Seed:</span>
+                                    <span class="model-seed-title">Seed:</span>
                                     <div class="seed-mode-selector">
                                         <label class="seed-mode-pill">
                                             <input type="radio" name="seed-mode-nn" value="default" class="seed-mode-radio" data-model="nn" checked>
@@ -430,7 +426,7 @@
                                 <div class="custom-seed-row" id="custom-seed-row-nn" style="display: none;">
                                     <div class="seed-input-wrap">
                                         <input type="number" id="nn-card-seed-input" aria-label="Custom seed for Neural Network (MLP)" class="control-input card-seed-input" data-model="nn" placeholder="Custom seed" value="42">
-                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="nn" title="Generate random seed">🎲</button>
+                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="nn" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                     </div>
                                     <span class="seed-hint">Custom integer seed (reproducible on the same browser &amp; TF.js backend; GPU arithmetic can differ slightly across devices).</span>
                                 </div>
@@ -451,7 +447,7 @@
                             <!-- Model Seed Control -->
                             <div class="model-seed-box" data-model="rf" data-stop-click>
                                 <div class="model-seed-header">
-                                    <span class="model-seed-title">🌱 Seed:</span>
+                                    <span class="model-seed-title">Seed:</span>
                                     <div class="seed-mode-selector">
                                         <label class="seed-mode-pill">
                                             <input type="radio" name="seed-mode-rf" value="default" class="seed-mode-radio" data-model="rf" checked>
@@ -466,7 +462,7 @@
                                 <div class="custom-seed-row" id="custom-seed-row-rf" style="display: none;">
                                     <div class="seed-input-wrap">
                                         <input type="number" id="rf-card-seed-input" aria-label="Custom seed for Random Forest" class="control-input card-seed-input" data-model="rf" placeholder="Custom seed" value="42">
-                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="rf" title="Generate random seed">🎲</button>
+                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="rf" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                     </div>
                                     <span class="seed-hint">Custom bootstrap and feature split seed.</span>
                                 </div>
@@ -487,7 +483,7 @@
                             <!-- Model Seed Control -->
                             <div class="model-seed-box" data-model="glm" data-stop-click>
                                 <div class="model-seed-header">
-                                    <span class="model-seed-title">🌱 Seed:</span>
+                                    <span class="model-seed-title">Seed:</span>
                                     <div class="seed-mode-selector">
                                         <label class="seed-mode-pill">
                                             <input type="radio" name="seed-mode-glm" value="default" class="seed-mode-radio" data-model="glm" checked>
@@ -502,7 +498,7 @@
                                 <div class="custom-seed-row" id="custom-seed-row-glm" style="display: none;">
                                     <div class="seed-input-wrap">
                                         <input type="number" id="glm-card-seed-input" aria-label="Custom seed for Logistic / Ridge Regression" class="control-input card-seed-input" data-model="glm" placeholder="Custom seed" value="42">
-                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="glm" title="Generate random seed">🎲</button>
+                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="glm" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                     </div>
                                     <span class="seed-hint">Custom seed for parameter initialization.</span>
                                 </div>
@@ -523,7 +519,7 @@
                             <!-- Model Seed Control -->
                             <div class="model-seed-box" data-model="knn" data-stop-click>
                                 <div class="model-seed-header">
-                                    <span class="model-seed-title">🌱 Seed:</span>
+                                    <span class="model-seed-title">Seed:</span>
                                     <div class="seed-mode-selector">
                                         <label class="seed-mode-pill">
                                             <input type="radio" name="seed-mode-knn" value="default" class="seed-mode-radio" data-model="knn" checked>
@@ -538,7 +534,7 @@
                                 <div class="custom-seed-row" id="custom-seed-row-knn" style="display: none;">
                                     <div class="seed-input-wrap">
                                         <input type="number" id="knn-card-seed-input" aria-label="Custom seed for k-Nearest Neighbours" class="control-input card-seed-input" data-model="knn" placeholder="Custom seed" value="42">
-                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="knn" title="Generate random seed">🎲</button>
+                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="knn" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                     </div>
                                     <span class="seed-hint">Custom seed for equidistant ranking tie-breaks.</span>
                                 </div>
@@ -559,7 +555,7 @@
                             <!-- Model Seed Control -->
                             <div class="model-seed-box" data-model="nb" data-stop-click>
                                 <div class="model-seed-header">
-                                    <span class="model-seed-title">🌱 Seed:</span>
+                                    <span class="model-seed-title">Seed:</span>
                                     <div class="seed-mode-selector">
                                         <label class="seed-mode-pill">
                                             <input type="radio" name="seed-mode-nb" value="default" class="seed-mode-radio" data-model="nb" checked>
@@ -574,7 +570,7 @@
                                 <div class="custom-seed-row" id="custom-seed-row-nb" style="display: none;">
                                     <div class="seed-input-wrap">
                                         <input type="number" id="nb-card-seed-input" aria-label="Custom seed for Naive Bayes" class="control-input card-seed-input" data-model="nb" placeholder="Custom seed" value="42">
-                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="nb" title="Generate random seed">🎲</button>
+                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="nb" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                     </div>
                                     <span class="seed-hint">Reference seed recorded for provenance.</span>
                                 </div>
@@ -595,7 +591,7 @@
                             <!-- Model Seed Control -->
                             <div class="model-seed-box" data-model="gbm" data-stop-click>
                                 <div class="model-seed-header">
-                                    <span class="model-seed-title">🌱 Seed:</span>
+                                    <span class="model-seed-title">Seed:</span>
                                     <div class="seed-mode-selector">
                                         <label class="seed-mode-pill">
                                             <input type="radio" name="seed-mode-gbm" value="default" class="seed-mode-radio" data-model="gbm" checked>
@@ -610,7 +606,7 @@
                                 <div class="custom-seed-row" id="custom-seed-row-gbm" style="display: none;">
                                     <div class="seed-input-wrap">
                                         <input type="number" id="gbm-card-seed-input" aria-label="Custom seed for Gradient-Boosted Trees" class="control-input card-seed-input" data-model="gbm" placeholder="Custom seed" value="42">
-                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="gbm" title="Generate random seed">🎲</button>
+                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="gbm" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                     </div>
                                     <span class="seed-hint">Reference seed recorded for provenance.</span>
                                 </div>
@@ -631,7 +627,7 @@
                             <!-- Model Seed Control -->
                             <div class="model-seed-box" data-model="ensemble" data-stop-click>
                                 <div class="model-seed-header">
-                                    <span class="model-seed-title">🌱 Master Seed:</span>
+                                    <span class="model-seed-title">Master Seed:</span>
                                     <div class="seed-mode-selector">
                                         <label class="seed-mode-pill">
                                             <input type="radio" name="seed-mode-ensemble" value="default" class="seed-mode-radio" data-model="ensemble" checked>
@@ -646,7 +642,7 @@
                                 <div class="custom-seed-row" id="custom-seed-row-ensemble" style="display: none;">
                                     <div class="seed-input-wrap">
                                         <input type="number" id="ensemble-card-seed-input" aria-label="Custom seed for Voting / Weighted Ensemble" class="control-input card-seed-input" data-model="ensemble" placeholder="Custom master seed" value="42">
-                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="ensemble" title="Generate random seed">🎲</button>
+                                        <button type="button" class="btn-roll-seed card-btn-roll-seed" data-model="ensemble" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                     </div>
                                     <span class="seed-hint">Propagates deterministic seeds to constituent models.</span>
                                 </div>
@@ -676,7 +672,7 @@
                         <div style="background: var(--bg-surface); padding: 18px 20px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); margin-bottom: 20px;">
                             <div style="margin-bottom: 14px;">
                                 <h4 style="font-size: 14.5px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
-                                    <span>🧪</span> Training &amp; Testing Validation Protocol
+                                    Training &amp; Testing Validation Protocol
                                 </h4>
                                 <p style="font-size: 12px; color: var(--text-muted); margin-top: 3px;">
                                     Choose how training and evaluation datasets are provided and configure your retraining protocol.
@@ -740,7 +736,7 @@
                                         <select id="bootstrap-group-col" class="control-select" style="width: auto; display: inline-block;"><option value="">Each row is a different patient</option></select>
                                     </label>
                                     <p class="autotune-hint">If a patient can have more than one row (several visits or admissions), choose the column that identifies the patient: whole patients are then drawn into each resample (and kept together in cross-validation), so a patient is never both seen and unseen by the same model.</p>
-                                    <p class="autotune-hint">⏱️ With automatic tuning switched on, every resample re-tunes the model, so a run can take several minutes per model (shown with a time estimate). Start with 50 resamples to see how long it takes.</p>
+                                    <p class="autotune-hint">With automatic tuning switched on, every resample re-tunes the model, so a run can take several minutes per model (shown with a time estimate). Start with 50 resamples to see how long it takes.</p>
                                 </div>
                             </div>
 
@@ -786,7 +782,7 @@
                                             </div>
                                             <div class="seed-input-wrap" id="split-seed-custom-wrap" style="display: none;">
                                                 <input type="number" id="split-seed-input" class="control-input" aria-label="Custom split seed" placeholder="e.g. 42" value="42">
-                                                <button type="button" class="btn-roll-seed" id="btn-roll-split-seed" title="Generate random split seed">🎲</button>
+                                                <button type="button" class="btn-roll-seed" id="btn-roll-split-seed" title="Generate random split seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                             </div>
                                             <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
                                         </div>
@@ -855,7 +851,7 @@
                                             </div>
                                         </div>
                                         <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 10px; border-top: 1px dashed var(--border-subtle); padding-top: 8px;">
-                                            💡 Model parameters will be fitted strictly on 100% of this training dataset.
+                                            Model parameters will be fitted strictly on 100% of this training dataset.
                                         </div>
                                     </div>
 
@@ -868,7 +864,7 @@
 
                                         <div id="test-dropzone" style="border: 2px dashed var(--border-color); border-radius: var(--radius-sm); padding: 14px 10px; text-align: center; cursor: pointer; background: var(--bg-surface); transition: var(--transition);">
                                             <input type="file" id="test-csv-file-input" accept=".csv" style="display: none;">
-                                            <div style="font-size: 20px; margin-bottom: 4px;">📂</div>
+                                            <div style="font-size: 20px; margin-bottom: 4px;"><span class="ico ico-folder" aria-hidden="true"></span></div>
                                             <div style="font-size: 12.5px; font-weight: 700; color: var(--text-primary);">Click or drag separate Testing CSV here</div>
                                             <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Must include feature predictors and target outcome</div>
                                         </div>
@@ -961,7 +957,7 @@
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-nn" style="display: none;">
                                     <input type="number" id="nn-seed-input" class="control-input" aria-label="Custom seed for Neural Network (MLP)" placeholder="e.g. 42" value="42">
-                                    <button type="button" class="btn-roll-seed" id="btn-roll-nn-seed" title="Generate random seed">🎲</button>
+                                    <button type="button" class="btn-roll-seed" id="btn-roll-nn-seed" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
                             </div>
@@ -1018,7 +1014,7 @@
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-rf" style="display: none;">
                                     <input type="number" id="rf-seed-input" class="control-input" aria-label="Custom seed for Random Forest" placeholder="e.g. 42" value="42">
-                                    <button type="button" class="btn-roll-seed" id="btn-roll-rf-seed" title="Generate random seed">🎲</button>
+                                    <button type="button" class="btn-roll-seed" id="btn-roll-rf-seed" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
                             </div>
@@ -1066,7 +1062,7 @@
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-glm" style="display: none;">
                                     <input type="number" id="glm-seed-input" class="control-input" aria-label="Custom seed for Logistic / Ridge Regression" placeholder="e.g. 42" value="42">
-                                    <button type="button" class="btn-roll-seed" id="btn-roll-glm-seed" title="Generate random seed">🎲</button>
+                                    <button type="button" class="btn-roll-seed" id="btn-roll-glm-seed" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
                             </div>
@@ -1107,7 +1103,7 @@
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-knn" style="display: none;">
                                     <input type="number" id="knn-seed-input" class="control-input" aria-label="Custom seed for k-Nearest Neighbours" placeholder="e.g. 42" value="42">
-                                    <button type="button" class="btn-roll-seed" id="btn-roll-knn-seed" title="Generate random seed">🎲</button>
+                                    <button type="button" class="btn-roll-seed" id="btn-roll-knn-seed" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
                             </div>
@@ -1146,7 +1142,7 @@
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-nb" style="display: none;">
                                     <input type="number" id="nb-seed-input" class="control-input" aria-label="Custom seed for Naive Bayes" placeholder="e.g. 42" value="42">
-                                    <button type="button" class="btn-roll-seed" id="btn-roll-nb-seed" title="Generate random seed">🎲</button>
+                                    <button type="button" class="btn-roll-seed" id="btn-roll-nb-seed" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
                             </div>
@@ -1211,7 +1207,7 @@
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-gbm" style="display: none;">
                                     <input type="number" id="gbm-seed-input" class="control-input" aria-label="Custom seed for Gradient-Boosted Trees" placeholder="e.g. 42" value="42">
-                                    <button type="button" class="btn-roll-seed" id="btn-roll-gbm-seed" title="Generate random seed">🎲</button>
+                                    <button type="button" class="btn-roll-seed" id="btn-roll-gbm-seed" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
                             </div>
@@ -1257,7 +1253,7 @@
                                 </div>
                                 <div class="seed-input-wrap" id="hp-seed-wrap-ensemble" style="display: none;">
                                     <input type="number" id="ensemble-seed-input" class="control-input" aria-label="Custom seed for Voting / Weighted Ensemble" placeholder="e.g. 42" value="42">
-                                    <button type="button" class="btn-roll-seed" id="btn-roll-ensemble-seed" title="Generate random seed">🎲</button>
+                                    <button type="button" class="btn-roll-seed" id="btn-roll-ensemble-seed" title="Generate random seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                 </div>
                                 <div class="seed-hint">Choose Default (42) or input any custom seed.</div>
                             </div>
@@ -1286,19 +1282,19 @@
                         <!-- Model selection and automatic tuning (k-fold cross-validation inside the Training set) -->
                         <div class="autotune-box">
                             <div data-level="intermediate" class="selection-row" role="radiogroup" aria-labelledby="selection-mode-label">
-                                <span id="selection-mode-label" class="selection-label">🏁 When several models are trained, choose the best one by:</span>
+                                <span id="selection-mode-label" class="selection-label">When several models are trained, choose the best one by:</span>
                                 <label class="selection-option"><input type="radio" name="selection-mode" id="selection-mode-cv" value="cv" checked> Cross-validation within the Training set <span class="selection-tag">recommended</span></label>
                                 <label class="selection-option"><input type="radio" name="selection-mode" id="selection-mode-test" value="test"> Testing-set results <span class="selection-tag selection-tag-muted">faster, but optimistic</span></label>
                             </div>
                             <p class="autotune-hint" style="margin-top: 4px;">With <strong>cross-validation</strong>, each model is scored on parts of the Training set it did not learn from (missing-value filling and scaling are redone inside each part), and the best model is picked on those scores. The Testing set is then used only once, as an honest final check. Picking the winner on the <strong>Testing set</strong> is quicker, but the winner's test score is then too optimistic, because it won on those same patients.</p>
                             <div data-level="intermediate" class="threshold-row">
-                                <label for="decision-threshold" class="autotune-folds-label">🎚️ Decision threshold (two-outcome predictions):
+                                <label for="decision-threshold" class="autotune-folds-label">Decision threshold (two-outcome predictions):
                                     <input type="number" id="decision-threshold" class="control-input" value="0.5" min="0.05" max="0.95" step="0.05" style="width: 80px; display: inline-block;">
                                 </label>
                                 <span class="autotune-hint" style="margin: 0;">A patient is classed as the positive outcome when its predicted probability is at or above this value. 0.5 is the usual default; use a lower value if missing a case is worse than a false alarm. Decide it on clinical grounds <strong>before</strong> looking at the results; do not adjust it to improve the Testing-set score.</span>
                             </div>
                             <div data-level="intermediate" class="threshold-row">
-                                <label for="recalibration-select" class="autotune-folds-label">📐 Recalibrate two-outcome probabilities:
+                                <label for="recalibration-select" class="autotune-folds-label">Recalibrate two-outcome probabilities:
                                     <select id="recalibration-select" class="control-select" style="width: auto; display: inline-block;">
                                         <option value="none" selected>No (use the model's own probabilities)</option>
                                         <option value="platt">Platt scaling (logistic; good for small samples)</option>
@@ -1310,7 +1306,7 @@
                             <div data-level="advanced" class="autotune-row" style="margin-top: 10px;">
                                 <label class="autotune-label">
                                     <input type="checkbox" id="autotune-check">
-                                    🎯 Automatically tune each selected model's key settings on the Training set
+                                    Automatically tune each selected model's key settings on the Training set
                                 </label>
                                 <label for="autotune-folds" class="autotune-folds-label">Cross-validation folds:
                                     <select id="autotune-folds" class="control-select" style="width: auto; display: inline-block;">
@@ -1327,7 +1323,7 @@
                         <div style="margin-top: 16px; display: flex; align-items: center; justify-content: space-between;">
                             <div id="train-status" aria-live="polite" style="font-size: 13px; font-weight: 600;"></div>
                             <button id="train-model-btn" class="btn btn-primary">
-                                🚀 Train Selected Model
+                                Train Selected Model
                             </button>
                         </div>
 
@@ -1338,12 +1334,12 @@
                                     <span class="pulse-dot"></span>
                                     <span id="step4-monitor-state">ACTIVE &bull; COMPUTING</span>
                                 </div>
-                                <div class="monitor-timer" id="step4-monitor-timer">⏱️ 00:00.0s</div>
+                                <div class="monitor-timer" id="step4-monitor-timer">00:00.0s</div>
                                 <div class="monitor-loop-status" id="step4-monitor-loop-status">
-                                    <span class="loop-icon">🛡️</span> <span id="step4-monitor-loop-text">Loop Guard: Normal</span>
+                                    <span class="loop-icon"><span class="ico ico-shield" aria-hidden="true"></span></span> <span id="step4-monitor-loop-text">Loop Guard: Normal</span>
                                 </div>
                                 <button type="button" class="btn btn-secondary btn-xs monitor-cancel-btn" id="step4-monitor-cancel-btn" style="color: var(--accent-rose); border-color: rgba(244,63,94,0.4);" title="Emergency halt if task is stalled">
-                                    🛑 Force Stop / Reset
+                                    Force Stop / Reset
                                 </button>
                             </div>
                             <div class="monitor-body">
@@ -1371,9 +1367,9 @@
                     <!-- Results Dashboard -->
                     <div id="results-dashboard" class="results-dashboard" style="display: none;">
                         <div style="display: flex; justify-content: flex-end;">
-                            <button type="button" id="standard-html-report-btn" class="btn btn-secondary btn-sm" title="Readable report with methods, results and plots; print it to PDF from the browser">🖨️ Printable Report (HTML/PDF)</button>
-                            <button type="button" id="standard-download-report-btn" class="btn btn-secondary btn-sm" style="margin-left: 8px;">📄 Download Analysis Report (.JSON)</button>
-                            <button type="button" id="standard-tripod-btn" class="btn btn-secondary btn-sm" style="margin-left: 8px;" title="Reporting checklist aligned with TRIPOD+AI, pre-filled from this analysis, with a draft Methods paragraph">📝 TRIPOD+AI Checklist &amp; Methods Draft</button>
+                            <button type="button" id="standard-html-report-btn" class="btn btn-secondary btn-sm" title="Readable report with methods, results and plots; print it to PDF from the browser">Printable Report (HTML/PDF)</button>
+                            <button type="button" id="standard-download-report-btn" class="btn btn-secondary btn-sm" style="margin-left: 8px;">Download Analysis Report (.JSON)</button>
+                            <button type="button" id="standard-tripod-btn" class="btn btn-secondary btn-sm" style="margin-left: 8px;" title="Reporting checklist aligned with TRIPOD+AI, pre-filled from this analysis, with a draft Methods paragraph">TRIPOD+AI Checklist &amp; Methods Draft</button>
                         </div>
                         <div id="retrain-status-banner" aria-live="polite"></div>
                         <div id="tuning-report-container"></div>
@@ -1415,12 +1411,12 @@
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title-group">
-                            <h2>🔮 Single Patient Case Predictor</h2>
+                            <h2>Single Patient Case Predictor</h2>
                             <p>Input patient parameters to obtain real-time inference and class probability distributions from your trained clinical model.</p>
                         </div>
                     </div>
 
-                    <div class="research-use-note" role="note">⚠️ <strong>Research and education only.</strong> These predictions have not been validated for decisions about an individual patient's care. Software used to guide individual care may be regulated as a medical device (e.g. UK MDR / MHRA Software as a Medical Device).</div>
+                    <div class="research-use-note" role="note"><span class="ico ico-warn" aria-hidden="true"></span> <strong>Research and education only.</strong> These predictions have not been validated for decisions about an individual patient's care. Software used to guide individual care may be regulated as a medical device (e.g. UK MDR / MHRA Software as a Medical Device).</div>
                     <!-- Model Provenance & Switcher Banner -->
                     <div id="single-predict-provenance-bar" class="pipeline-alert" style="display: none; margin-bottom: 18px; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;"></div>
 
@@ -1431,7 +1427,7 @@
 
                     <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
                         <button id="run-single-predict-btn" class="btn btn-primary standard-only">
-                            ⚡ Compute Target Outcome
+                            Compute Target Outcome
                         </button>
                     </div>
 
@@ -1447,21 +1443,21 @@
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title-group">
-                            <h2>📊 Batch Prediction & Export Facility</h2>
+                            <h2>Batch Prediction & Export Facility</h2>
                             <p>Upload a .csv file containing multiple records to compute predictions across all rows simultaneously. If the file also contains the outcome column, the model is <strong>validated</strong> on those patients as well (discrimination, calibration, clinical usefulness and subgroups): use this to test a model on a separate cohort, for example a model received from another centre via "Load trained model".</p>
                         </div>
                         <button id="sample-batch-btn" class="dataset-pill">
-                            📂 Load Sample Batch Cases (10 Patients)
+                            Load Sample Batch Cases (10 Patients)
                         </button>
                     </div>
 
-                    <div class="research-use-note" role="note">⚠️ <strong>Research and education only.</strong> These predictions have not been validated for decisions about an individual patient's care. Software used to guide individual care may be regulated as a medical device (e.g. UK MDR / MHRA Software as a Medical Device).</div>
+                    <div class="research-use-note" role="note"><span class="ico ico-warn" aria-hidden="true"></span> <strong>Research and education only.</strong> These predictions have not been validated for decisions about an individual patient's care. Software used to guide individual care may be regulated as a medical device (e.g. UK MDR / MHRA Software as a Medical Device).</div>
                     <!-- Batch Model Provenance & Switcher Banner -->
                     <div id="batch-predict-provenance-bar" class="pipeline-alert" style="display: none; margin-bottom: 18px; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;"></div>
 
                     <div id="batch-dropzone" class="upload-dropzone">
                         <input type="file" id="batch-file-input" accept=".csv" style="display: none;">
-                        <div class="upload-icon-circle">📑</div>
+                        <div class="upload-icon-circle"><span class="ico ico-file" aria-hidden="true"></span></div>
                         <div>
                             <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary);">
                                 Upload Batch .csv File
@@ -1474,7 +1470,7 @@
 
                     <div style="display: flex; justify-content: flex-end;">
                         <button id="run-batch-predict-btn" class="btn btn-primary" disabled>
-                            🚀 Execute Batch Prediction
+                            Execute Batch Prediction
                         </button>
                     </div>
 
@@ -1488,7 +1484,7 @@
                                 Batch Prediction Preview
                             </h3>
                             <button id="download-batch-csv-btn" class="btn btn-emerald btn-sm" disabled>
-                                💾 Download Enriched Predictions (.CSV)
+                                Download Enriched Predictions (.CSV)
                             </button>
                         </div>
 
@@ -1507,15 +1503,14 @@
                     <div class="card-header">
                         <div class="card-title-group">
                             <h2 style="display: flex; align-items: center; gap: 10px;">
-                                <span>🔬</span>
                                 <span style="background: linear-gradient(135deg, var(--accent-emerald), var(--accent-cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Strictly Ordered 7-Step Clinical ML Pipeline</span>
                             </h2>
                             <p>Clinical ML protocol with training-only preprocessing: stratified train/test split (default 80/20; rows with a missing outcome excluded), imputation fitted on the training split only, skewness screen & correlation review (Pearson vs Spearman), VIF multicollinearity review, univariate baselines, SMOTENC balancing of the training split, Random Forest feature scout, and algorithm-constrained final evaluation.</p>
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                            <span class="pill pill-target" style="font-size: 11px;">🛡️ Train-Only Preprocessing</span>
-                            <span class="pill pill-feature" style="font-size: 11px;">⚙️ Algorithm-Constrained</span>
-                            <span class="pill pill-continuous" style="font-size: 11px;">🏥 Clinical Metrics</span>
+                            <span class="pill pill-target" style="font-size: 11px;">Train-Only Preprocessing</span>
+                            <span class="pill pill-feature" style="font-size: 11px;">Algorithm-Constrained</span>
+                            <span class="pill pill-continuous" style="font-size: 11px;">Clinical Metrics</span>
                         </div>
                     </div>
 
@@ -1559,10 +1554,10 @@
                         </div>
                         <div style="display: flex; gap: 8px;">
                             <button id="pipeline-load-cardio-btn" class="dataset-pill" style="font-size: 11.5px; padding: 4px 10px;">
-                                🫀 Cardiometabolic Cohort
+                                Cardiometabolic Cohort
                             </button>
                             <button id="pipeline-load-shunt-btn" class="dataset-pill" style="font-size: 11.5px; padding: 4px 10px;">
-                                🧠 iNPH Shunt Cohort (420, simulated)
+                                iNPH Shunt Cohort (420, simulated)
                             </button>
                         </div>
                     </div>
@@ -1626,14 +1621,14 @@
                                 <label for="pipeline-seed-input" class="form-label">Reproducibility Seed:</label>
                                 <div style="display: flex; gap: 8px;">
                                     <input type="number" id="pipeline-seed-input" class="form-input" value="42" placeholder="42">
-                                    <button id="pipeline-seed-random-btn" class="btn btn-secondary btn-sm" title="Generate New Seed">🎲</button>
+                                    <button id="pipeline-seed-random-btn" class="btn btn-secondary btn-sm" title="Generate New Seed"><span class="ico ico-shuffle" aria-hidden="true"></span></button>
                                 </div>
                             </div>
                         </div>
 
                         <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
                             <button id="pipeline-step1-run-btn" class="btn btn-primary" style="background: linear-gradient(135deg, var(--accent-emerald), #059669);">
-                                ⚡ Run Step 1: Split & Impute (Strictly on Train)
+                                Run Step 1: Split & Impute (Strictly on Train)
                             </button>
                         </div>
 
@@ -1656,14 +1651,14 @@
 
                             <div class="card" style="background: var(--bg-surface-elevated); padding: 16px; margin-bottom: 20px;">
                                 <h4 style="font-size: 13.5px; font-weight: 700; color: var(--text-primary); margin-bottom: 10px;">
-                                    🛡️ Training-Set Imputer Parameters (Fitted on Train Only)
+                                    Training-Set Imputer Parameters (Fitted on Train Only)
                                 </h4>
                                 <div id="pipeline-imputer-table-container" class="table-container"></div>
                             </div>
 
                             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                                 <div style="display: flex; align-items: center; gap: 8px; color: var(--accent-emerald); font-weight: 600; font-size: 13px;">
-                                    <span>✅ Step 1 Complete: Train & Test sets prepared; imputation fitted on the Training set only.</span>
+                                    <span>✓Step 1 Complete: Train & Test sets prepared; imputation fitted on the Training set only.</span>
                                 </div>
                                 <button id="pipeline-to-step2-btn" class="btn btn-emerald">
                                     Proceed to Step 2: Correlation Check &rarr;
@@ -1677,7 +1672,7 @@
                          ======================================================= -->
                     <div class="pipeline-step-panel" id="pipeline-panel-2">
                         <div class="pipeline-alert pipeline-alert-info">
-                            <div style="font-size: 18px;">📊</div>
+                            <div style="font-size: 18px;"><span class="ico ico-chart" aria-hidden="true"></span></div>
                             <div>
                                 <strong>Step 2: Continuous Variable Correlation Check (Pearson vs. Spearman)</strong><br>
                                 Continuous and ordinal variables in the Training set are screened for skewness (bias-adjusted Fisher–Pearson coefficient, G₁ = √(n(n−1))/(n−2)·g₁, as in SciPy <code>skew(bias=False)</code>) using the rule of thumb |G₁| ≤ 1 (approximately symmetric). This is not a formal normality test. Pearson (r) is calculated when both variables pass the screen; Spearman (ρ) is calculated if one or both are skewed. High-collinearity pairs (|r| or |ρ| &ge; 0.8) are presented below to allow dropping one or keeping both.
@@ -1687,7 +1682,7 @@
                         <!-- Continuous Skewness Table -->
                         <div class="card" style="background: var(--bg-surface-elevated); padding: 16px; margin-bottom: 20px;">
                             <h4 style="font-size: 13.5px; font-weight: 700; color: var(--text-primary); margin-bottom: 10px;">
-                                📈 Training Variables Skewness Screen (|G₁| ≤ 1 rule of thumb)
+                                Training Variables Skewness Screen (|G₁| ≤ 1 rule of thumb)
                             </h4>
                             <div id="pipeline-normality-table-container" class="table-container"></div>
                         </div>
@@ -1697,7 +1692,7 @@
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
                                 <div>
                                     <h4 style="font-size: 13.5px; font-weight: 700; color: var(--text-primary);">
-                                        ⚠️ Collinear Variable Pairs (|Correlation| &ge; 0.8)
+                                        ⚠︎ Collinear Variable Pairs (|Correlation| &ge; 0.8)
                                     </h4>
                                     <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
                                         Select which redundant variable to drop from both Train and Test sets, or choose to keep both.
@@ -1713,7 +1708,7 @@
 
                         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                             <button id="pipeline-run-corr-btn" class="btn btn-secondary">
-                                🔄 Refresh Skewness & Correlation Check
+                                Refresh Skewness & Correlation Check
                             </button>
                             <button id="pipeline-to-step3-btn" class="btn btn-emerald">
                                 Proceed to Step 3: VIF Collinearity Check &rarr;
@@ -1726,7 +1721,7 @@
                          ======================================================= -->
                     <div class="pipeline-step-panel" id="pipeline-panel-3">
                         <div class="pipeline-alert pipeline-alert-info">
-                            <div style="font-size: 18px;">📐</div>
+                            <div style="font-size: 18px;"><span class="ico ico-ruler" aria-hidden="true"></span></div>
                             <div>
                                 <strong>Step 3: Variance Inflation Factor (VIF) Check</strong><br>
                                 Categorical variables are one-hot encoded (dropping reference category to eliminate dummy trap) and continuous variables standardized. VIF is computed for all surviving features; multi-level categorical features use the Generalised VIF (Fox &amp; Monette), which captures the joint collinearity of all their dummy columns and is shown on the VIF scale as GVIF<sup>1/df</sup>. Features with VIF &gt; 5 indicate severe multicollinearity and can be permanently eliminated from both Train and Test sets.
@@ -1744,7 +1739,7 @@
                                     </p>
                                 </div>
                                 <button id="pipeline-drop-vif-btn" class="btn btn-rose btn-sm" disabled>
-                                    🗑️ Drop Selected High-VIF Features
+                                    Drop Selected High-VIF Features
                                 </button>
                             </div>
 
@@ -1753,7 +1748,7 @@
 
                         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                             <button id="pipeline-run-vif-btn" class="btn btn-secondary">
-                                🔄 Recompute VIF Scores
+                                Recompute VIF Scores
                             </button>
                             <button id="pipeline-to-step4-btn" class="btn btn-emerald">
                                 Proceed to Step 4: Univariate Testing &rarr;
@@ -1766,7 +1761,7 @@
                          ======================================================= -->
                     <div class="pipeline-step-panel" id="pipeline-panel-4">
                         <div class="pipeline-alert pipeline-alert-info">
-                            <div style="font-size: 18px;">🧪</div>
+                            <div style="font-size: 18px;"><span class="ico ico-flask" aria-hidden="true"></span></div>
                             <div>
                                 <strong>Step 4: Univariate Statistical Testing Check</strong><br>
                                 Informational baseline testing of surviving original variables against the Target: One-Way ANOVA (or t-test) for continuous features and Pearson Chi-Square (χ²) for categorical features. Variables are sorted from lowest p-value to highest. Variables are NOT automatically dropped at this step.
@@ -1777,7 +1772,7 @@
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
                                 <div>
                                     <h4 style="font-size: 13.5px; font-weight: 700; color: var(--text-primary);">
-                                        📑 Univariate Statistical Screening Baseline (Sorted by p-value Ascending)
+                                        Univariate Statistical Screening Baseline (Sorted by p-value Ascending)
                                     </h4>
                                     <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
                                         Select which predictor variables to include or exclude based on statistical significance or clinical judgment before balancing &amp; model training.
@@ -1785,13 +1780,13 @@
                                 </div>
                                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                                     <button id="pipeline-filter-significant-btn" class="btn btn-secondary btn-sm" title="Uncheck all variables with p >= 0.05">
-                                        ⚡ Keep Only Significant (p &lt; 0.05)
+                                        Keep Only Significant (p &lt; 0.05)
                                     </button>
                                     <button id="pipeline-select-all-univ-btn" class="btn btn-secondary btn-sm" title="Check all variables">
                                         Select All
                                     </button>
                                     <button id="pipeline-drop-unselected-univ-btn" class="btn btn-rose btn-sm" title="Exclude unchecked variables from the pipeline">
-                                        🗑️ Exclude Unchecked Features
+                                        Exclude Unchecked Features
                                     </button>
                                 </div>
                             </div>
@@ -1814,7 +1809,7 @@
                          ======================================================= -->
                     <div class="pipeline-step-panel" id="pipeline-panel-5">
                         <div class="pipeline-alert pipeline-alert-info">
-                            <div style="font-size: 18px;">⚖️</div>
+                            <div style="font-size: 18px;"><span class="ico ico-scale" aria-hidden="true"></span></div>
                             <div>
                                 <strong>Step 5: Imbalance Handling (SMOTENC)</strong><br>
                                 Counts how many Training-set patients have each outcome. If the rarer outcome makes up less than 30% of the Training set (or, for outcomes with more than two groups, the smallest group is less than about 43% the size of the largest), SMOTENC creates synthetic (made-up but realistic) patients for that outcome, each blended from similar real patients, until the outcome groups are equal in size. Measurements such as age are blended to in-between values; categories such as sex take the most common value among the similar patients. The Testing set is never changed: it contains only real patients, so the results reflect real-world performance.
@@ -1829,7 +1824,7 @@
 
                         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                             <div style="display: flex; align-items: center; gap: 8px; color: var(--accent-cyan); font-size: 12.5px; font-weight: 600;">
-                                🔒 The Testing set is never resampled: it keeps the true outcome prevalence. (Its missing predictor values were filled in Step 1 using Training-set values only.)
+                                The Testing set is never resampled: it keeps the true outcome prevalence. (Its missing predictor values were filled in Step 1 using Training-set values only.)
                             </div>
                             <button id="pipeline-to-step6-btn" class="btn btn-emerald">
                                 Proceed to Step 6: RF Feature Scout &rarr;
@@ -1842,7 +1837,7 @@
                          ======================================================= -->
                     <div class="pipeline-step-panel" id="pipeline-panel-6">
                         <div class="pipeline-alert pipeline-alert-info">
-                            <div style="font-size: 18px;">🌲</div>
+                            <div style="font-size: 18px;"><span class="ico ico-tree" aria-hidden="true"></span></div>
                             <div>
                                 <strong>Step 6: Model-Driven Feature Ranking (Random Forest Scout)</strong><br>
                                 Ranks the predictors by how useful they are. A quick "scout" Random Forest is trained on the balanced Training set from Step 5 (it is used only for this ranking, not as one of the final models). Each predictor is scored by how much it helps the trees separate the outcome groups (Mean Decrease in Impurity). The weakest 30% of predictors are then left out for k-Nearest Neighbours and Naive Bayes in Step 7, because weak predictors add noise that easily misleads these two models. The other models use all remaining predictors. The ranking uses the Training set only, and it is a practical filter rather than a definitive clinical ranking: it tends to favour continuous measurements over simple yes/no predictors.
@@ -1851,13 +1846,13 @@
 
                         <div style="display: flex; justify-content: flex-end; margin-bottom: 16px;">
                             <button id="pipeline-run-rf-scout-btn" class="btn btn-primary" style="background: linear-gradient(135deg, var(--accent-purple), var(--accent-indigo));">
-                                🌲 Run Random Forest Scout & Feature Ranking
+                                Run Random Forest Scout & Feature Ranking
                             </button>
                         </div>
 
                         <div class="card" style="background: var(--bg-surface-elevated); padding: 20px; margin-bottom: 20px;">
                             <h4 style="font-size: 13.5px; font-weight: 700; color: var(--text-primary); margin-bottom: 12px;">
-                                📊 Ranked Feature Importance (Random Forest Impurity Reduction)
+                                Ranked Feature Importance (Random Forest Impurity Reduction)
                             </h4>
                             <div id="pipeline-rf-importance-container">
                                 <p style="padding: 20px; color: var(--text-muted); text-align: center;">Click 'Run Random Forest Scout' above to compute feature rankings.</p>
@@ -1866,7 +1861,7 @@
 
                         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                             <div style="font-size: 12.5px; color: var(--text-secondary);">
-                                💡 k-NN &amp; Naive Bayes will train only on the Top 70% features, plus any you reinstate.
+                                k-NN &amp; Naive Bayes will train only on the Top 70% features, plus any you reinstate.
                             </div>
                             <button id="pipeline-to-step7-btn" class="btn btn-emerald" disabled>
                                 Proceed to Step 7: Train Constrained Models &rarr;
@@ -1879,7 +1874,7 @@
                          ======================================================= -->
                     <div class="pipeline-step-panel" id="pipeline-panel-7">
                         <div class="pipeline-alert pipeline-alert-info">
-                            <div style="font-size: 18px;">🎯</div>
+                            <div style="font-size: 18px;"><span class="ico ico-target" aria-hidden="true"></span></div>
                             <div>
                                 <strong>Step 7: Algorithm-Specific Training & Constraints</strong><br>
                                 Applies strict stability constraints to each algorithm:
@@ -1918,26 +1913,26 @@
                                 </select>
                             </div>
                             <button id="pipeline-train-models-btn" class="btn btn-primary" style="background: linear-gradient(135deg, var(--accent-emerald), var(--accent-cyan)); font-weight: 700; padding: 12px 24px;">
-                                🚀 Train Constrained Models & Benchmark on Unaltered Test Set
+                                Train Constrained Models & Benchmark on Unaltered Test Set
                             </button>
                         </div>
 
                         <!-- Model selection and optional automatic tuning (tuning off by default: fixed, prespecified settings) -->
                         <div class="autotune-box" style="margin: -6px 0 20px;">
                             <div class="selection-row" role="radiogroup" aria-labelledby="pipeline-selection-mode-label">
-                                <span id="pipeline-selection-mode-label" class="selection-label">🏁 Choose the best model by:</span>
+                                <span id="pipeline-selection-mode-label" class="selection-label">Choose the best model by:</span>
                                 <label class="selection-option"><input type="radio" name="pipeline-selection-mode" id="pipeline-selection-mode-cv" value="cv" checked> Cross-validation within the Training set <span class="selection-tag">recommended</span></label>
                                 <label class="selection-option"><input type="radio" name="pipeline-selection-mode" id="pipeline-selection-mode-test" value="test"> Testing-set results <span class="selection-tag selection-tag-muted">faster, but optimistic</span></label>
                             </div>
                             <p class="autotune-hint" style="margin-top: 4px;">With <strong>cross-validation</strong>, each of the models is scored on parts of the real Training patients it did not learn from (SMOTENC and scaling are redone inside each part) and the best is picked on those scores; the Testing set is then used only once, as an honest final check. Picking the winner on the Testing set is quicker, but its test score is then too optimistic.</p>
                             <div data-level="intermediate" class="threshold-row">
-                                <label for="pipeline-decision-threshold" class="autotune-folds-label">🎚️ Decision threshold (two-outcome predictions):
+                                <label for="pipeline-decision-threshold" class="autotune-folds-label">Decision threshold (two-outcome predictions):
                                     <input type="number" id="pipeline-decision-threshold" class="form-input" value="0.5" min="0.05" max="0.95" step="0.05" style="width: 80px; display: inline-block;">
                                 </label>
                                 <span class="autotune-hint" style="margin: 0;">Probability of the positive outcome at or above which a patient is classed as positive (default 0.5). Choose it on clinical grounds before seeing the results; never tune it on the Testing set.</span>
                             </div>
                             <div data-level="intermediate" class="threshold-row">
-                                <label for="pipeline-recalibration-select" class="autotune-folds-label">📐 Recalibrate two-outcome probabilities:
+                                <label for="pipeline-recalibration-select" class="autotune-folds-label">Recalibrate two-outcome probabilities:
                                     <select id="pipeline-recalibration-select" class="form-select" style="width: auto; display: inline-block;">
                                         <option value="none" selected>No (use the model's own probabilities)</option>
                                         <option value="platt">Platt scaling (logistic; good for small samples)</option>
@@ -1949,7 +1944,7 @@
                             <div data-level="advanced" class="autotune-row" style="margin-top: 10px;">
                                 <label class="autotune-label">
                                     <input type="checkbox" id="pipeline-autotune-check">
-                                    🎯 Auto-tune model settings on the Training set (optional; off = protocol default settings)
+                                    Auto-tune model settings on the Training set (optional; off = protocol default settings)
                                 </label>
                                 <label for="pipeline-autotune-folds" class="autotune-folds-label">Cross-validation:
                                     <select id="pipeline-autotune-folds" class="form-select" style="width: auto; display: inline-block;">
@@ -1968,12 +1963,12 @@
                                     <span class="pulse-dot"></span>
                                     <span id="pipeline-monitor-state">ACTIVE &bull; COMPUTING</span>
                                 </div>
-                                <div class="monitor-timer" id="pipeline-monitor-timer">⏱️ 00:00.0s</div>
+                                <div class="monitor-timer" id="pipeline-monitor-timer">00:00.0s</div>
                                 <div class="monitor-loop-status" id="pipeline-monitor-loop-status">
-                                    <span class="loop-icon">🛡️</span> <span id="pipeline-monitor-loop-text">Loop Guard: Normal (0 cycles)</span>
+                                    <span class="loop-icon"><span class="ico ico-shield" aria-hidden="true"></span></span> <span id="pipeline-monitor-loop-text">Loop Guard: Normal (0 cycles)</span>
                                 </div>
                                 <button type="button" class="btn btn-secondary btn-xs monitor-cancel-btn" id="pipeline-monitor-cancel-btn" style="color: var(--accent-rose); border-color: rgba(244,63,94,0.4);" title="Emergency halt if task is stalled">
-                                    🛑 Force Stop / Reset
+                                    Force Stop / Reset
                                 </button>
                             </div>
                             <div class="monitor-body">
@@ -1999,13 +1994,13 @@
                             <div class="card" style="background: var(--bg-surface-elevated); padding: 20px; margin-bottom: 20px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
                                     <h4 style="font-size: 14px; font-weight: 700; color: var(--text-primary);">
-                                        🏆 Clinical Models Performance Benchmark (Evaluated Strictly on Unaltered Test Set)
+                                        Clinical Models Performance Benchmark (Evaluated Strictly on Unaltered Test Set)
                                     </h4>
                                     <button id="pipeline-download-report-btn" class="btn btn-secondary btn-sm">
-                                        📄 Download Clinical Protocol Report (.JSON)
+                                        Download Clinical Protocol Report (.JSON)
                                     </button>
-                                    <button type="button" id="pipeline-tripod-btn" class="btn btn-secondary btn-sm" title="Reporting checklist aligned with TRIPOD+AI, pre-filled from this analysis">📝 TRIPOD+AI Checklist</button>
-                                    <button type="button" id="pipeline-html-report-btn" class="btn btn-secondary btn-sm" title="Readable report with methods, results and plots; print it to PDF from the browser">🖨️ Printable Report (HTML/PDF)</button>
+                                    <button type="button" id="pipeline-tripod-btn" class="btn btn-secondary btn-sm" title="Reporting checklist aligned with TRIPOD+AI, pre-filled from this analysis">TRIPOD+AI Checklist</button>
+                                    <button type="button" id="pipeline-html-report-btn" class="btn btn-secondary btn-sm" title="Readable report with methods, results and plots; print it to PDF from the browser">Printable Report (HTML/PDF)</button>
                                 </div>
                                 <div id="pipeline-leaderboard-container" class="table-container"></div>
                             </div>
@@ -2016,7 +2011,7 @@
                             <!-- 2x2 Confusion Matrices Grid -->
                             <div class="card" style="background: var(--bg-surface-elevated); padding: 20px;">
                                 <h4 style="font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 14px;">
-                                    🎯 2×2 Diagnostic Concordance & Confusion Matrices (Unaltered Test Set)
+                                    2×2 Diagnostic Concordance & Confusion Matrices (Unaltered Test Set)
                                 </h4>
                                 <div id="pipeline-cm-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 18px;"></div>
                             </div>
@@ -2026,7 +2021,7 @@
                                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; margin-bottom: 16px;">
                                     <div>
                                         <div style="display: flex; align-items: center; gap: 8px;">
-                                            <span style="font-size: 22px;">🚀</span>
+                                            <span style="font-size: 22px;"><span class="ico ico-play" aria-hidden="true"></span></span>
                                             <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0;">
                                                 Use a Pipeline Model for Research Predictions
                                             </h3>
@@ -2037,13 +2032,13 @@
                                     </div>
                                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                                         <button id="pipeline-to-single-predict-btn" class="btn btn-primary">
-                                            🔮 Single Patient Prediction (Step 5) &rarr;
+                                            Single Patient Prediction (Step 5) &rarr;
                                         </button>
                                         <button id="pipeline-to-batch-predict-btn" class="btn btn-emerald">
-                                            📊 Batch CSV Prediction (Step 6) &rarr;
+                                            Batch CSV Prediction (Step 6) &rarr;
                                         </button>
                                         <button id="pipeline-compare-baseline-btn" class="btn btn-secondary">
-                                            ⚖️ Compare Pipeline vs Baseline
+                                            Compare Pipeline vs Baseline
                                         </button>
                                     </div>
                                 </div>
@@ -2051,7 +2046,7 @@
                                 <!-- Side-by-side Pipeline vs Baseline Comparison Panel -->
                                 <div id="pipeline-vs-baseline-panel" style="display: none; margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--border-color);">
                                     <h4 style="font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-                                        <span>⚖️</span> Empirical Performance Comparison: Pre-existing Baseline vs 7-Step Clinical Pipeline
+                                        Empirical Performance Comparison: Pre-existing Baseline vs 7-Step Clinical Pipeline
                                     </h4>
                                     <div id="pipeline-vs-baseline-content"></div>
                                 </div>
@@ -2073,7 +2068,7 @@
                 <strong>&copy; 2026 Dr G Narenthiran. All rights reserved.</strong>
             </div>
             <div class="disclaimer">
-                ⚠️ <strong>Clinical & Research Disclaimer:</strong> The Universal Medical ML/NeuralNet Predictor is designed as an interactive scientific computing and educational tool for clinical medical research across healthcare disciplines. It must not be utilized as the sole determinant for treatment or clinical interventions without independent medical validation.
+                <span class="ico ico-warn" aria-hidden="true"></span> <strong>Clinical & Research Disclaimer:</strong> The Universal Medical ML/NeuralNet Predictor is designed as an interactive scientific computing and educational tool for clinical medical research across healthcare disciplines. It must not be utilized as the sole determinant for treatment or clinical interventions without independent medical validation.
             </div>
         </footer>
 
@@ -2087,9 +2082,9 @@
     <!-- Application controller: ES modules (src/); when opened directly from disk (file://), where browsers
          block modules, the generated single-file bundle is used instead (node tools/build.js). -->
     <!-- IMPORTMAP:START (generated by tools/build.js) -->
-    <script type="importmap">{"imports":{"./src/analysis-summary.js":"./src/analysis-summary.js?h=fb8706eabd","./src/batch-prediction.js":"./src/batch-prediction.js?h=231c84e0c7","./src/compute.js":"./src/compute.js?h=65d87514ce","./src/core.js":"./src/core.js?h=655550795c","./src/cv-tuning.js":"./src/cv-tuning.js?h=fa00556794","./src/evaluation-dashboard.js":"./src/evaluation-dashboard.js?h=a4c677fc5f","./src/external-validation.js":"./src/external-validation.js?h=9159e56731","./src/html-report.js":"./src/html-report.js?h=712e4a1888","./src/imputation.js":"./src/imputation.js?h=0f57fa8297","./src/ingest.js":"./src/ingest.js?h=7ba1830092","./src/interpretation.js":"./src/interpretation.js?h=d5e36cc4de","./src/main.js":"./src/main.js?h=b0472f481f","./src/model-card.js":"./src/model-card.js?h=9e3b15b914","./src/model-io.js":"./src/model-io.js?h=22d37dca94","./src/multiple-imputation.js":"./src/multiple-imputation.js?h=4003ad5608","./src/navigation.js":"./src/navigation.js?h=0581a127c2","./src/outcome-type.js":"./src/outcome-type.js?h=aea5106345","./src/panels.js":"./src/panels.js?h=fbeebf80e8","./src/pipeline-balance.js":"./src/pipeline-balance.js?h=fcaba72cc4","./src/pipeline-results.js":"./src/pipeline-results.js?h=e443534b1e","./src/pipeline-screening.js":"./src/pipeline-screening.js?h=508e94f4f4","./src/pipeline-step1.js":"./src/pipeline-step1.js?h=cc37a00c9f","./src/pipeline-train.js":"./src/pipeline-train.js?h=8dbfe51f20","./src/pipeline.js":"./src/pipeline.js?h=df0e9cc102","./src/predictor-budget.js":"./src/predictor-budget.js?h=b24bd3269d","./src/reports.js":"./src/reports.js?h=424452ce1a","./src/safeguards.js":"./src/safeguards.js?h=39b5610def","./src/settings.js":"./src/settings.js?h=04928306bd","./src/shell.js":"./src/shell.js?h=2b4a6b55bc","./src/single-prediction.js":"./src/single-prediction.js?h=aa836d9970","./src/standard-training.js":"./src/standard-training.js?h=613336b84a","./src/subgroups.js":"./src/subgroups.js?h=86a3169f53","./src/survival.js":"./src/survival.js?h=4473fa4136","./src/training-actions.js":"./src/training-actions.js?h=cf27b96639","./src/training-setup.js":"./src/training-setup.js?h=6a59f09f91","./src/tripod.js":"./src/tripod.js?h=a225f101fa","./src/validation-core.js":"./src/validation-core.js?h=b5f38546d2","./src/variables.js":"./src/variables.js?h=721e342765","./src/watchdog.js":"./src/watchdog.js?h=582f5a6b6e","./data-engine.js":"./data-engine.js?h=876360bb85","./models.js":"./models.js?h=5ba54a7cdb","./compute-worker.js":"./compute-worker.js?h=54a9c51fb3","./dist/validation-core.worker.js":"./dist/validation-core.worker.js?h=567c95bf34"}}</script>
+    <script type="importmap">{"imports":{"./src/analysis-summary.js":"./src/analysis-summary.js?h=e464a8214c","./src/batch-prediction.js":"./src/batch-prediction.js?h=231c84e0c7","./src/compute.js":"./src/compute.js?h=65d87514ce","./src/core.js":"./src/core.js?h=adfbe2afbf","./src/cv-tuning.js":"./src/cv-tuning.js?h=877419f60e","./src/evaluation-dashboard.js":"./src/evaluation-dashboard.js?h=529b75dbdb","./src/external-validation.js":"./src/external-validation.js?h=67746b78ca","./src/html-report.js":"./src/html-report.js?h=712e4a1888","./src/imputation.js":"./src/imputation.js?h=ca19c47bc0","./src/ingest.js":"./src/ingest.js?h=7ba1830092","./src/interpretation.js":"./src/interpretation.js?h=7eaefdac11","./src/main.js":"./src/main.js?h=405a18fced","./src/model-card.js":"./src/model-card.js?h=9e3b15b914","./src/model-io.js":"./src/model-io.js?h=52b9312f82","./src/multiple-imputation.js":"./src/multiple-imputation.js?h=db97192857","./src/navigation.js":"./src/navigation.js?h=9654be6fc5","./src/outcome-type.js":"./src/outcome-type.js?h=d2479ce4d3","./src/panels.js":"./src/panels.js?h=5e59ef6727","./src/pipeline-balance.js":"./src/pipeline-balance.js?h=bf2fce909b","./src/pipeline-results.js":"./src/pipeline-results.js?h=c43872a983","./src/pipeline-screening.js":"./src/pipeline-screening.js?h=258cc3f68a","./src/pipeline-step1.js":"./src/pipeline-step1.js?h=cc37a00c9f","./src/pipeline-train.js":"./src/pipeline-train.js?h=5af7940c3f","./src/pipeline.js":"./src/pipeline.js?h=5764f58b90","./src/predictor-budget.js":"./src/predictor-budget.js?h=8c78caf3d9","./src/reports.js":"./src/reports.js?h=6c9f16f293","./src/safeguards.js":"./src/safeguards.js?h=39b5610def","./src/settings.js":"./src/settings.js?h=04b99ce304","./src/shell.js":"./src/shell.js?h=d3f5676eb0","./src/single-prediction.js":"./src/single-prediction.js?h=5064a21e29","./src/standard-training.js":"./src/standard-training.js?h=5c949abc91","./src/subgroups.js":"./src/subgroups.js?h=7d17f7140c","./src/survival.js":"./src/survival.js?h=2d89c142f8","./src/training-actions.js":"./src/training-actions.js?h=652de9596d","./src/training-setup.js":"./src/training-setup.js?h=dca013e0d3","./src/tripod.js":"./src/tripod.js?h=a225f101fa","./src/validation-core.js":"./src/validation-core.js?h=b5f38546d2","./src/variables.js":"./src/variables.js?h=f13844f716","./src/watchdog.js":"./src/watchdog.js?h=737038d1e1","./data-engine.js":"./data-engine.js?h=876360bb85","./models.js":"./models.js?h=5ba54a7cdb","./compute-worker.js":"./compute-worker.js?h=54a9c51fb3","./dist/validation-core.worker.js":"./dist/validation-core.worker.js?h=567c95bf34"}}</script>
     <!-- IMPORTMAP:END -->
-    <script type="module" src="src/main.js?h=b0472f481f"></script>
+    <script type="module" src="src/main.js?h=405a18fced"></script>
     <script>if (location.protocol === 'file:') document.write('<script src="dist/app.bundle.js"><\/script>');</script>
 </body>
 </html>
