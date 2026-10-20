@@ -171,7 +171,7 @@ Reproducibility is a fundamental prerequisite in scientific and clinical researc
 
 ---
 
-## 🆕 Version 2 additions
+## Version 2 additions
 
 - **Architecture:** the application controller is split into ES modules (`src/`, entry `src/main.js`) with no build step needed to run; `tools/build.js` generates a single-file fallback (`dist/app.bundle.js`, used when `index.html` is opened directly from disk) and a content-hash import map so browsers never run stale code after an update.
 - **Background computation:** training, cross-validation and the complete Option C bootstrap loop run in a Web Worker (`compute-worker.js`; TensorFlow.js on WebGL via OffscreenCanvas where available), keeping the page responsive; Force Stop terminates the worker immediately. Falls back to the page when workers are unavailable.
