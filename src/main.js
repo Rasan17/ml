@@ -40,6 +40,7 @@ import './safeguards.js';
 import { downloadRCrossCheck } from './r-crosscheck.js';
 import './r-script.js';
 import { downloadModelCard } from './model-card.js';
+import { updateTrainingEstimate } from './training-time.js';
 
 AppState.pipeline = createEmptyPipelineState(42);
 
@@ -77,6 +78,9 @@ function start() {
     document.getElementById('standard-r-check-btn')?.addEventListener('click', () => downloadRCrossCheck('standard'));
     window.downloadValidationReport = downloadValidationReport;
     document.getElementById('pipeline-html-report-btn')?.addEventListener('click', () => downloadHtmlReport('pipeline'));
+    // Estimated training time under the Train button: follows the model selection and every Step 4 setting
+    AppState.updateTrainingEstimate = updateTrainingEstimate;
+    ['change', 'input'].forEach(ev => document.getElementById('step-4-content')?.addEventListener(ev, () => updateTrainingEstimate()));
     document.getElementById('mi-select')?.addEventListener('change', () => {
         updateImputationEstimate();
         // The table and the Step 3 result follow the single / multiple imputation choice

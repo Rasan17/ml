@@ -45,6 +45,28 @@ test('the imputation step gives the share of incomplete patients and suggests th
     expect(errors).toEqual([]);
 });
 
+test('Step 4 estimates the training time before training; the leaderboard shows the Brier score as its fifth column', async ({ page }) => {
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await toStep4(page);
+    await page.check('#scope-multi', { force: true });
+    const selected = () => page.evaluate(() => [...document.querySelectorAll('.model-card')].filter(e => /selected|active/.test(e.className)).map(e => e.dataset.modelId));
+    for (const id of ['glm', 'nb']) if (!(await selected()).includes(id)) await page.locator(`.model-card[data-model-id="${id}"]`).click({ position: { x: 12, y: 12 } });
+    for (const id of await selected()) if (!['glm', 'nb'].includes(id)) await page.locator(`.model-card[data-model-id="${id}"]`).click({ position: { x: 12, y: 12 } });
+    const est = page.locator('#train-estimate');
+    await expect(est).toContainText('Estimated training time on this computer');
+    await expect(est).toContainText('2 models');
+    await page.check('input[name="validation-mode"][value="bootstrap"]', { force: true });
+    await expect(est).toContainText('100 bootstrap resamples');
+    await page.check('input[name="validation-mode"][value="split"]', { force: true });
+    await page.click('#train-model-btn');
+    await expect(page.locator('#train-status')).toContainText(/Deployed|Complete/, { timeout: 170000 });
+    const heads = await page.locator('.leaderboard-table thead th').allInnerTexts();
+    expect(heads[4]).toMatch(/brier/i);
+    expect(heads.filter(h => /brier/i.test(h)).length).toBe(1);
+    expect(errors).toEqual([]);
+});
+
 test('settings with the newer controls are saved and restored', async ({ page }) => {
     const errors = watch(page);
     await page.goto('/index.html');

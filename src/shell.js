@@ -458,6 +458,7 @@ function setupEventListeners() {
     AppState.updateTrainButtonLabel = () => updateTrainButtonLabel();
     function updateTrainButtonLabel() {
         refreshModelSampleGuide();
+        if (AppState.updateTrainingEstimate) AppState.updateTrainingEstimate();
         if (!DOM.trainModelBtn) return;
         // Time-to-event outcome (Step 2): Step 4 fits a Cox model whatever model card was selected before
         if (AppState.outcomeType === 'survival') { DOM.trainModelBtn.textContent = 'Fit & Validate Cox Model (time-to-event)'; return; }

@@ -281,13 +281,14 @@ function renderEvaluationDashboard() {
                             </div>
                         </td>
                         <td><span class="pill ${mInfo.pillClass}" style="font-size: 11px;">${mInfo.tag}</span></td>
+                        ${rEval.isClassification ? `<td>${brierDisplay}</td>` : ''}
                         <td>${scoreDisplay}</td>
                         <td>${rocAucDisplay}</td>
                         <td>${f1Display}</td>
                         <td>${precDisplay}</td>
                         <td>${recDisplay}</td>
                         <td>${balDisplay}</td>
-                        <td>${brierDisplay}</td>
+                        ${rEval.isClassification ? '' : `<td>${brierDisplay}</td>`}
                         <td>${seedDisplay}</td>
                         <td>${deployBtn}</td>
                     </tr>
@@ -319,13 +320,14 @@ function renderEvaluationDashboard() {
                                     ${anyCV ? `<th title="Score inside the Training set by cross-validation (mean ± SD across folds); used to choose the best model">CV ${escapeHtml(rankingMetricLabel(prep.isClassification))}</th>` : ''}
                                     <th>Model Algorithm</th>
                                     <th>Paradigm</th>
+                                    ${prep.isClassification ? '<th title="How close the predicted probabilities are to what happened (0 = perfect; lower is better)">Brier ↓</th>' : ''}
                                     <th>${isOptionC ? (prep.isClassification ? 'Corrected Accuracy' : 'Corrected R²') : (prep.isClassification ? 'Test Accuracy' : 'Test R²')}</th>
                                     <th>${prep.isClassification ? 'ROC-AUC' : 'RMSE'}</th>
                                     <th>${prep.isClassification ? 'Macro F1' : 'MAE'}</th>
                                     <th>${prep.isClassification ? 'Precision' : 'MSE'}</th>
                                     <th>${prep.isClassification ? 'Recall' : '-'}</th>
                                     <th>${prep.isClassification ? 'Balanced Acc' : '-'}</th>
-                                    <th>${prep.isClassification ? 'Brier ↓' : '-'}</th>
+                                    ${prep.isClassification ? '' : '<th>-</th>'}
                                     <th>Seed (Ref)</th>
                                     <th>Status / Deploy</th>
                                 </tr>
