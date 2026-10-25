@@ -6269,6 +6269,10 @@ function renderEvaluationDashboard() {
                                 <span class="cm-m-label">${rEval.isClassification ? 'Macro F1' : 'MAE'}</span>
                                 <span class="cm-m-val" style="color: var(--accent-amber);">${rEval.isClassification ? `${(rEval.macroF1 * 100).toFixed(1)}%` : rEval.mae.toFixed(3)}</span>
                             </div>
+                            ${rEval.isClassification && typeof rEval.brierScore === 'number' ? `<div class="cm-metric-item">
+                                <span class="cm-m-label" title="Mean squared difference between the predicted probability and what happened (0 = perfect; lower is better)">Brier ↓</span>
+                                <span class="cm-m-val">${rEval.brierScore.toFixed(3)}</span>
+                            </div>` : ''}
                         </div>
 
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border-color);">
@@ -6299,6 +6303,7 @@ function renderEvaluationDashboard() {
                         Individual confusion matrices and test metrics for every model chosen in this benchmark. Each card includes its exact reproducibility seed (click to copy).${isOptionC ? ' <strong>Option C: these matrices are apparent (measured on the patients each model was trained on), not optimism-corrected.</strong>' : ''}
                     </p>
                 </div>
+                ${whyTopRanked(allResults, prep, isOptionC)}
                 <div class="multi-cm-grid">
                     ${cmCardsHtml}
                 </div>
@@ -6435,6 +6440,43 @@ function renderEvaluationDashboard() {
             `;
         }
     }
+}
+
+// Plain-language reasons why the top-ranked model is first: what decided the ranking, by how much it leads (against
+// the variation between cross-validation folds), and whether another model is better at the risk percentages
+// (Brier score) or at ordering patients by risk (ROC-AUC), with what that means for the choice
+function whyTopRanked(allResults, prep, isOptionC) {
+    if (!allResults.length) return '';
+    const name = r => escapeHtml(displayModelName(r.modelId, r.model));
+    const top = allResults[0], ev = top.evalRes, clf = prep.isClassification;
+    if (allResults.length === 1) return `<div class="explain-box" style="margin-bottom: 14px;"><strong>Why this model:</strong> it is the only model trained in this run.</div>`;
+    const key = rankingMetricKey(clf), def = (clf ? RANKING_METRICS.classification : RANKING_METRICS.regression)[key], label = rankingMetricLabel(clf).replace(/ \(.*\)$/, '');
+    const pctKey = ['macroF1', 'balancedAccuracy', 'accuracy'].includes(key);
+    const fmt = v => (typeof v !== 'number' || !isFinite(v) ? 'N/A' : pctKey ? `${(v * 100).toFixed(1)}%` : v.toFixed(3));
+    const second = allResults[1], byCV = Boolean(ev.cv && second.evalRes.cv);
+    const val = r => (byCV ? r.evalRes.cv[key] : r.evalRes[key]);
+    const lines = [];
+    lines.push(`<strong>${name(top)}</strong> is ranked first because it had the ${def.higherIsBetter ? 'highest' : 'lowest'} <strong>${escapeHtml(label)}</strong> ${byCV ? 'in cross-validation inside the Training set (the Testing set was not used to choose)' : isOptionC ? '(bootstrap optimism-corrected)' : 'on the Testing set'}: ${fmt(val(top))}, against ${fmt(val(second))} for ${name(second)}.`);
+    const diff = Math.abs((val(top) ?? 0) - (val(second) ?? 0));
+    const sd = byCV ? Math.max(...[ev.cv, second.evalRes.cv].map(c => (c.metricKey === key && typeof c.sd === 'number' ? c.sd : 0))) : 0;
+    if (byCV && sd > 0) {
+        lines.push(diff < sd
+            ? `The lead (${pctKey ? (diff * 100).toFixed(1) + ' points' : diff.toFixed(3)}) is smaller than the variation between cross-validation folds (± ${pctKey ? (sd * 100).toFixed(1) : sd.toFixed(3)}), so the two are <strong>effectively tied</strong>: with other patients the order could easily reverse.`
+            : `The lead (${pctKey ? (diff * 100).toFixed(1) + ' points' : diff.toFixed(3)}) is larger than the variation between cross-validation folds (± ${pctKey ? (sd * 100).toFixed(1) : sd.toFixed(3)}), so it is a <strong>clear lead</strong> on this measure.`);
+    } else if (diff < 1e-9) lines.push('The two are tied on this measure; the order follows the next measures (Macro F1, ROC-AUC, accuracy).');
+    if (clf) {
+        const others = allResults.slice(1);
+        const bestBy = (k, lower) => others.filter(r => typeof r.evalRes[k] === 'number').sort((a, b) => (lower ? a.evalRes[k] - b.evalRes[k] : b.evalRes[k] - a.evalRes[k]))[0];
+        const notes = [];
+        const bB = key !== 'brierScore' && typeof ev.brierScore === 'number' ? bestBy('brierScore', true) : null;
+        if (bB && bB.evalRes.brierScore < ev.brierScore - 0.005) notes.push(`<strong>${name(bB)}</strong> has the better Brier score (${bB.evalRes.brierScore.toFixed(3)} against ${ev.brierScore.toFixed(3)}; lower is better): its predicted probabilities are closer to what actually happened. If you will quote patients' risks as percentages, the Brier score is the better measure to rank by: choose it in Step 4 and train again (deciding the measure before looking at results), rather than switching models now.`);
+        const bA = key !== 'rocAuc' && typeof ev.rocAuc === 'number' ? bestBy('rocAuc', false) : null;
+        if (bA && bA.evalRes.rocAuc > ev.rocAuc + 0.01) notes.push(`<strong>${name(bA)}</strong> has the higher ROC-AUC (${bA.evalRes.rocAuc.toFixed(3)} against ${ev.rocAuc.toFixed(3)}): it is better at putting patients in the right order of risk, whatever threshold is used. If ordering patients by risk matters most, choose ROC-AUC as the ranking measure in Step 4.`);
+        if (notes.length) lines.push(...notes);
+        else if (typeof ev.brierScore === 'number') lines.push(`It is also as good as or better than the others on the Brier score (${ev.brierScore.toFixed(3)})${typeof ev.rocAuc === 'number' ? ` and ROC-AUC (${ev.rocAuc.toFixed(3)})` : ''}, so it leads on the main measures.`);
+    }
+    lines.push('The ranking uses one measure (chosen in Step 4); the scores below and in the leaderboard show the others. Choosing a different model after looking at the Testing-set results makes its reported performance optimistic.');
+    return `<div class="explain-box" style="margin-bottom: 14px;"><strong>Why ${name(top)} is top-ranked</strong><ul style="margin: 6px 0 0 18px; padding: 0;">${lines.map(l => `<li style="margin-top: 4px;">${l}</li>`).join('')}</ul></div>`;
 }
 
 // ---- src/single-prediction.js ----

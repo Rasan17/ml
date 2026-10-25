@@ -45,7 +45,7 @@ test('the imputation step gives the share of incomplete patients and suggests th
     expect(errors).toEqual([]);
 });
 
-test('Step 4 estimates the training time before training; the leaderboard shows the Brier score as its fifth column', async ({ page }) => {
+test('Step 4 estimates the training time; the leaderboard shows the Brier score fifth; the results explain the top-ranked model', async ({ page }) => {
     const errors = watch(page);
     await page.goto('/index.html');
     await toStep4(page);
@@ -61,6 +61,12 @@ test('Step 4 estimates the training time before training; the leaderboard shows 
     await page.check('input[name="validation-mode"][value="split"]', { force: true });
     await page.click('#train-model-btn');
     await expect(page.locator('#train-status')).toContainText(/Deployed|Complete/, { timeout: 170000 });
+    // The confusion-matrix section explains the ranking and every card shows the Brier score
+    const why = page.locator('.explain-box', { hasText: 'is top-ranked' });
+    await expect(why).toContainText('ranked first because it had the highest Macro F1 in cross-validation');
+    await expect(why).toContainText(/effectively tied|clear lead/);
+    await expect(page.locator('.multi-cm-card .cm-m-label', { hasText: 'Brier' })).toHaveCount(2);
+    expect(await page.evaluate(() => Boolean(document.getElementById('sample-size-container').compareDocumentPosition(document.getElementById('model-sample-guide')) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
     const heads = await page.locator('.leaderboard-table thead th').allInnerTexts();
     expect(heads[4]).toMatch(/brier/i);
     expect(heads.filter(h => /brier/i.test(h)).length).toBe(1);
