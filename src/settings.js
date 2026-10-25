@@ -276,7 +276,7 @@ function applySettings(settings) {
     if (AppState.applyModelSelection && std.selectedModelIds) AppState.applyModelSelection(std.modelScope, std.selectedModelIds);
     applyFormState(std.form, '#step-4-content');
     // Imputation choice (Step 3); older settings files kept it in the Step 4 form
-    const miVal = ['single', 'mice5', 'mice10'].find(v => v === (std.multipleImputation || (std.form || {})['mi-select']));
+    const miVal = ['single', 'mice5', 'mice10', 'mice20'].find(v => v === (std.multipleImputation || (std.form || {})['mi-select']));
     const miEl = document.getElementById('mi-select');
     if (miEl && miVal && miEl.value !== miVal) { miEl.value = miVal; miEl.dispatchEvent(new Event('change', { bubbles: true })); }
     const quickEl = document.getElementById('mi-quick-cv');

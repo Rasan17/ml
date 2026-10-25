@@ -27,6 +27,24 @@ async function toStep4(page) {
     await page.click('button.step-tab[data-step="4"]');
 }
 
+test('the imputation step gives the share of incomplete patients and suggests the number of imputations; 20 imputations can be chosen', async ({ page }) => {
+    const errors = watch(page);
+    await page.goto('/index.html');
+    await page.click('#sample-shunt-large-btn');
+    await expect(page.locator('#data-stats-grid')).toContainText('420');
+    await page.click('button.step-tab[data-step="3"]');
+    const advice = page.locator('#mi-advice');
+    await expect(advice).toContainText('101 of 420 patients (24%)');
+    await expect(advice).toContainText('MICE 20');
+    await expect(advice).toContainText('about 24 would be ideal');
+    await page.selectOption('#mi-select', 'mice10');
+    await expect(advice).toContainText('The current choice (10) is fewer');
+    await page.selectOption('#mi-select', 'mice20');
+    await expect(advice).not.toContainText('is fewer');
+    await expect(page.locator('#analysis-summary')).toContainText('multiple imputation (20)');
+    expect(errors).toEqual([]);
+});
+
 test('settings with the newer controls are saved and restored', async ({ page }) => {
     const errors = watch(page);
     await page.goto('/index.html');

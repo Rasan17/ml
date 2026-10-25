@@ -63,7 +63,7 @@ function renderAnalysisSummary() {
         items.push(['Predictors', String(pd.headers.filter(h => cfgs[h] && cfgs[h].role === 'feature').length)]);
         items.push(['Validation', validationText()]);
         const mi = val('mi-select');
-        items.push(['Missing data', AppState.completeCase ? 'complete cases only' : mi === 'mice5' ? 'multiple imputation (5)' : mi === 'mice10' ? 'multiple imputation (10)' : 'single imputation (Step 3)']);
+        items.push(['Missing data', AppState.completeCase ? 'complete cases only' : mi === 'mice5' ? 'multiple imputation (5)' : mi === 'mice10' ? 'multiple imputation (10)' : mi === 'mice20' ? 'multiple imputation (20)' : 'single imputation (Step 3)']);
         const recal = val('recalibration-select');
         if (recal && recal !== 'none') items.push(['Recalibration', recal === 'platt' ? 'Platt scaling' : 'isotonic regression']);
     }

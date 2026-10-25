@@ -93,7 +93,7 @@ function executePipelineStep1() {
 
     // Fit strict imputer ONLY on the Training set (Zero Data Leakage); with multiple imputation it only supplies the
     // training summary statistics shown below, and MICE fills the gaps
-    const miM = imputeStrategy === 'mice10' ? 10 : imputeStrategy === 'mice5' ? 5 : 0;
+    const miM = imputeStrategy === 'mice20' ? 20 : imputeStrategy === 'mice10' ? 10 : imputeStrategy === 'mice5' ? 5 : 0;
     const imputer = DataEngine.fitStrictImputer(
         trainRaw,
         featureCols,

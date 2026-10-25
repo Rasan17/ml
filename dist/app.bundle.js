@@ -4262,7 +4262,7 @@ function runSubgroupAnalysis(containerId) {
 // Number of imputations chosen in Step 4 (0 = single imputation)
 function readMultipleImputation() {
     const v = document.getElementById('mi-select')?.value || 'single';
-    return v === 'mice10' ? 10 : v === 'mice5' ? 5 : 0;
+    return v === 'mice20' ? 20 : v === 'mice10' ? 10 : v === 'mice5' ? 5 : 0;
 }
 
 // Completed datasets already computed in this session, so that training another model on the same patients
@@ -4407,8 +4407,29 @@ async function fitPooledModel(modelId, isClassification, numClasses, hp, sets, o
     return ModelEngine.createMIPooled(models);
 }
 
+// How many imputations: the share of patients with at least one missing predictor value, and the number of
+// imputations suggested by the rule of thumb of White, Royston and Wood (Stat Med 2011): at least as many
+// imputations as the percentage of incomplete patients. Patients without the outcome are left out (never used).
+function updateImputationAdvice() {
+    const box = document.getElementById('mi-advice');
+    if (!box) return;
+    const cfgs = AppState.columnConfigs, pd = AppState.parsedData;
+    const feats = cfgs ? Object.keys(cfgs).filter(c => cfgs[c].role === 'feature') : [];
+    const target = cfgs ? Object.keys(cfgs).find(c => cfgs[c].role === 'target') : null;
+    if (!pd || !pd.rows || !feats.length || AppState.completeCase) { box.style.display = 'none'; return; }
+    const rows = target ? pd.rows.filter(r => !DataEngine.isMissing(r[target])) : pd.rows;
+    const n = rows.length, inc = rows.filter(r => feats.some(c => DataEngine.isMissing(r[c]))).length;
+    if (!n) { box.style.display = 'none'; return; }
+    const pct = (100 * inc) / n, p = pct < 10 ? pct.toFixed(1) : Math.round(pct);
+    box.style.display = 'block';
+    if (!inc) { box.innerHTML = 'No patient has a missing predictor value: nothing needs imputing.'; return; }
+    const suggest = pct <= 5 ? 5 : pct <= 10 ? 10 : 20, chosen = readMultipleImputation();
+    box.innerHTML = `<strong>${inc.toLocaleString('en-GB')} of ${n.toLocaleString('en-GB')} patients (${p}%)</strong> have at least one missing predictor value. Rule of thumb (White, Royston and Wood 2011): use at least as many imputations as this percentage, so <strong>MICE ${suggest}</strong>${pct > 20 ? ` (the most offered here; about ${Math.round(pct)} would be ideal, so compare the results with 10 and 20 imputations: if they barely change, the number of imputations is not driving them)` : ''}.${chosen && chosen < suggest ? ` The current choice (${chosen}) is fewer: results may vary a little with the random imputations.` : ''}`;
+}
+
 // Shown under the Step 4 choice: how long multiple imputation will take for the loaded cohort
 function updateImputationEstimate() {
+    updateImputationAdvice();
     const box = document.getElementById('mi-estimate');
     if (!box) return;
     const m = readMultipleImputation();
@@ -7001,7 +7022,7 @@ function executePipelineStep1() {
 
     // Fit strict imputer ONLY on the Training set (Zero Data Leakage); with multiple imputation it only supplies the
     // training summary statistics shown below, and MICE fills the gaps
-    const miM = imputeStrategy === 'mice10' ? 10 : imputeStrategy === 'mice5' ? 5 : 0;
+    const miM = imputeStrategy === 'mice20' ? 20 : imputeStrategy === 'mice10' ? 10 : imputeStrategy === 'mice5' ? 5 : 0;
     const imputer = DataEngine.fitStrictImputer(
         trainRaw,
         featureCols,
@@ -11135,7 +11156,7 @@ function applySettings(settings) {
     if (AppState.applyModelSelection && std.selectedModelIds) AppState.applyModelSelection(std.modelScope, std.selectedModelIds);
     applyFormState(std.form, '#step-4-content');
     // Imputation choice (Step 3); older settings files kept it in the Step 4 form
-    const miVal = ['single', 'mice5', 'mice10'].find(v => v === (std.multipleImputation || (std.form || {})['mi-select']));
+    const miVal = ['single', 'mice5', 'mice10', 'mice20'].find(v => v === (std.multipleImputation || (std.form || {})['mi-select']));
     const miEl = document.getElementById('mi-select');
     if (miEl && miVal && miEl.value !== miVal) { miEl.value = miVal; miEl.dispatchEvent(new Event('change', { bubbles: true })); }
     const quickEl = document.getElementById('mi-quick-cv');
@@ -11298,7 +11319,7 @@ function renderAnalysisSummary() {
         items.push(['Predictors', String(pd.headers.filter(h => cfgs[h] && cfgs[h].role === 'feature').length)]);
         items.push(['Validation', validationText()]);
         const mi = val('mi-select');
-        items.push(['Missing data', AppState.completeCase ? 'complete cases only' : mi === 'mice5' ? 'multiple imputation (5)' : mi === 'mice10' ? 'multiple imputation (10)' : 'single imputation (Step 3)']);
+        items.push(['Missing data', AppState.completeCase ? 'complete cases only' : mi === 'mice5' ? 'multiple imputation (5)' : mi === 'mice10' ? 'multiple imputation (10)' : mi === 'mice20' ? 'multiple imputation (20)' : 'single imputation (Step 3)']);
         const recal = val('recalibration-select');
         if (recal && recal !== 'none') items.push(['Recalibration', recal === 'platt' ? 'Platt scaling' : 'isotonic regression']);
     }
