@@ -261,6 +261,9 @@ test('"How many predictors?" (Step 2, pipeline Step 4) and per-model data needs 
     await expect(guide).toContainText('104 are in the smaller outcome group');
     await expect(guide).toContainText('14 predictor(s) = 15 parameter(s)');
     await expect(guide).toContainText('Riley');
+    // With Option A, the larger budget when all patients train (Options B and C) is shown alongside
+    await expect(guide).toContainText('With Option B or C (all 420 records)');
+    await expect(guide).toContainText('allow up to 5 parameter(s) instead of 4 (you have 15)');
     await page.click('#var-exclude-all-btn');
     await expect(guide).toContainText('0 predictor(s) = 0 parameter(s)');
     await expect(guide).toContainText('meets these planning criteria');

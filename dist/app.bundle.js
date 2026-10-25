@@ -10258,7 +10258,8 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
     const Pv = Math.max(P, candidates || 0);
     const isClass = tcfg.type === 'nominal' || tcfg.type === 'ordinal';
     const fmt = v => v.toLocaleString('en-GB');
-    const rows4 = []; // [guide, max parameters, note]
+    const rows4 = []; // [guide, max parameters, note, max parameters with every patient training (Options B and C)]
+    const split = trainFraction < 1;
     let headline = '', minority = null, minorityLabel = '', status = 'ok';
 
     if (isClass) {
@@ -10272,19 +10273,20 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
         headline = `<strong>${fmt(nTrain)}</strong> training ${units.unit}${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}, of whom about <strong>${fmt(E)}</strong> ${eventValue !== null ? `had the event ("${escapeHtml(minorityLabel)}", ${(minority / n * 100).toFixed(1)}%; time-to-event outcome, Cox model: events per parameter)` : `are in the smaller outcome group ("${escapeHtml(minorityLabel)}", ${(minority / n * 100).toFixed(1)}%)${binary ? '' : ` of ${groups.length} groups`}`}.`;
         if (binary) {
             const riley = rileyMaxParameters('binary', nTrain, minority / n);
+            const rileyAll = rileyMaxParameters('binary', n, minority / n);
             rows4.push(['Minimum sample-size criteria (Riley et al.; logistic regression)', riley,
-                riley ? 'the recommended standard: limits overfitting and estimates the overall risk precisely' : `not met for any number of predictors: ${fmt(ModelEngine.rileySampleSize({ type: 'binary', p: 1, prevalence: minority / n }).n)} patients are needed just to estimate the overall risk precisely`]);
+                riley ? 'the recommended standard: limits overfitting and estimates the overall risk precisely' : `not met for any number of predictors: ${fmt(ModelEngine.rileySampleSize({ type: 'binary', p: 1, prevalence: minority / n }).n)} patients are needed just to estimate the overall risk precisely`, rileyAll]);
         }
-        rows4.push(['10 patients in the smaller group per parameter', Math.floor(E / 10), 'traditional minimum; often too lenient'],
-            ['20 patients in the smaller group per parameter', Math.floor(E / 20), 'more cautious; logistic regression reached stable performance at about 20–50'],
-            ['Flexible models (random forest, boosted trees, neural network, k-NN): 200 per parameter', Math.floor(E / 200), 'still unstable at this level in simulations (over 10 times what logistic regression needs); below it, treat these models as exploratory']);
+        rows4.push(['10 patients in the smaller group per parameter', Math.floor(E / 10), 'traditional minimum; often too lenient', Math.floor(minority / 10)],
+            ['20 patients in the smaller group per parameter', Math.floor(E / 20), 'more cautious; logistic regression reached stable performance at about 20–50', Math.floor(minority / 20)],
+            ['Flexible models (random forest, boosted trees, neural network, k-NN): 200 per parameter', Math.floor(E / 200), 'still unstable at this level in simulations (over 10 times what logistic regression needs); below it, treat these models as exploratory', Math.floor(minority / 200)]);
         const main = binary ? Math.min(rows4[0][1], rows4[1][1]) : rows4[0][1];
         status = Pv <= main ? 'ok' : Pv <= Math.floor(E / 10) ? 'caution' : 'over';
     } else {
         headline = `<strong>${fmt(nTrain)}</strong> training ${units.unit}${trainLabel ? ` (${escapeHtml(trainLabel)})` : ''}; numerical outcome.`;
         const riley = rileyMaxParameters('continuous', nTrain, null);
-        rows4.push(['Minimum sample-size criteria (Riley et al.; linear regression, anticipated R² 0.2)', riley, riley ? 'the recommended standard' : 'not met for any number of predictors'],
-            ['Flexible models (random forest, boosted trees, neural network, k-NN)', Math.floor(nTrain / 200), 'rough guide; flexible models need much more data than regression']);
+        rows4.push(['Minimum sample-size criteria (Riley et al.; linear regression, anticipated R² 0.2)', riley, riley ? 'the recommended standard' : 'not met for any number of predictors', rileyMaxParameters('continuous', n, null)],
+            ['Flexible models (random forest, boosted trees, neural network, k-NN)', Math.floor(nTrain / 200), 'rough guide; flexible models need much more data than regression', Math.floor(n / 200)]);
         status = Pv <= riley ? 'ok' : Pv <= riley * 1.5 ? 'caution' : 'over';
     }
 
@@ -10304,8 +10306,9 @@ function renderPredictorBudget(containerId, { rows, featureCols, targetCol, colu
             <div class="tune-title">How many predictors can this sample support?</div>
             <p class="tune-muted" style="margin-top: 4px;">${headline} Your selection: <strong>${featureCols.length}</strong> predictor(s) = <strong>${P}</strong> parameter(s)${candidates !== null && candidates > P ? `, from <strong>${candidates}</strong> candidate parameters considered` : ''}.</p>
             <div class="${status === 'ok' ? 'explain-box' : 'tune-warn'}" style="margin-top: 6px;">${statusText}</div>
-            <table class="data-table thr-table budget-table"><thead><tr><th>Guide</th><th>Largest number of parameters</th><th>Comment</th></tr></thead>
-                <tbody>${rows4.map(([g, v, c]) => `<tr><td>${escapeHtml(g)}</td><td><strong>${v}</strong>${Pv > v ? ' <span class="tune-sd">(you have ' + Pv + ')</span>' : ''}</td><td>${escapeHtml(c)}</td></tr>`).join('')}</tbody></table>
+            <table class="data-table thr-table budget-table"><thead><tr><th>Guide</th><th>Largest number of parameters${split ? ` (${fmt(nTrain)} training)` : ''}</th>${split ? `<th>With Option B or C (all ${fmt(n)} ${units.unit})</th>` : ''}<th>Comment</th></tr></thead>
+                <tbody>${rows4.map(([g, v, c, all]) => `<tr><td>${escapeHtml(g)}</td><td><strong>${v}</strong>${Pv > v ? ' <span class="tune-sd">(you have ' + Pv + ')</span>' : ''}</td>${split ? `<td><strong>${all}</strong></td>` : ''}<td>${escapeHtml(c)}</td></tr>`).join('')}</tbody></table>
+            ${split && rows4[0][3] > rows4[0][1] ? `<p class="explain-box" style="margin-top: 6px;">With <strong>Option C</strong> (bootstrap validation, generally preferred to a split sample for small and moderate samples) every one of the ${fmt(n)} ${units.unit} trains the model, so ${rows4[0][0].startsWith('Minimum') ? 'the Riley criteria allow' : 'the guide of 10 per parameter allows'} up to <strong>${rows4[0][3]}</strong> parameter(s) instead of ${rows4[0][1]}${Pv > rows4[0][3] ? ` (you have ${Pv})` : ''}; the bootstrap then estimates the remaining optimism, so check the optimism-corrected calibration slope (about 0.9 or above).</p>` : ''}
             ${idLike.length ? `<div class="tune-warn"><span class="ico ico-warn" aria-hidden="true"></span> <strong>Looks like an identifier:</strong> ${idLike.map(c => `"${escapeHtml(c.col)}" (${c.levels} categories in ${withOutcome.length} records)`).join(', ')}. Untick it (or set it to Meta / ID): identifiers cannot predict new patients, and their values would be stored in exported model files.</div>` : ''}
             ${multi.length ? `<p class="tune-muted">Categorical predictors use one parameter per category beyond the first: ${multi.map(c => `"${escapeHtml(c.col)}" ${c.levels} categories = ${c.df}`).join('; ')}. Grouping rare categories saves parameters.</p>` : ''}
             ${groupOf ? '' : `<p class="tune-muted">${escapeHtml(UNIT_NOTE)}</p>`}
