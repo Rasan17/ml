@@ -502,15 +502,17 @@ test('interface levels: Beginner and Intermediate hide expert settings and reset
     await page.click('button.step-tab[data-step="1"]');
     await page.selectOption('#ui-level-select', 'intermediate');
     await page.click('button.step-tab[data-step="4"]');
-    await expect(page.locator('#autotune-check')).toBeHidden();
+    await expect(page.locator('#autotune-check')).toBeVisible(); // automatic tuning is offered at every level
     await expect(page.locator('#recalibration-select')).toBeVisible();
-    await expect(page.locator('#autotune-check')).not.toBeChecked(); // hidden, so reset to the default
+    await expect(page.locator('#autotune-check')).toBeChecked(); // visible at every level, so kept
     await expect(page.locator('#recalibration-select')).toHaveValue('isotonic'); // still visible, so kept
     await page.click('button.step-tab[data-step="1"]');
     await page.selectOption('#ui-level-select', 'beginner');
     await page.click('button.step-tab[data-step="4"]');
     await expect(page.locator('#recalibration-select')).toBeHidden();
     await expect(page.locator('#recalibration-select')).toHaveValue('none');
+    await expect(page.locator('#autotune-check')).toBeVisible();
+    await expect(page.locator('#autotune-check')).toBeChecked();
     await expect(page.locator('#decision-threshold')).toBeHidden();
     await expect(page.locator('input[name="validation-mode"][value="split"]')).toBeAttached(); // validation choices stay
     await page.reload(); // the level is remembered in this browser

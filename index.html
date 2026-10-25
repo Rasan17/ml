@@ -118,7 +118,7 @@
                     <button type="button" class="task-choice" id="task-develop"><strong>Develop a model</strong><span>from my own data: upload a CSV below, then follow Steps 2–4</span></button>
                     <button type="button" class="task-choice" id="task-validate"><strong>Validate an existing model</strong><span>import a model file, then score a labelled cohort in Step 6</span></button>
                     <button type="button" class="task-choice" id="task-demo"><strong>Explore a demo</strong><span>load the simulated 420-patient iNPH shunt cohort</span></button>
-                    <p class="autotune-hint ui-level-note" style="width: 100%; margin: 0;">Simplified view: expert settings (model hyperparameters, automatic tuning, custom seeds and, for Beginner, the decision threshold, recalibration, ranking metric and model-selection method) are hidden and use their recommended defaults: cross-validated model selection, threshold 0.5, no recalibration, default seed 42. Choose "Advanced" to see and change them.</p>
+                    <p class="autotune-hint ui-level-note" style="width: 100%; margin: 0;">Simplified view: expert settings (model hyperparameters, custom seeds and, for Beginner, the decision threshold, recalibration, ranking metric and model-selection method) are hidden and use their recommended defaults: cross-validated model selection, threshold 0.5, no recalibration, default seed 42. Choose "Advanced" to see and change them. Automatic tuning of the models (Step 4) is available at every level and off by default.</p>
                     <p id="task-hint" class="autotune-hint" style="display: none; width: 100%; margin: 0;" aria-live="polite"></p>
                     <p class="autotune-hint" style="width: 100%; margin: 0;">Use real patient data only as your approvals allow, on a managed computer (ideally encrypted and offline, see the ethics pack); not on shared or public computers. Remove identifiers before loading, store any exported file that contains patient values like the original data, and use <strong>Clear session</strong> or close the tab when finished.</p>
                 </div>
@@ -1310,7 +1310,7 @@
                                 </label>
                                 <span class="autotune-hint" style="margin: 0;">Adjusts the predicted percentages so they better match observed risks, using cross-validation predictions from the Training set only (the Testing set is never used). The calibration panel then shows the results before and after. It does not change how well the model ranks patients (AUC) for Platt scaling. With bootstrap validation (Option C) the recalibration is refitted inside every resample, so the optimism-corrected results include it.</span>
                             </div>
-                            <div data-level="advanced" class="autotune-row" style="margin-top: 10px;">
+                            <div class="autotune-row" style="margin-top: 10px;">
                                 <label class="autotune-label">
                                     <input type="checkbox" id="autotune-check">
                                     Automatically tune each selected model's key settings on the Training set
@@ -1950,7 +1950,7 @@
                                 </label>
                                 <span class="autotune-hint" style="margin: 0;">Adjusts the predicted percentages so they better match observed risks, using cross-validation predictions from the Training set only (the Testing set is never used). The calibration panel then shows the results before and after. It does not change how well the model ranks patients (AUC) for Platt scaling.</span>
                             </div>
-                            <div data-level="advanced" class="autotune-row" style="margin-top: 10px;">
+                            <div class="autotune-row" style="margin-top: 10px;">
                                 <label class="autotune-label">
                                     <input type="checkbox" id="pipeline-autotune-check">
                                     Auto-tune model settings on the Training set (optional; off = protocol default settings)
