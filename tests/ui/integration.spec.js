@@ -73,6 +73,24 @@ test('Step 4 estimates the training time; the leaderboard shows the Brier score 
     expect(errors).toEqual([]);
 });
 
+test('the chosen task is highlighted until another is chosen; both workflow buttons show at every level', async ({ page }) => {
+    const errors = watch(page);
+    await page.addInitScript(() => { try { localStorage.clear(); } catch (e) { /* ignore */ } });
+    await page.goto('/index.html');
+    await page.selectOption('#ui-level-select', 'beginner');
+    await page.click('#task-demo');
+    await expect(page.locator('#task-demo')).toHaveClass(/chosen/);
+    await expect(page.locator('#task-demo')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#data-stats-grid')).toContainText('420');
+    page.on('filechooser', fc => fc.setFiles([]).catch(() => {}));
+    await page.click('#task-validate');
+    await expect(page.locator('#task-validate')).toHaveClass(/chosen/);
+    await expect(page.locator('#task-demo')).not.toHaveClass(/chosen/);
+    await expect(page.locator('#to-step-2-btn')).toBeVisible();
+    await expect(page.locator('#pipeline-direct-launch-btn')).toBeVisible();
+    expect(errors).toEqual([]);
+});
+
 test('settings with the newer controls are saved and restored', async ({ page }) => {
     const errors = watch(page);
     await page.goto('/index.html');
@@ -531,9 +549,9 @@ test.describe('first visit', () => {
         await page.goto('/index.html');
         await expect(page.locator('#ui-level-select')).toHaveValue('beginner');
         await expect(page.locator('.ui-level-note')).toBeVisible();
-        // A simpler first screen: settings files and the separate pipeline launcher appear from Intermediate
+        // A simpler first screen: settings files appear from Intermediate; both workflows can be started at every level
         await expect(page.locator('#settings-save-btn')).toBeHidden();
-        await expect(page.locator('#pipeline-direct-launch-btn')).toBeHidden();
+        await expect(page.locator('#pipeline-direct-launch-btn')).toBeVisible();
         await expect(page.locator('#clear-session-btn')).toBeVisible();
         expect(errors).toEqual([]);
     });

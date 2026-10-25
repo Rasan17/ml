@@ -275,7 +275,7 @@ function renderCompleteCaseBox(rows, activeCols) {
     const pct = (100 * incomplete / total).toFixed(1);
     const heavy = incomplete / total > 0.2 || remaining < 30;
     box.innerHTML = `
-        <div style="margin-bottom: 16px; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid ${AppState.completeCase ? 'var(--accent-cyan)' : 'var(--border-color)'}; background: var(--bg-surface-subtle);">
+        <div class="panel-green" style="margin-bottom: 16px; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid ${AppState.completeCase ? 'var(--accent-cyan)' : 'var(--border-color)'}; background: var(--bg-surface-subtle);">
             <label for="complete-case-toggle" style="display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 13px; color: var(--text-primary);">
                 <input type="checkbox" id="complete-case-toggle" ${AppState.completeCase ? 'checked' : ''} style="margin-top: 3px; accent-color: var(--accent-cyan);">
                 <span>

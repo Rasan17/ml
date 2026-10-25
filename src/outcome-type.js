@@ -56,7 +56,7 @@ function renderOutcomeTypePanel(onChange) {
     const horizonFor = (col, cur) => { if (cur && cur.timeCol === col && cur.horizon > 0) return cur.horizon; const t = rows.map(r => Number(r[col])).filter(v => isFinite(v) && v > 0).sort((a, b) => a - b); return t.length ? Number(t[Math.floor(t.length / 2)].toPrecision(3)) : ''; };
     const opts = (list, sel) => list.map(h => `<option value="${escapeHtml(h)}"${h === sel ? ' selected' : ''}>${escapeHtml(h)}</option>`).join('');
     box.innerHTML = `
-        <div class="cal-panel outcome-type-panel">
+        <div class="cal-panel outcome-type-panel panel-green">
             <div class="tune-title">What kind of outcome do you want to predict?</div>
             <div class="outcome-type-options" role="radiogroup" aria-label="Outcome type">
                 <label><input type="radio" name="outcome-type" value="standard"${surv ? '' : ' checked'}> <strong>Yes/no, categories or a number</strong>: mark that column as <em>Target</em> in the list below</label>

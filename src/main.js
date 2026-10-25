@@ -129,6 +129,9 @@ function start() {
     }
     document.getElementById('model-card-btn')?.addEventListener('click', downloadModelCard);
     // Start page task choice
+    // The chosen task stays highlighted until another is chosen
+    const markTask = id => document.querySelectorAll('.task-choice').forEach(b => { const on = b.id === id; b.classList.toggle('chosen', on); b.setAttribute('aria-pressed', String(on)); });
+    ['task-develop', 'task-validate', 'task-demo'].forEach(id => document.getElementById(id)?.addEventListener('click', () => markTask(id)));
     document.getElementById('task-develop')?.addEventListener('click', () => {
         const input = document.getElementById('csv-file-input');
         document.getElementById('step-1-content')?.querySelector('.card')?.scrollIntoView({ behavior: 'smooth' });
